@@ -195,14 +195,17 @@ def poll_claude(stop):
   claude_controller.db.close();claude_journal.db.close();native.db.close()
 
 class ServiceWorkers:
- def __init__(self,threads):self.threads=threads
+ def __init__(self,threads,service_lock=None):self.threads=threads;self.service_lock=service_lock
  def join(self,timeout=None):
   deadline=None if timeout is None else time.monotonic()+timeout
   for thread in self.threads:thread.join(None if deadline is None else max(0,deadline-time.monotonic()))
+  if not self.is_alive() and self.service_lock:self.service_lock.close()
  def is_alive(self):return any(thread.is_alive() for thread in self.threads)
 
 def start_background_service(stop=None):
  """Start independent Codex and Claude workers inside the desktop process."""
+ from service_lock import ServiceLock
+ service_lock=ServiceLock(ROOT/'monitor.lockfile')
  stop = stop or threading.Event()
  worker=threading.Thread(target=poll,args=(stop,),daemon=True,name='monitor-worker')
  claude_worker=threading.Thread(target=poll_claude,args=(stop,),daemon=True,name='claude-monitor-worker')
@@ -216,4 +219,4 @@ def start_background_service(stop=None):
    try:run_stream(router,os.environ['DINGTALK_CLIENT_ID'],os.environ['DINGTALK_CLIENT_SECRET'],lambda:update(streamStatus='callback_received'))
    except Exception:update(streamStatus='unavailable; credentials or SDK need local verification')
   threading.Thread(target=stream_worker,daemon=True,name='dingtalk-stream').start()
- return stop,ServiceWorkers([worker,claude_worker])
+ return stop,ServiceWorkers([worker,claude_worker],service_lock)

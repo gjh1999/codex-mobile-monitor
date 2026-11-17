@@ -4,6 +4,8 @@ Windows 原生桌面软件，用于集中查看和控制本机 Codex / Claude Co
 
 ## 快速开始
 
+新增 **React Web 工作台**：沿用现有 Python 后端，提供苹果风格界面和手机适配。安装、运行及 iPhone 局域网调试见 [Web 工作台](docs/WEB.md)，当前 Qt 启动方式仍可使用。两种入口不要同时运行。
+
 在 PowerShell 中从项目根目录启动：
 
 ```powershell

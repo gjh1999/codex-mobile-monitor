@@ -1,0 +1,3 @@
+﻿# Optional: only required for the DingTalk Stream application bot.
+dingtalk-stream
+

@@ -1,0 +1,3 @@
+# Build the native Windows desktop EXE.
+-r requirements-desktop.txt
+pyinstaller==6.22.3

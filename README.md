@@ -1,0 +1,71 @@
+﻿# 任务小站 · Codex / Claude Code 桌面监控
+
+Windows 原生桌面软件，用于集中查看和控制本机 Codex / Claude Code 任务。蓝白工作台提供任务接入、对话、指令发送、暂停与继续、单次审批、自动推进和 Windows 提醒；两端使用独立后台和状态文件。钉钉通知与 Stream 指令是可选通道。
+
+## 快速开始
+
+在 PowerShell 中从项目根目录启动：
+
+```powershell
+Set-Location 'C:/Users/gjh/PycharmProjects/To_Do_List/codex-mobile-monitor'
+& './.venv/Scripts/python.exe' './desktop_app.py'
+```
+
+打包版使用 `release/CodexMobileMonitor-0.7.3.exe`。完整 Qt 界面优先显示；源码环境缺少 Qt 时回退到功能较少的 Tk 或 Win32 界面。关闭窗口后程序留在系统托盘；选择“退出程序”才会停止后台。
+
+`desktop_app.py` 是正式启动入口，`monitor.py` 是桌面进程内部的后台模块。正式发布程序名为 `CodexMobileMonitor-0.7.3.exe`，数据继续保存在 `release/`，现有发布目录无需搬迁。首次安装依赖、构建 EXE、登录启动和故障检查见 [运行与维护](docs/RUNBOOK.md)。
+
+## 文档导航
+
+| 要做的事 | 文档 |
+|---|---|
+| 查找全部说明 | [文档索引](docs/README.md) |
+| 启动、安装依赖、打包、测试、登录启动 | [运行与维护](docs/RUNBOOK.md) |
+| 配置键、默认值、环境变量和数据位置 | [配置说明](docs/CONFIGURATION.md) |
+| 了解模块职责和后台处理流程 | [架构与文件说明](docs/ARCHITECTURE.md) |
+| 使用桌面窗口、托盘及 EXE | [桌面使用说明](docs/DESKTOP.md) |
+| 切换客户端、理解控制与自动推进边界 | [双客户端使用说明](docs/MULTI_CLIENT.md) |
+| 配置 Webhook 通知与 Stream 指令 | [钉钉配置](docs/DINGTALK_SETUP.md) |
+| 查询过去的需求、计划和验收记录 | [历史文档](docs/archive/README.md) |
+
+## 文件布局
+
+```text
+codex-mobile-monitor/
+├── README.md                   # 项目入口
+├── desktop_app.py              # 桌面启动入口
+├── desktop_qt.py               # 完整 Qt 双客户端工作台与托盘
+├── desktop_theme.py            # 蓝白主题、字体和消息排版
+├── desktop_win32.py            # Win32 回退界面
+├── monitor.py                  # 进程内双客户端后台与状态编排
+├── *.py                        # RPC、任务控制、调度、审批、通知和消息记录
+├── local-config.example.json   # 无凭据的配置示例
+├── requirements-*.txt          # 桌面、构建和可选 Stream 依赖
+├── docs/                       # 当前使用与维护文档
+│   └── archive/                # 历史需求、计划与验收记录
+├── scripts/                    # 构建、登录启动、通知检查
+├── tests/                      # Python 回归与 Qt smoke
+├── schema/                     # Codex app-server 协议参考
+├── archive/                    # 原型、诊断、人工维护工具及旧构建快照
+├── build-exe/                  # 本机构建输出（忽略）
+└── release/                    # EXE 及其独立运行数据（忽略）
+```
+
+源码运行的配置、SQLite 数据库和日志保留在项目根目录；EXE 使用自身所在目录。`.venv/` 和这些本机文件均由 `.gitignore` 排除。一次性工具说明见 [归档索引](archive/README.md)。
+
+## 功能边界
+
+- 发现任务、只读关注、取得控制权和启用自动调度是不同状态。Codex 自动续跑需要本连接拥有控制权、实时空闲、有效目标且无待审批。额度耗尽时保存刷新时间并等待，到点重新查询；服务端确认额度恢复后继续原任务。手动暂停、关闭自动推进或移出会取消自动恢复。
+- Claude Code 支持历史查看、手动消息、暂停、继续和单次工具审批。每小时自动推进默认关闭，显式开启后仅在可控制、空闲且无审批或执行错误时发送；任务完成后需关闭。官方剩余额度显示未知。
+- 自动审批只匹配显式配置的 Codex 任务、目录与完整命令；其他请求由人工核对并单次处理。
+- 钉钉 Webhook 用于出站通知，Stream 指令另需应用凭据和身份白名单。
+- 离线测试与界面检查不代替真实模型收发、工具审批往返、系统通知展示、钉钉联网或 Windows 重新登录验收。历史结果仅适用于记录当时的范围。
+
+## 验证
+
+```powershell
+& './.venv/Scripts/python.exe' -m unittest discover -s tests -t . -p 'test_*.py' -v
+& './.venv/Scripts/python.exe' './tests/smoke_desktop.py' --output "$env:TEMP/monitor-dual-client-smoke"
+```
+
+Qt smoke 使用虚构任务和替代后台，点击生产界面并生成截图。验证范围及操作说明见 [运行与维护](docs/RUNBOOK.md)。

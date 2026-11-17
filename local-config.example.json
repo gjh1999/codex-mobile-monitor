@@ -1,0 +1,15 @@
+﻿{
+  "tasks": [],
+  "managedTasks": [
+    {
+      "name": "example-disabled",
+      "cwd": ".",
+      "objective": "替换为明确授权的新增长程任务目标，不要复制已有自动续跑任务",
+      "prompt": "检查该目标目前的进度，推进可执行工作，保存结果；如已完成则标记目标完成。不要操作桌面或浏览器。",
+      "interval": 600,
+      "enabled": false,
+      "exclusiveOwner": false
+    }
+  ],
+  "streamIdentities": []
+}

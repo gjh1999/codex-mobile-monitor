@@ -11,7 +11,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from handoff import capture, find_session, git, prepare_resume, restore, session_info
+from automation import Approvals
+from handoff import HandoffError, capture, find_session, git, prepare_resume, restore, session_info
+from universal_rpc import CodexRPC
 
 
 class Replies(BaseHTTPRequestHandler):
@@ -23,8 +25,9 @@ class Replies(BaseHTTPRequestHandler):
             self.send_error(404)
             return
         body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
-        previous = 'reply-on-A' in json.dumps(body['input'])
-        text = 'reply-on-B' if previous else 'reply-on-A'
+        history = json.dumps(body['input'])
+        text = ('reply-on-return' if 'reply-on-B' in history else
+                'reply-on-B' if 'reply-on-A' in history else 'reply-on-A')
         item = dict(type='message', id='msg_fixture', status='completed', role='assistant',
                     content=[dict(type='output_text', text=text, annotations=[])])
         response = dict(id='resp_fixture', object='response', status='completed', output=[item],
@@ -41,7 +44,7 @@ class Replies(BaseHTTPRequestHandler):
             self.wfile.write(f'event: {event}\ndata: {json.dumps(dict(type=event, **fields))}\n\n'.encode())
 
 
-def native_turn(exe, home, cwd, port, thread=None):
+def native_turn(exe, home, cwd, port, thread=None, prompt='Handoff fixture B'):
     home.mkdir(exist_ok=True)
     config = f'''model = "gpt-5.4"
 model_provider = "lanxi_fixture"
@@ -55,7 +58,7 @@ request_max_retries = 0
     (home / 'config.toml').write_text(config, encoding='utf-8')
     env = dict(os.environ, CODEX_HOME=str(home), NO_PROXY='localhost,127.0.0.1')
     args = [exe, 'exec', '--json', '-s', 'read-only', '--cd', str(cwd)]
-    args.extend(['resume', thread, 'Handoff fixture B'] if thread else ['Handoff fixture A'])
+    args.extend(['resume', thread, prompt] if thread else ['Handoff fixture A'])
     p = subprocess.run(args, cwd=cwd, env=env, stdin=subprocess.DEVNULL, capture_output=True,
                        encoding='utf-8', errors='replace', timeout=90)
     if p.returncode:
@@ -71,7 +74,10 @@ def main():
     parser.add_argument('--output', type=Path, required=True, help='new verification directory')
     parser.add_argument('--source-parent', type=Path, default=Path(tempfile.gettempdir()))
     parser.add_argument('--sync', action='store_true', help='stage via replicated folder scans')
+    parser.add_argument('--roundtrip', action='store_true', help='continue on B and then return to the original A profile')
     args = parser.parse_args()
+    if args.roundtrip and not args.sync:
+        parser.error('--roundtrip needs --sync')
     target = args.output.resolve()
     target.mkdir(parents=True, exist_ok=False)
     server = ThreadingHTTPServer(('127.0.0.1', 0), Replies)
@@ -125,6 +131,8 @@ def main():
                           codex=subprocess.check_output([exe, '--version'], text=True).strip(),
                           git=git(a, '--version').decode().strip(), backend='localhost fixture',
                           transport='replicated filesystem folders' if args.sync else 'manual package')
+            if args.roundtrip:
+                report['return'] = test_return(exe, a, b, target, base, sid, home_a, home_b, server.server_port)
             (target / 'result.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
             print(json.dumps(report))
     finally:
@@ -132,31 +140,94 @@ def main():
         server.server_close()
 
 
-def through_exchange(a, target, base, thread, seed, home_a, home_b):
-    source_folder, incoming_folder = a.parent / 'exchange', target / 'exchange'
-    source_folder.mkdir()
+def through_exchange(a, target, base, thread, seed, home_a, home_b, sender='office', receiver='laptop',
+                     sender_runtime=None):
+    incoming_folder = target / 'exchange'
     script = Path(__file__).resolve().parents[1] / 'handoff_sync.py'
     env = dict(os.environ, LANXI_FIXTURE_HANDOFF_KEY='fixture-only-handoff-key-' * 3)
 
     def scan(runtime, home, device, exchange, **direction):
         runtime.mkdir(exist_ok=True)
         config = runtime / 'local-config.json'
-        config.write_text(json.dumps({'handoffSync': {'device': device, 'projects': {'fixture': {
-            'exchange': str(exchange), 'keyEnv': 'LANXI_FIXTURE_HANDOFF_KEY', **direction,
-        }}}}), encoding='utf-8')
+        if direction:
+            config.write_text(json.dumps({'handoffSync': {'device': device, 'projects': {'fixture': {
+                'exchange': str(exchange), 'keyEnv': 'LANXI_FIXTURE_HANDOFF_KEY', **direction,
+            }}}}), encoding='utf-8')
         output = subprocess.check_output([sys.executable, str(script), '--config', str(config),
                                           '--codex-home', str(home)], env=env, timeout=60)
         return json.loads(output)['projects']['fixture']
 
-    sent = scan(a.parent / 'runtime', home_a, 'office', source_folder,
-                publish=dict(repo=str(a), base=base, thread=thread, include=['new.txt']))
+    if sender_runtime:
+        config_path = sender_runtime / 'local-config.json'
+        before = config_path.read_bytes()
+        source_folder = Path(json.loads(before)['handoffSync']['projects']['fixture']['exchange'])
+        sent = scan(sender_runtime, home_a, sender, source_folder)
+        assert config_path.read_bytes() == before, 'return publication must reuse the paired config'
+    else:
+        source_folder = a.parent / f'exchange-{sender}'
+        source_folder.mkdir()
+        sent = scan(a.parent / f'runtime-{sender}', home_a, sender, source_folder,
+                    publish=dict(repo=str(a), base=base, thread=thread, include=['new.txt']))
     assert sent['publish']['status'] == 'published', sent
     shutil.copytree(source_folder, incoming_folder)
-    received = scan(target / 'runtime', home_b, 'laptop', incoming_folder,
-                    receive=dict(seed=str(seed), staging=str(target / 'staged'), peers=['office']))
+    received = scan(target / 'runtime', home_b, receiver, incoming_folder,
+                    receive=dict(seed=str(seed), staging=str(target / 'staged'), peers=[sender]),
+                    publish=dict(repo=str(seed), base='origin/main' if receiver == 'laptop' else base,
+                                 thread=thread, include=['new.txt']))
     offer, = received['received']
-    assert offer['status'] == 'ready', offer
+    assert offer['status'] == ('ready' if sender == 'office' else 'advance_on_resume'), offer
     return sent['publish']['lastPublished'], Path(offer['cwd'])
+
+
+def test_return(exe, original, source_b, output, base, thread, home_a, home_b, port):
+    log_a, = find_session(home_a, thread)
+    previous = log_a.read_bytes()
+    assert git(source_b, 'rev-parse', '--verify', 'origin/main', optional=True) is None
+    (source_b / 'code.bin').write_bytes(b'staged-on-B\x00')
+    git(source_b, 'add', 'code.bin')
+    (source_b / 'code.bin').write_bytes(b'unstaged-on-B\x00')
+    returned, cwd = through_exchange(source_b, original.parent / 'return', base, thread, original,
+                                     home_b, home_a, sender='laptop', receiver='office',
+                                     sender_runtime=output / 'runtime')
+    assert log_a.read_bytes() == previous, 'staging cannot modify the existing Codex home'
+    env = dict(os.environ, CODEX_HOME=str(home_a), NO_PROXY='localhost,127.0.0.1')
+    process = subprocess.Popen([exe, 'app-server', '--stdio'], cwd=original, env=env, stdin=subprocess.PIPE,
+                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding='utf-8')
+    try:
+        rpc = CodexRPC(Approvals(), custom_process=process)
+        assert rpc.call('thread/resume', {'threadId': thread, 'cwd': str(original),
+                                         'excludeTurns': True})['thread']['id'] == thread
+        try:
+            prepare_resume(cwd, home_a, exe)
+        except HandoffError as error:
+            assert '原生写入者' in str(error), str(error)
+        else:
+            raise AssertionError('the native writer lock did not block a rollout update')
+        assert log_a.read_bytes() == previous
+    finally:
+        process.stdin.close()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.terminate()
+            process.wait(timeout=5)
+        process.stdout.close()
+    binding = prepare_resume(cwd, home_a, exe)
+    past, = (home_a / 'lanxi-handoff-backups' / thread).glob('*.jsonl')
+    assert past.read_bytes() == previous
+    assert git(cwd, 'show', ':code.bin') == b'staged-on-B\x00'
+    assert (cwd / 'code.bin').read_bytes() == b'unstaged-on-B\x00'
+    assert original.joinpath('code.bin').read_bytes() == b'unstaged\x00'
+    assert native_turn(exe, home_a, Path(binding['cwd']), port, thread, 'Handoff fixture returning A') == thread
+    contents = log_a.read_bytes()
+    _, current_turn, current_cwd = session_info(contents)
+    assert current_turn != returned['turn'] and Path(current_cwd).resolve() == cwd
+    assert b'reply-on-return' in contents
+    (output / 'return-local-before.jsonl').write_bytes(previous)
+    (output / 'return-local-after.jsonl').write_bytes(contents)
+    return dict(incoming_turn=returned['turn'], new_turn=current_turn, cwd=current_cwd,
+                reply='reply-on-return', active_writer_blocked=True, backup_verified=True,
+                paired_config_reused=True)
 
 
 if __name__ == '__main__':

@@ -10,6 +10,8 @@ import sys
 import tempfile
 import uuid
 import zipfile
+from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
@@ -119,10 +121,11 @@ def session_info(data):
     return thread, completed, cwd
 
 
-def find_session(home, thread):
+def find_session(home, thread, include_compressed=False):
     require(str(uuid.UUID(thread)) == thread, '线程 ID 必须为标准 UUID')
-    return [p for folder in ('sessions', 'archived_sessions')
-            for p in (home / folder).rglob(f'rollout-*-{thread}.jsonl')]
+    suffixes = ('.jsonl', '.jsonl.zst') if include_compressed else ('.jsonl',)
+    return [p for folder in ('sessions', 'archived_sessions') for suffix in suffixes
+            for p in (home / folder).rglob(f'rollout-*-{thread}{suffix}')]
 
 
 def session_location(filename, thread):
@@ -385,18 +388,99 @@ def handoff_receipts(projects):
     return results
 
 
-def matching_session(home, thread, transcript):
-    matches = find_session(home, thread)
+def session_progress(home, thread, transcript):
+    matches = find_session(home, thread, include_compressed=True)
     if not matches:
-        return None
-    require(len(matches) == 1 and matches[0].is_relative_to(home / 'sessions'),
-            '目标机存在同 ID 的归档或多份记录，请先核对')
-    with matches[0].open('rb') as stream:
-        require(stream.read(len(transcript)) == transcript, '目标机同一线程已有不同历史，已保留双方内容')
-    return matches[0]
+        return 'missing', None, None
+    require(len(matches) == 1 and matches[0].is_relative_to(home / 'sessions') and matches[0].suffix == '.jsonl',
+            '目标机存在同 ID 的归档、压缩或多份记录，请先核对')
+    path = local_path(home, matches[0].relative_to(home).as_posix())
+    with path.open('rb') as stream:
+        prefix = stream.read(len(transcript) + 1)
+    if prefix.startswith(transcript):
+        return 'current', path, None
+    if prefix and transcript.startswith(prefix):
+        try:
+            sid, _, _ = session_info(prefix)
+        except (ValueError, KeyError, TypeError, IndexError):
+            pass
+        else:
+            if sid == thread:
+                return 'advance', path, prefix
+    raise HandoffError('目标机同一线程已有不同或未完成的历史，已保留双方内容')
 
 
-def prepare_resume(cwd, home):
+@contextmanager
+def native_publication_lock(home, thread):
+    import msvcrt
+
+    def lock(file, label):
+        file.seek(0)
+        try:
+            msvcrt.locking(file.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError as error:
+            raise HandoffError(label) from error
+
+    # Codex 0.169.1 takes the home coordination lock before opening the
+    # thread writer lock. Keep both handles alive until publication finishes.
+    directory = local_path(home, 'thread-writer-locks')
+    directory.mkdir(exist_ok=True)
+    with local_path(directory, '.coordination.lock').open('a+b') as coordination:
+        lock(coordination, 'Codex 正在协调历史写入，请稍后续接')
+        with local_path(directory, thread + '.lock').open('a+b') as writer:
+            lock(writer, '同一线程仍有 Codex 原生写入者，请退出旧会话后续接')
+            yield
+
+
+@contextmanager
+def staged_rollout(directory, data):
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=directory, prefix='.lanxi-rollout-', delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        yield temporary
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def advance_session(home, thread, path, prefix, transcript, executable):
+    require(executable and os.name == 'nt', '历史快进需要通过已验证的 Windows Codex CLI 启动')
+    version = subprocess.run([str(executable), '--version'], capture_output=True, text=True,
+                             encoding='utf-8', errors='replace', timeout=5)
+    require(version.returncode == 0 and version.stdout.strip() == 'codex-cli 0.169.1',
+            '当前 Codex CLI 版本的原生写入锁尚未验证，已保留两端历史')
+    with staged_rollout(path.parent, transcript) as new, staged_rollout(path.parent, prefix) as previous:
+        with native_publication_lock(home, thread):
+            state, current, data = session_progress(home, thread, transcript)
+            if state == 'current':
+                return
+            require(state == 'advance' and path == current and data == prefix, '本机历史刚刚变化，请重新续接')
+            backups = local_path(home, 'lanxi-handoff-backups/' + thread)
+            backups.mkdir(parents=True, exist_ok=True)
+            backup = local_path(backups, sha(prefix) + '.jsonl')
+            try:
+                os.link(previous, backup)
+            except FileExistsError:
+                require(limited(backup) == prefix, '本机旧历史备份校验失败')
+            new.replace(path)
+
+
+@dataclass
+class ResumeContext:
+    project: str
+    thread: str
+    cwd: Path
+    private: Path
+    rollout: str
+    turn: str
+    checksum: str
+
+
+def resume_context(cwd):
     root = git(cwd, 'rev-parse', '--show-toplevel', optional=True)
     if not root:
         return None
@@ -409,24 +493,31 @@ def prepare_resume(cwd, home):
     require(m['version'] == 1, '续接记录版本不支持')
     mapped = root if m['cwd'] == '.' else local_path(root, m['cwd'])
     require(mapped.is_dir(), '目标会话工作目录已不存在')
-    data = limited(private / 'session.jsonl')
-    require(sha(data) == m['sha256'] and session_info(data)[:2] == (m['thread'], m['turn']),
+    return ResumeContext(m['project'], m['thread'], mapped, private, m['rollout'], m['turn'], m['sha256'])
+
+
+def install_resume(context, home, executable=None):
+    data = limited(context.private / 'session.jsonl')
+    require(sha(data) == context.checksum and session_info(data)[:2] == (context.thread, context.turn),
             '本地交接记录损坏')
-    target = home / session_location(m['rollout'], m['thread'])
-    if matching_session(home, m['thread'], data) is None:
+    target = local_path(home, session_location(context.rollout, context.thread).as_posix())
+    state, path, prefix = session_progress(home, context.thread, data)
+    if state == 'advance':
+        advance_session(home, context.thread, path, prefix, data, executable)
+    elif state == 'missing':
         target.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as stream:
-            tmp = Path(stream.name)
-        try:
-            tmp.write_bytes(data)
+        with staged_rollout(target.parent, data) as tmp:
             try:
                 os.link(tmp, target)
             except FileExistsError:
                 pass
-        finally:
-            tmp.unlink()
-        require(matching_session(home, m['thread'], data) is not None, '安装后的会话未找到')
-    return dict(thread=m['thread'], cwd=str(mapped))
+        require(session_progress(home, context.thread, data)[0] == 'current', '安装后的会话未找到')
+    return dict(thread=context.thread, cwd=str(context.cwd))
+
+
+def prepare_resume(cwd, home, executable=None):
+    context = resume_context(cwd)
+    return install_resume(context, home, executable) if context else None
 
 
 def main():
@@ -450,6 +541,7 @@ def main():
     unpack.add_argument('--seed', type=Path, required=True, help='目标机拥有共同提交的本地仓库')
     unpack.add_argument('--dest', type=Path, required=True)
     launch.add_argument('--cwd', type=Path, default=Path.cwd())
+    launch.add_argument('--codex', type=Path, help='验证原生写入锁后允许快进的 Codex CLI')
     args = parser.parse_args()
     try:
         if args.action == 'capture':
@@ -458,9 +550,9 @@ def main():
         elif args.action == 'restore':
             result = restore(args.package, args.sha256, args.project, args.seed, args.dest)
         else:
-            result = prepare_resume(args.cwd, args.codex_home.resolve())
+            result = prepare_resume(args.cwd, args.codex_home.resolve(), args.codex)
         print(json.dumps(result))
-    except (ValueError, OSError, KeyError, IndexError, TypeError, zipfile.BadZipFile) as exc:
+    except (ValueError, OSError, KeyError, IndexError, TypeError, zipfile.BadZipFile, subprocess.TimeoutExpired) as exc:
         parser.exit(1, f'交接失败：{exc}\n')
 
 

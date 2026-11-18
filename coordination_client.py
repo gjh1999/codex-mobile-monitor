@@ -239,16 +239,26 @@ def device_client(config):
 
 
 def terminal(client, cwd, args, resume=False):
+    from handoff import install_resume, resume_context
+
+    context = resume_context(cwd) if resume else None
+    project = client.project_at(cwd) if client else None
+    if client and context:
+        owner = client.threads.get(context.thread)
+        if (project and context.project != project) or (owner and owner != context.project):
+            raise ControlDenied(detail='交接回执与本机登记的项目不一致')
+        project = project or owner
+        if project is None and context.project in client.paths.values():
+            raise ControlDenied(detail='请把续接的线程 ID 登记到此项目，再从预备目录启动')
+
     def launch():
         command = args
-        if resume:
-            from handoff import prepare_resume
-            binding = prepare_resume(cwd, Path(os.environ.get('CODEX_HOME') or Path.home() / '.codex').resolve())
-            if binding:
-                command = [*args, 'resume', '--cd', binding['cwd'], binding['thread']]
+        if context:
+            home = Path(os.environ.get('CODEX_HOME') or Path.home() / '.codex').resolve()
+            binding = install_resume(context, home, args[0])
+            command = [*args, 'resume', '--cd', binding['cwd'], binding['thread']]
         return subprocess.Popen(command, cwd=cwd)
 
-    project = client.project_at(cwd) if client else None
     if project is None:
         return launch().wait()
     session, sequence = str(uuid.uuid4()), 1
@@ -307,7 +317,7 @@ def main():
             raise ValueError('此设备尚未配置协调服务')
         print(json.dumps(client.event(options.project, options.session, options.source,
                                       options.sequence, options.event), ensure_ascii=True))
-    except (RPCError, ValueError, KeyError, TypeError, OSError) as error:
+    except (RPCError, ValueError, KeyError, TypeError, OSError, subprocess.TimeoutExpired) as error:
         parser.exit(1, f'{getattr(error, "detail", str(error))}\n')
 
 

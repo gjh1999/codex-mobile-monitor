@@ -16,7 +16,7 @@ $snapshot
 
 包内含基线以后尚未共享的提交历史、暂存区补丁、已修改工作文件的内容及删除状态、逐个 `--include` 的未跟踪文件，以及指定线程的完整原生 JSONL。没有新增文件时省略 `--include`。仅对获准跨设备传输原始会话和这段提交历史的项目使用。把包传到目标端，并通过可信渠道取得封存回执里的 `sha256`。包使用 ZIP 格式，内容为明文。
 
-封存会复查 Git 状态、工作文件内容和会话记录。中途变化、末轮没有完成标记、未解决冲突或选中了忽略文件时会报错。单个工作文件、会话、Git 对象及暂存补丁上限为 64 MiB，整包对象未压缩上限为 512 MiB。内容过滤器（含 Git LFS）、子模块、稀疏检出、特殊索引标志和在途 Git 合并或变基留待后续支持。常见凭据文件和运行目录会被拒绝，源端仍需确认项目的数据授权范围。
+封存会复查 Git 状态、工作文件内容和会话记录。中途变化、末轮没有完成标记、未解决冲突或选中了忽略文件时会报错。单个工作文件、会话、Git 对象及暂存补丁上限为 64 MiB，整包对象未压缩上限为 512 MiB。已登记的 Git LFS 路径通过提交中的指针交接，实际对象由接收端单独预取。其他内容过滤器、子模块、稀疏检出、特殊索引标志和在途 Git 合并或变基留待后续支持。常见凭据文件和运行目录会被拒绝，源端仍需确认项目的数据授权范围。
 
 ## 目标端恢复并续接
 
@@ -186,11 +186,35 @@ git -C 'C:\Code\Vision' lfs checkout -- 'models/weights.bin'
 
 命令按对象去重并分批请求，单次只流式下载一个对象。中断时保留部分文件，重试带上 `Range`，并校验服务返回的偏移。服务器改回完整响应时从头写入。对象大小和 SHA-256 都匹配后才发布到标准缓存。旧缓存校验失败时保留原文件供核对。下载地址须与配置端点同源并指向该仓库的对象路径；跳转和外部对象存储直链留待后续支持。 [Git LFS 基础传输](https://github.com/git-lfs/git-lfs/blob/main/docs/api/basic-transfers.md)
 
-输出为版本 1 的 JSON，包含 `commit`、总状态与按路径索引的 `files`。所有对象校验通过时返回 `ready` 和退出码 0。缺件、断线、散列错误或协议错误时返回 `incomplete` 和退出码 1，各对象提供对应状态。配置或 Git 指针无效使用退出码 2。`--check` 只检查本机缓存。当前入口按需运行，适用独立 Git 仓库的默认缓存，LFS 状态与会话交接后台的就绪联动仍待接入。
+输出为版本 1 的 JSON，包含 `commit`、总状态与按路径索引的 `files`。所有对象校验通过时返回 `ready` 和退出码 0。缺件、断线、散列错误或协议错误时返回 `incomplete` 和退出码 1，各对象提供对应状态。配置或 Git 指针无效使用退出码 2。`--check` 只检查本机缓存。此入口适用独立 Git 仓库的默认缓存。
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest -v tests.test_lfs_assets
 .\.venv\Scripts\python.exe tests/bench_lfs_assets.py --output build-exe/verification/lfs-repeat
+```
+
+## 把必需 LFS 对象纳入交接
+
+在源端 `handoffSync.projects.<项目>.publish` 中增加 `"lfs": ["models/weights.bin"]`，或在手动封存时对每个路径传入 `--lfs`。清单需覆盖当前提交中启用 LFS 的路径。先提交指针，工作区可保留标准指针或与其散列相符的已检出文件。暂存区或工作区中存在 LFS 修改时，封存会保留原版本。交接包和签名清单记录对象标识与大小，实际大文件的下载单独走 Gitea。
+
+目标端在项目的 `receive` 下配置 `lfs`，为允许下载的路径名单、家庭端点和凭据环境变量。`seed` 使用独立 Git 仓库的默认 `.git/lfs` 缓存，同一对象供不同预备版本复用。配置中省略 `lfs` 时，只检查本机的预备与基线缓存。 [Gitea 内置 LFS](https://docs.gitea.com/administration/git-lfs-setup/) · [Git LFS 离线检出](https://github.com/git-lfs/git-lfs/blob/main/docs/man/git-lfs-checkout.adoc)
+
+```json
+{
+  "lfs": {
+    "paths": ["models/weights.bin"],
+    "endpoint": "https://gitea.example/home/vision.git/info/lfs",
+    "userEnv": "LANXI_LFS_USER",
+    "tokenEnv": "LANXI_LFS_TOKEN"
+  }
+}
+```
+
+`GET /api/v1/handoff-sync` 对此类接收结果显示按路径的 `lfs` 状态。对象缺失、断线或坏校验时为 `lfs_pending`，预备目录保留。下载配置或许可路径不匹配时为 `lfs_unconfigured`，预备目录中的 LFS 文件被改动时为 `lfs_staging_changed`。重复扫描可在缓存文件元数据一致时复用本次进程中的校验结果。合并、原路径切换以及原生续接前再次按内容校验必需对象。自动切换后的标准缓存也可使用原生 `git lfs checkout` 检出工作副本。
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest -v tests.test_handoff_lfs tests.test_lfs_assets
+.\.venv\Scripts\python.exe -m tests.bench_handoff_lfs --output build-exe/verification/handoff-lfs-repeat
 ```
 
 ## 本机跨盘复验

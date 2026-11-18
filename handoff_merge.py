@@ -7,8 +7,10 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from handoff import (DIFF, GIT_ID, MAX_FILE, MAX_TOTAL, HandoffError, checked_index, git, git_process,
-                     limited, local_path, names, require, resume_context, session_info, sha, switch_pending, work_file)
+from handoff import (DIFF, GIT_ID, MAX_FILE, MAX_TOTAL, HandoffError, check_filters, checked_index, excluded_paths, git,
+                     git_process, limited, local_path, names, require, resume_context, session_info, sha, switch_pending,
+                     tracked_lfs, work_file)
+from lfs_assets import copy_cache, inventory, require_cached
 
 
 class MergeConflict(ValueError):
@@ -56,8 +58,9 @@ def hash_changes(root, source_args, source_index, files, write_objects, tracked)
     return [(item, mode, oid) for (item, mode), oid in zip(files, oids)]
 
 
-def capture_index(root, temporary, includes, write_objects):
-    head, branch, index = checked_index(root)
+def capture_index(root, temporary, includes, write_objects, lfs_paths=(), lfs_memo=None):
+    lfs = tracked_lfs(root, 'HEAD', lfs_paths, lfs_memo, optional=True)
+    head, branch, index = checked_index(root, lfs)
     entries = {path: header[:6] for header, path in (line.split('\t', 1) for line in names(index))}
     require(all(mode in ('100644', '100755') for mode in entries.values()), '合并仅支持普通文件')
 
@@ -72,7 +75,8 @@ def capture_index(root, temporary, includes, write_objects):
         valid = ('true', 'false', 'yes', 'no', 'on', 'off', '1', '0')
         require(value in valid or (key == 'core.autocrlf' and value == 'input'), 'Git 工作区设置无效')
         source_args.extend(('-c', f'{key}={value}'))
-    dirty = set(names(git(root, *source_args, *DIFF, '--name-only', '-z', isolated=True, index_file=source_index)))
+    dirty = set(names(git(root, *source_args, *DIFF, '--name-only', '-z', *excluded_paths(lfs), isolated=True,
+                          index_file=source_index, literal=not lfs)))
     if includes:
         untracked = set(names(git(root, 'ls-files', '--others', '--exclude-standard', '-z')))
         require(set(includes) <= untracked, '纳入的新文件需为未忽略的单个未跟踪文件')
@@ -188,7 +192,7 @@ def object_store(repo):
     return path
 
 
-def check_checkout_paths(repo, target_repo=None):
+def check_checkout_paths(repo, target_repo=None, lfs=()):
     entries = names(git(repo, 'ls-files', '--stage', '-z', isolated=True))
     paths, spellings = [], {}
     for entry in entries:
@@ -210,8 +214,7 @@ def check_checkout_paths(repo, target_repo=None):
                       index_file=repo / '.git/index')
     else:
         filters = git(repo, 'check-attr', '--cached', '-z', '--stdin', 'filter', data=paths, isolated=True)
-    require(all(value in ('unset', 'unspecified') for value in names(filters)[2::3]),
-            '合并结果依赖 Git 内容过滤器')
+    check_filters(names(filters), lfs)
 
 
 def verify_snapshot(root, state, manifest):
@@ -239,13 +242,17 @@ def prepare_merge(local, incoming, dest, includes=(), incoming_includes=(), *, v
     require(context is not None, '输入缺少已恢复的交接回执')
     receipt = json.loads(limited(context.private / 'handoff.json', 65536))
     require(receipt['head'] == incoming_head, '预备目录已切换到与交接回执不同的提交')
+    lfs = inventory(receipt)
+    if lfs:
+        require_cached(incoming, lfs)
+    source_options = dict(lfs_paths=lfs, lfs_memo={}) if lfs else {}
     transcript = limited(context.private / 'session.jsonl')
     require(sha(transcript) == context.checksum and session_info(transcript)[:2] == (context.thread, context.turn),
             '交接历史与回执不匹配')
     registered = receipt.get('included', [])
     require(isinstance(registered, list) and all(isinstance(path, str) for path in registered), '交接新文件回执无效')
     if verified and (any(receipt[key] != verified[key] for key in ('project', 'head', 'thread', 'turn', 'cwd', 'rollout'))
-                     or context.checksum != verified['objects']['session.jsonl']
+                     or inventory(verified) != lfs or context.checksum != verified['objects']['session.jsonl']
                      or set(registered) != {row['path'] for row in verified['files'] if row['new']}):
         raise SnapshotChanged('预备工作区回执与签名包不符')
     remote_paths = sorted(set(registered) | set(incoming_includes))
@@ -278,8 +285,8 @@ def prepare_merge(local, incoming, dest, includes=(), incoming_includes=(), *, v
                 if base != previous:
                     check_history_paths(work, base, previous)
 
-            here = capture_index(local, work, includes, write_objects=True)
-            there = capture_index(incoming, work, remote_paths, write_objects=True)
+            here = capture_index(local, work, includes, write_objects=True, **source_options)
+            there = capture_index(incoming, work, remote_paths, write_objects=True, **source_options)
             require((here.head, there.head) == (local_head, incoming_head), '输入提交在读取期间发生变化')
             if verified:
                 verify_snapshot(incoming, there, verified)
@@ -299,17 +306,23 @@ def prepare_merge(local, incoming, dest, includes=(), incoming_includes=(), *, v
 
         head = merged_head(work, history, base)
         git(work, 'read-tree', working, isolated=True)
-        check_checkout_paths(work)
+        check_checkout_paths(work, lfs=lfs)
         git(work, 'checkout-index', '--all', isolated=True)
         git(work, *DIFF, '--quiet', isolated=True)
         if index != working:
             git(work, 'read-tree', index, isolated=True)
-            check_checkout_paths(work)
+            check_checkout_paths(work, lfs=lfs)
         if here.branch:
             git(work, 'symbolic-ref', 'HEAD', 'refs/heads/' + here.branch, isolated=True)
             git(work, 'update-ref', 'HEAD', head, isolated=True)
         else:
             git(work, 'update-ref', '--no-deref', 'HEAD', head, isolated=True)
+        if lfs:
+            require(tracked_lfs(work, head, lfs) == lfs, '合并后的 LFS 指针与接收清单不一致')
+            for tree in dict.fromkeys((index, working)):
+                require(not git(work, 'diff-tree', '-r', '--name-only', head + '^{tree}', tree, '--', *lfs,
+                                isolated=True), '合并结果含未提交的 LFS 修改')
+            copy_cache(incoming, work, lfs)
 
         # Materialize only objects reachable from the final worktree, index and
         # HEAD in a single pack. Drop the borrowing link before publishing.
@@ -317,8 +330,8 @@ def prepare_merge(local, incoming, dest, includes=(), incoming_includes=(), *, v
         prefix = work / '.git' / 'objects' / 'pack' / 'pack'
         git(work, '-c', 'pack.compression=1', '-c', 'pack.threads=2', 'pack-objects', '--quiet', '--revs', '--delta-base-offset',
             prefix, data=roots, isolated=True)
-        require(capture_index(local, work, includes, write_objects=False) == here
-                and capture_index(incoming, work, remote_paths, write_objects=False) == there
+        require(capture_index(local, work, includes, write_objects=False, **source_options) == here
+                and capture_index(incoming, work, remote_paths, write_objects=False, **source_options) == there
                 and not (switch_pending(local) or switch_pending(incoming)),
                 '输入工作区在合并期间发生变化')
         if verified:

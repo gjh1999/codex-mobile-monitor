@@ -267,17 +267,21 @@ figcaption { color: var(--ink); font-weight: 650; margin-bottom: 15px; }
           <a href="#ownership">人工优先与夜间审批</a>
           <a href="#compute">硬件调度</a>
           <a href="#usage">任务类型与用量</a>
+          <a href="#reports">每日工作报告</a>
+          <a href="#memory">项目长期记忆</a>
+          <a href="#extensions">扩展接口</a>
           <a href="#delivery">开发计划与验收</a>
         </nav>
       </details>
     </aside>
     <div class="content">
 
-<section id="overview"><h2>项目要求</h2><p>三台 Windows 电脑使用同一套澜汐。一次安装、配对并登记项目后，后台负责交接。日常开发路径仍是打开 IDE、编辑、运行命令，用户无需另开工作台或点击同步。</p>
+<section id="overview"><h2>项目要求</h2><p>公司台式机、私人笔记本和家里台式机使用同一套澜汐。一次安装、配对并登记项目后，后台负责交接。日常开发路径仍是打开 IDE、编辑、运行命令，用户无需另开工作台或点击同步。</p>
 <div class="grid"><article class="card"><h3>代码和会话一起到达</h3><p>三端保留代码副本。已保存到磁盘的未提交修改、暂存状态、允许同步的新文件和最近可恢复的 Codex 轮次必须相互对应；绝对路径按设备映射。</p></article>
 <article class="card"><h3>人拥有最高优先级</h3><p>任一设备用 VS Code 或 PyCharm 打开项目，澜汐释放该项目的自动控制。最后一个 IDE 关闭、人工 CLI 释放后，后台按原策略接回。</p></article>
 <article class="card"><h3>算力和大文件按需使用</h3><p>普通开发就近执行，GPU 任务或受本机性能限制的可迁移步骤自动调度到家里。大对象默认一份持久主副本，工作缓存按需生成，重要数据另存冷备。</p></article>
-<article class="card"><h3>夜间可独立推进</h3><p>项目按长期、短期或探索性管理。夜间在项目沙箱和预算内自动处理符合规则的操作审批，iPhone 可暂停、看结果和处理例外。</p></article></div></section>
+<article class="card"><h3>夜间可独立推进</h3><p>项目按长期、短期或探索性管理。夜间在项目沙箱和预算内自动处理符合规则的操作审批，iPhone 可暂停、看结果和处理例外。</p></article></div>
+<p>每天自动生成一份跨项目工作报告。Codex 对话、决策和技术探索按项目归档，供日后查阅和继续开发。新功能通过有版本的接口接入。</p></section>
 
 <section id="design">
   <h2>前端设计</h2>
@@ -300,12 +304,13 @@ figcaption { color: var(--ink); font-weight: 650; margin-bottom: 15px; }
 <p>2026-11-17 的项目记录显示，Python 回归运行 118 项、跳过 1 项、失败 0 项。Edge 模拟桌面和手机视口通过两项浏览器检查。三机换机、iPhone Safari 真机、GPU 调度和夜间策略均属于新增验收。</p>
 <p class="refs">仓库依据　<a href="ARCHITECTURE.md">架构说明</a><a href="WEB.md">Web 工作台</a><a href="WEB_VALIDATION.md">历史验证记录</a><a href="RUNBOOK.md">运行手册</a></p></section>
 
-<section id="architecture"><h2>总体架构</h2><figure><figcaption>设备拓扑与职责</figcaption><div class="topology"><div class="node"><b>公司机 · 笔记本</b>本地代码与 CLI<br>设备代理、同步与探测</div><div class="wire"><strong>↔</strong><span>私网</span></div><div class="node core"><b>家里电脑</b>本地开发客户端<br>协调服务、LFS、计算 worker</div><div class="wire"><strong>↔</strong><span>HTTPS</span></div><div class="node"><b>iPhone · Safari</b>任务状态、额度、审批<br>查看结果与暂停</div></div></figure>
+<section id="architecture"><h2>总体架构</h2><figure><figcaption>设备拓扑与职责</figcaption><div class="topology"><div class="node"><b>公司台式机 · 私人笔记本</b>本地代码与 CLI<br>设备代理、同步与探测</div><div class="wire"><strong>↔</strong><span>私网</span></div><div class="node core"><b>家里台式机</b>本地开发客户端<br>协调服务、LFS、计算 worker</div><div class="wire"><strong>↔</strong><span>HTTPS</span></div><div class="node"><b>iPhone · Safari</b>任务状态、每日报告、审批<br>查看结果与暂停</div></div></figure>
 <p>三台电脑分别连接项目原有的 Git 远程。家里节点保存已确认的交接版本，并协调写入权。桌面、CLI 和手机都以同一个项目标识关联任务，磁盘盘符只保存在各设备的映射里。</p>
 <div class="tbl"><table><thead><tr><th>层次</th><th>接口与持久状态</th></tr></thead><tbody>
 <tr><th>用户入口</th><td>PyCharm / VS Code 终端运行 Codex CLI。Qt 托盘与 Web 调用同一后台；iPhone 通过经鉴权的 HTTPS 入口查看项目或发起已有控制操作。</td></tr>
 <tr><th>本机设备代理</th><td>复用现有 worker 生命周期，采集文件变更、IDE 实例、CLI 活动和资源能力。本机 SQLite 持久化发送队列、最近确认版本与未完成作业，重启后对账。</td></tr>
 <tr><th>中心协调服务</th><td>在家里运行 FastAPI 和独立的 SQLite。保存项目、设备、快照清单、项目控制权、会话写入租约、作业编号和额度记录。设备凭证和浏览器登录分别鉴权。</td></tr>
+<tr><th>项目档案与报告</th><td>设备侧先记录获准归档的对话和活动，再按项目 ID 补传。获准跨设备的数据汇聚到中心，供每日报告、项目检索和后续会话续接使用。报告和检索入口复用现有客户端。</td></tr>
 <tr><th>数据与计算</th><td>Git 管代码版本，Syncthing 搬运已封存的交接材料，Gitea LFS 存大对象。家庭 worker 按项目环境和输入版本运行作业，回传日志、退出码和输出对象。</td></tr>
 </tbody></table></div><p>协调服务用递增的控制权版本拒绝已过期设备的写入，提交同一作业编号只产生一次执行。操作结果未知时先向执行节点核对。旧设备重新上线后，先保存它的独立变更，再决定能否合并。</p></section>
 
@@ -323,7 +328,7 @@ figcaption { color: var(--ink); font-weight: 650; margin-bottom: 15px; }
 
 <section id="environment"><h2>开发与运行环境</h2><div class="grid">
 <article class="card"><h3>开发与构建</h3><p>以 Windows 11、PowerShell、Python 3.10+、Node.js 22+ 为开发基线。仓库的 Web 验证记录使用 Python 3.14 与 Node.js 26.13.1。前端按 package-lock 安装，后端依赖按用途锁定。</p><p>仓库当前声明 PySide6 6.12.0、FastAPI 0.163.1、Uvicorn 0.54.0、React 19、TypeScript 5、Vite 6，Windows EXE 沿用 PyInstaller 打包。发布时记录实测 CLI 版本及兼容清单。</p></article>
-<article class="card"><h3>日常设备</h3><p>公司机为基础显示显卡，型号待探测。笔记本为 RTX 3050，显存容量和运行时可用量以实测为准。家里电脑同时承担开发、协调与重计算，首次启动探测显卡、驱动、运行环境、内存、磁盘和可用带宽。</p><p>iPhone 使用 Safari 访问同一 Web 工作台，可添加到主屏幕。首次配置完成设备配对、项目目录映射、各端 CLI 登录和家庭节点登录启动。</p></article>
+<article class="card"><h3>日常设备</h3><p>公司台式机使用基础显示显卡，型号待探测。私人笔记本配 RTX 3050，显存容量和运行时可用量以实测为准。家里台式机同时承担开发、协调与重计算，首次启动探测显卡、驱动、运行环境、内存、磁盘和可用带宽。</p><p>iPhone 使用 Safari 访问同一 Web 工作台，可添加到主屏幕。首次配置完成设备配对、项目目录映射、各端 CLI 登录和家庭节点登录启动。</p></article>
 </div><h3>在平时开启 VPN 的条件下联调</h3><p>分别探测模型服务、Git 远程和家里中心节点的可达性。优先复用已有获准网络。若 VPN 占用了默认路由、DNS 或手机的 VPN 通道，验证可共存的路由，或采用经鉴权的 HTTPS 网关访问家庭服务。iPhone 的日常路径设计为保持现有 VPN 开启，覆盖 Wi-Fi、蜂窝和网络切换后的重连。</p><p>各机维护自己的解释器、虚拟环境与驱动。工作区内引用本机绝对路径的配置按设备映射；锁定依赖和可复现的项目设置随代码版本管理。</p></section>
 
 <section id="handoff"><h2>无感换机与数据一致性</h2><ol class="steps">
@@ -358,16 +363,50 @@ figcaption { color: var(--ink); font-weight: 650; margin-bottom: 15px; }
 <tr><th>探索性任务</th><td>在独立工作区隔离尝试，限制轮次、耗时与预算，保留结论与实验记录，由用户决定是否将成果合入主项目。</td></tr>
 </tbody></table></div><p>台账同时展示账号官方短、长额度窗口及刷新时间，以及按项目和线程累计的可观测 token、轮次与运行时长。每条记录按线程、轮次和事件标识去重。官方未提供的指标标为未知；项目统计用于预算控制，账号共享额度按服务端返回值展示。</p><p>到达项目预算后暂停该项目；账号额度耗尽时所有相关任务等待官方刷新。恢复前重新核对人工占用、任务目标、预算和沙箱策略。手机可查看“哪个项目用了多少、为何暂停、何时重查”。</p></section>
 
+<section id="reports">
+  <h2>每日工作报告</h2>
+  <p>澜汐按用户所在时区每天自动生成一份报告，可设置出报时间。桌面工作台和 iPhone 查看同一份内容，可回看历史日期。中心节点离线时补生成，设备晚到的数据合并到原日的报告，并标出更新时间。</p>
+  <div class="tbl"><table><thead><tr><th>报告内容</th><th>统计口径与证据</th></tr></thead><tbody>
+    <tr><th>今天做了什么</th><td>按项目列出当天参与的任务、编辑、对话、运行结果和变更。汇总人工操作与 Codex 后台推进，并链接具体任务、会话、提交或验证记录。</td></tr>
+    <tr><th>每个项目用了多少 token</th><td>从 CLI 和 App Server 可观测的用量事件汇总输入、输出和总 token。按线程、轮次与用量检查点去重，将累计量换算为增量，设备切换和补传时避免重复计入。来源缺失或项目归属不明时标明覆盖范围。</td></tr>
+    <tr><th>每个项目花了多少时间</th><td>显示有可观测证据的人工活跃时长及后台执行时长。以 IDE 前台活动或 CLI 交互划分人工区间，排除长时间闲置，将同一项目跨设备重叠区间合并。后台构建、测试和远程计算单独记录，排队时间可另查。</td></tr>
+    <tr><th>今日推进与思考</th><td>列出做成的事、通过的验证、遇到的阻碍和下一步。思考部分归纳对话、笔记和决策记录里实际写下的问题、取舍和理由，每条保留来源。</td></tr>
+    <tr><th>今日技术探索</th><td>按问题、尝试、结果、结论和待验证项记录调研与实验，保留失败或无改善的尝试。引用原始会话、实验记录和输出位置。</td></tr>
+  </tbody></table></div>
+  <p>同一用户、同一本地日期对应一份日报。报告完成时保存所用事件版本，次日补传后可更新并追溯。无法分配给具体项目的用量或时长标为未归类，采集缺口标为未知。</p>
+</section>
+
+<section id="memory">
+  <h2>项目长期记忆</h2>
+  <p>每个登记项目有独立档案。按稳定的项目 ID 归集获准保存的 Codex CLI 和工作台对话，目录更名、不同盘符和换机续接都可找到原线程。每轮保存用户消息、Codex 可见回复、时间、设备和可用的产物引用。私密内容按项目规则脱敏或留在原机，公司项目沿用已批准的数据范围。</p>
+  <ul>
+    <li><strong>找回过去的工作。</strong> 在项目页按日期、任务、主题和关键词检索对话、日报、技术决策及实验结论，并跳回原文。</li>
+    <li><strong>为下一轮工作准备上下文。</strong> 从当前项目检索相关决策、已验证方案、已排除的尝试和待办，附来源及时间，在换机或新会话开始时提供项目上下文。</li>
+    <li><strong>保留可追溯的版本。</strong> 历史对话以线程和轮次增量归档。摘要可以重建，记录与摘要保持可追溯关联；项目设置提供导出、保留期限和删除入口。</li>
+  </ul>
+</section>
+
+<section id="extensions">
+  <h2>扩展接口</h2>
+  <p>同步、任务控制和调度通过稳定的项目 ID 与带版本的事件衔接。事件包含唯一标识、项目、时间、设备、必要的线程或任务标识和类型。首批支持工作活动、对话轮次、用量、任务结果和报告生成，允许事后补录和重算。</p>
+  <div class="tbl"><table><thead><tr><th>扩展位置</th><th>约定</th></tr></thead><tbody>
+    <tr><th>数据来源</th><td>为 IDE、CLI、测试结果和项目笔记提供适配入口。新增来源把输出转成统一事件，按项目授权、校验和去重。</td></tr>
+    <tr><th>后台模块</th><td>报告、归档、检索和通知通过事件订阅或内部服务接口接入。模块可独立启停、重放和升级，失败可重试。新增字段与历史记录向后兼容。</td></tr>
+    <tr><th>桌面、Web 和交付渠道</th><td>使用带版本的 FastAPI 接口查询项目记忆和日报，支持按项目、日期与线程过滤。状态入口可按能力注册，预留后续报告格式、提醒渠道及新的工作台页面。</td></tr>
+  </tbody></table></div>
+</section>
+
 <section id="delivery"><h2>开发计划与验收</h2><p>按可独立验证的里程碑交付。优先解决真实终端续接和控制权交接，再增加后台计算与夜间自动化。每阶段保存测试环境、输入、实测结果、失败记录与回滚点。</p>
 <div class="tbl"><table><thead><tr><th>里程碑</th><th>交付物与通过条件</th></tr></thead><tbody>
 <tr><th>一 · 真实 CLI 续接</th><td>双机、不同盘符和两种 IDE。A 留下已暂存、未暂存及新增文件，B 在终端输入 codex 后继续原线程。核对文件与暂存标记、线程 ID、新一轮实际目录；统计额外手动操作数，正常路径目标为 0。</td></tr>
-<tr><th>二 · 统一后台与控制权</th><td>Qt、Web 和托盘共用本机后台，接入 IDE 项目生命周期。用三机、多窗口、外部 CLI、IDE 崩溃、断网和重启验证人工优先、自动接回及冲突保全；检查没有重复指令或陈旧审批。</td></tr>
+<tr><th>二 · 统一后台与控制权</th><td>Qt、Web 和托盘共用本机后台，接入 IDE 项目生命周期及带版本的活动事件接口。用三机、多窗口、外部 CLI、IDE 崩溃、断网和重启验证人工优先、自动接回及冲突保全；检查没有重复指令或陈旧审批。</td></tr>
 <tr><th>三 · 手机与大文件</th><td>在现有 VPN 开启时，用真实 iPhone Safari 从 Wi-Fi、蜂窝查看进度、暂停和处理待审批。实测家庭 LFS 预取、校验失败和中断恢复，验证缺少必需对象时不会误报就绪。</td></tr>
 <tr><th>四 · 硬件自动调度</th><td>公司机发起 GPU 作业，核对家庭设备执行、终端结果与文件校验。笔记本测试本地资源充足、显存不足、家里忙碌和中途掉线。比较本地运行与远程端到端耗时，检查同一作业只交付一次。</td></tr>
 <tr><th>五 · 分类、额度与夜间</th><td>验证三类任务的结束条件、额度去重、超额暂停和到点重查。夜间沙箱内构建通过，越界操作留待审批，用户半夜打开 IDE 后自动审批立即停发，次日可核对全部动作。</td></tr>
-<tr><th>六 · 存储与发布</th><td>验证容量阈值、冷迁移、双副本和唯一来源离线。统一安装器复用已有工具，支持客户端或家庭中心角色、登录启动、升级与回滚。用原有 Python 回归、Qt smoke 和 Web 测试覆盖已有功能。</td></tr>
+<tr><th>六 · 日报与项目记忆</th><td>用公司台式机、私人笔记本和家里台式机产生至少两个项目的记录，验证 token 去重、人工与后台时长、补传更新、iPhone 查看及项目间档案隔离。逐条核对日报结论和原始会话或实验记录。</td></tr>
+<tr><th>七 · 存储与发布</th><td>验证容量阈值、冷迁移、双副本和唯一来源离线。统一安装器复用已有工具，支持客户端或家庭中心角色、登录启动、升级与回滚。用原有 Python 回归、Qt smoke 和 Web 测试覆盖已有功能。</td></tr>
 </tbody></table></div><p><strong>首轮联调要记录的现场数据</strong>包括三机实际 CLI 和终端版本、家庭 GPU 与网络带宽、典型大文件体积、公司机可同步项目、VPN 路由、常用 GPU 命令和睡眠时段。用这些数据确定兼容矩阵、性能预算及排期。</p>
-<p class="refs">需求来源　《跨设备代码与 Codex 记忆同步软件需求文档》及 2026-11-18 补充的 IDE、CLI、iPhone、VPN、GPU、人工优先和夜间沙箱要求。</p></section>
+<p class="refs">需求来源　《跨设备代码与 Codex 记忆同步软件需求文档》及会话补充的设备、IDE、CLI、iPhone、VPN、GPU、人工优先、夜间沙箱、每日工作报告、项目归档与扩展接口要求。</p></section>
       <p class="end"><a href="#top">返回文档顶部 ↑</a></p>
     </div>
   </div>

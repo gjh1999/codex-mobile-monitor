@@ -18,12 +18,12 @@ from PySide6.QtWidgets import (
     QApplication, QDialog, QFrame, QGraphicsDropShadowEffect, QGraphicsOpacityEffect,
     QHBoxLayout, QLabel, QLineEdit, QTreeWidget, QTreeWidgetItem,
     QMainWindow, QMenu, QMessageBox, QPushButton, QSizePolicy, QStackedWidget, QStyle, QSystemTrayIcon,
-    QTextBrowser, QTextEdit, QVBoxLayout,
+    QTextBrowser, QTextEdit, QVBoxLayout, QWidget,
 )
 
 import monitor
 from desktop_glass import ClientSwitch, FrostedPanel, OceanBackdrop, motion_enabled
-from desktop_notebook import NotebookDialog, NotebookStore
+from desktop_notebook import NotebookStore, NotebookWorkspace
 from desktop_projects import SessionTitles, folder_name, project_group
 from desktop_theme import STYLESHEET, configure_text, message_html, set_reading_html, ui_font, warning_html
 
@@ -253,27 +253,37 @@ class MainWindow(QMainWindow):
         page.setContentsMargins(24, 22, 24, 24)
         page.setSpacing(16)
 
-        self.client_switch = ClientSwitch(root, self.switch_client)
+        self.client_switch = ClientSwitch(root, self.select_workspace)
         self.client_buttons = self.client_switch.buttons
         page.addWidget(self.client_switch, 0, Qt.AlignmentFlag.AlignHCenter)
 
         hero = QFrame()
-        hero.setFixedHeight(133)
+        hero.setObjectName('desktopHero')
+        hero.setFixedHeight(154)
         heading = QHBoxLayout(hero)
-        heading.setContentsMargins(35, 13, 9, 9)
+        heading.setContentsMargins(35, 6, 9, 9)
         heading.setSpacing(16)
         title = QVBoxLayout()
-        title.setSpacing(26)
+        title.setSpacing(0)
         verse = VerseTitle('潮平两岸阔，风正一帆悬。')
         verse.setObjectName('heroVerse')
-        verse.setFont(QFont('SimSun', 34, QFont.Weight.Bold))
+        verse_font = QFont('SimSun', 42, QFont.Weight.Bold)
+        verse_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, -1.3)
+        verse.setFont(verse_font)
         verse.setWordWrap(False)
         title.addWidget(verse)
-        intro = label('一处开始，处处继续。百日写的那一行，暮归时仍等着你。', 12, color='#effaff')
-        intro_font = intro.font()
-        intro_font.setStyleName('')
-        intro_font.setWeight(QFont.Weight.DemiBold)
-        intro.setFont(intro_font)
+        title.addSpacing(2)
+        source = label('唐 · 王湾《次北固山下》', 10, color='#d1e8f5')
+        source.setObjectName('heroSource')
+        title.addWidget(source)
+        title.addSpacing(10)
+        intro = label(
+            '<p style="margin:0;line-height:130%"><strong>一处开始，处处继续。</strong>'
+            ' 白日写到的那一行，暮归时仍等着你。<br>'
+            '终端续上未尽的话，掌中一瞥，便知今日行至何处。</p>',
+            12, color='#e3f3fd',
+        )
+        intro.setTextFormat(Qt.TextFormat.RichText)
         intro.setObjectName('heroIntro')
         title.addWidget(intro)
         title.addStretch()
@@ -313,7 +323,12 @@ class MainWindow(QMainWindow):
         heading.addWidget(self.summary, 0, Qt.AlignmentFlag.AlignBottom)
         page.addWidget(hero)
 
-        middle = QHBoxLayout()
+        self.workspace_pages = QStackedWidget()
+        self.task_workspace = QWidget()
+        self.workspace_pages.addWidget(self.task_workspace)
+        page.addWidget(self.workspace_pages, 1)
+        middle = QHBoxLayout(self.task_workspace)
+        middle.setContentsMargins(0, 0, 0, 0)
         middle.setSpacing(7)
         self.task_panel = FrostedPanel(root)
         self.task_panel.setFixedWidth(266)
@@ -359,14 +374,7 @@ class MainWindow(QMainWindow):
         side.addWidget(self.task_empty)
         self.live = label('○ 正在连接', 9, color=MUTED)
         self.live.setObjectName('status')
-        footer = QHBoxLayout()
-        footer.addWidget(self.live, 1)
-        notebook_button = QPushButton('吉光片羽')
-        notebook_button.setObjectName('notebookLink')
-        notebook_button.setToolTip('随记、归档与待办')
-        notebook_button.clicked.connect(self.open_notebook)
-        footer.addWidget(notebook_button)
-        side.addLayout(footer)
+        side.addWidget(self.live)
         middle.addWidget(self.task_panel)
 
         self.conversation_card = FrostedPanel(root)
@@ -451,7 +459,6 @@ class MainWindow(QMainWindow):
         self.control_message = label('', 8.5, color=MUTED)
         conversation_layout.addWidget(self.control_message)
         middle.addWidget(self.conversation_card, 1)
-        page.addLayout(middle, 1)
         task_header_area.addSpacing(conversation_caption.sizeHint().height() + conversation_title.spacing())
         task_heading.setFixedHeight(self.title_stack.sizeHint().height())
         task_header_area.addLayout(task_header)
@@ -542,15 +549,28 @@ class MainWindow(QMainWindow):
         self.details_dialog.raise_()
 
     def open_notebook(self):
-        if self.notebook is None:
-            try:
-                self.notebook = NotebookDialog(NotebookStore(monitor.ROOT / 'lanxi-notebook.sqlite3'), self)
-            except sqlite3.Error:
-                self._popup('吉光片羽暂未打开', '暂时无法读写本机笔记库。')
-                return
-        self.notebook.show()
-        self.notebook.raise_()
-        self.notebook.activateWindow()
+        self.show_window()
+        self.select_workspace('notebook')
+
+    def select_workspace(self, section):
+        if section == 'notebook':
+            if self.notebook is None:
+                try:
+                    store = NotebookStore(monitor.ROOT / 'lanxi-notebook.sqlite3')
+                    self.notebook = NotebookWorkspace(store, self.centralWidget())
+                except sqlite3.Error:
+                    self.client_switch.select(self.client)
+                    self._popup('吉光片羽暂未打开', '暂时无法读写本机笔记库。')
+                    return
+                self.workspace_pages.addWidget(self.notebook)
+            self.workspace_pages.setCurrentWidget(self.notebook)
+            self.client_switch.select(section)
+            return
+        if self.workspace_pages.currentWidget() is self.notebook and not self.notebook.flush():
+            self.client_switch.select('notebook')
+            return
+        self.workspace_pages.setCurrentWidget(self.task_workspace)
+        self.switch_client(section)
 
     def select_task(self, current, _previous):
         tid = current.data(0, Qt.ItemDataRole.UserRole) if current else None
@@ -1057,6 +1077,8 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         if not self._quitting:
             event.ignore()
+            if self.notebook is not None and not self.notebook.flush():
+                return
             self.hide()
             self.tray.showMessage('任务监控仍在运行', '点击托盘图标可以重新打开。', QSystemTrayIcon.MessageIcon.Information, 2000)
             return

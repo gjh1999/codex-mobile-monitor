@@ -5,11 +5,12 @@ from pathlib import Path
 
 from PySide6.QtCore import QSignalBlocker, Qt, QTimer
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QHBoxLayout, QLineEdit, QListWidget, QListWidgetItem,
+    QComboBox, QHBoxLayout, QLineEdit, QListWidget, QListWidgetItem,
     QMessageBox, QPlainTextEdit, QPushButton, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from desktop_theme import ui_font
+from desktop_glass import FrostedPanel
 
 
 class NotebookStore:
@@ -200,17 +201,16 @@ class NotebookPage(QWidget):
         self.load_list()
 
 
-class NotebookDialog(QDialog):
-    def __init__(self, store, parent=None):
-        super().__init__(parent)
+class NotebookWorkspace(FrostedPanel):
+    def __init__(self, store, backdrop):
+        super().__init__(backdrop)
         self.setObjectName('notebook')
-        self.setWindowTitle('吉光片羽')
-        self.resize(690, 450)
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(13, 12, 13, 12)
         self.tabs = QTabWidget()
         self.notes = NotebookPage(store, 'note')
         self.todos = NotebookPage(store, 'todo')
-        self.tabs.addTab(self.notes, '吉光片羽')
+        self.tabs.addTab(self.notes, '随记')
         self.tabs.addTab(self.todos, '待办')
         layout.addWidget(self.tabs)
 
@@ -218,7 +218,3 @@ class NotebookDialog(QDialog):
         notes_saved = self.notes.save()
         todos_saved = self.todos.save()
         return notes_saved and todos_saved
-
-    def done(self, result):
-        if self.flush():
-            super().done(result)

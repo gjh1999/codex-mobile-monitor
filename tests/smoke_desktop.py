@@ -10,7 +10,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, QTimer, Qt
-from PySide6.QtGui import QEnterEvent, QFont, QFontDatabase, QImage, QMouseEvent, QRawFont, QTextCursor
+from PySide6.QtGui import QEnterEvent, QFontDatabase, QImage, QMouseEvent, QRawFont, QTextCursor, QTextDocument
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog, QFrame, QLabel, QMessageBox, QPushButton
 
@@ -64,16 +64,16 @@ class FakeControl:
 
 def check_client_switch(window, output):
     switch = window.client_switch
-    codex, claude = switch.buttons.values()
+    codex, claude, notebook = switch.buttons.values()
     left = Qt.MouseButton.LeftButton
-    for button in (codex, claude):
+    for button in (codex, claude, notebook):
         assert button.font().bold()
     with patch('desktop_glass.motion_enabled', return_value=True):
         QTest.mousePress(claude, left)
         assert claude.isDown() and window.client == 'codex'
         QTest.mouseRelease(claude, left)
         QTest.qWait(65)
-        assert .05 < switch.position < .92 and switch.velocity > 0
+        assert .05 * switch.offsets['claude'] < switch.position < .92 * switch.offsets['claude'] and switch.velocity > 0
         midpoint, velocity = switch.position, switch.velocity
         QTest.mouseClick(codex, left, pos=QPoint(4, codex.height() // 2))
         assert window.client == 'codex'
@@ -87,14 +87,13 @@ def check_client_switch(window, output):
         global_pos = QPointF(codex.mapToGlobal(drag_to))
         QApplication.sendEvent(codex, QMouseEvent(QEvent.Type.MouseMove, QPointF(drag_to), global_pos,
                                                   Qt.MouseButton.NoButton, left, Qt.KeyboardModifier.NoModifier))
-        travel = claude.x() - codex.x()
-        assert abs(switch.position * travel - 64) < .1 and window.client == 'codex'
+        assert abs(switch.position - 64) < .1 and window.client == 'codex'
         switch.grab().save(str(output / 'client-switch-drag.png'))
         QApplication.sendEvent(codex, QMouseEvent(QEvent.Type.MouseButtonRelease, QPointF(drag_to), global_pos,
                                                   left, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier))
         assert window.client == 'claude'
         QTest.qWait(400)
-        assert switch.position == 1.0 and not switch.spring.isActive()
+        assert switch.position == switch.offsets['claude'] and not switch.spring.isActive()
     with patch('desktop_glass.motion_enabled', return_value=False):
         QTest.mouseClick(codex, left)
         assert switch.position == 0.0 and not switch.spring.isActive()
@@ -102,17 +101,23 @@ def check_client_switch(window, output):
 
 def check_notebook(window, output):
     with tempfile.TemporaryDirectory() as directory, patch.object(monitor, 'ROOT', Path(directory)):
-        entry = window.findChild(QPushButton, 'notebookLink')
-        QTest.mouseClick(entry, Qt.MouseButton.LeftButton)
-        dialog = window.notebook
-        assert dialog is not None and dialog.isVisible()
-        note = dialog.notes
+        switch = window.client_switch
+        previous_client = window.client
+        previous_task = window.selected_thread
+        original_draft = window.message_edit.toPlainText()
+        QTest.mouseClick(switch.buttons['notebook'], Qt.MouseButton.LeftButton)
+        workspace = window.notebook
+        assert workspace is not None and workspace.isVisible()
+        assert not window.task_workspace.isVisible() and window.client == previous_client
+        QTest.qWait(420)
+        assert switch.position == switch.offsets['notebook']
+        note = workspace.notes
         note.title.setText('海边的随记')
         note.body.setPlainText('记录日常灵感，晚上再回看。')
         QTest.qWait(520)
         store = NotebookStore(Path(directory) / 'lanxi-notebook.sqlite3')
         assert store.entries('note', False)[0][1:] == ('海边的随记', '记录日常灵感，晚上再回看。')
-        dialog.grab().save(str(output / 'notebook-desktop.png'))
+        window.grab().save(str(output / 'notebook-desktop.png'))
         QTest.mouseClick(note.file_button, Qt.MouseButton.LeftButton)
         assert not store.entries('note', False)
         note.view.setCurrentIndex(1)
@@ -121,8 +126,8 @@ def check_notebook(window, output):
         QTest.mouseClick(note.file_button, Qt.MouseButton.LeftButton)
         assert not store.entries('note', True) and store.entries('note', False)
 
-        dialog.tabs.setCurrentWidget(dialog.todos)
-        todo = dialog.todos
+        workspace.tabs.setCurrentWidget(workspace.todos)
+        todo = workspace.todos
         todo.title.setText('整理项目待办')
         QTest.mouseClick(todo.save_button, Qt.MouseButton.LeftButton)
         QTest.mouseClick(todo.file_button, Qt.MouseButton.LeftButton)
@@ -133,8 +138,9 @@ def check_notebook(window, output):
         QTest.mouseClick(todo.file_button, Qt.MouseButton.LeftButton)
         todo.new_entry()
         todo.title.setText('关闭窗口时保存')
-        dialog.close()
-        assert not dialog.isVisible()
+        QTest.mouseClick(switch.buttons[previous_client], Qt.MouseButton.LeftButton)
+        assert not workspace.isVisible() and window.task_workspace.isVisible()
+        assert window.selected_thread == previous_task and window.message_edit.toPlainText() == original_draft
         assert {row[1] for row in store.entries('todo', False)} == {'整理项目待办', '关闭窗口时保存'}
 
 
@@ -170,9 +176,19 @@ def main():
             assert isinstance(ocean, OceanBackdrop) and not ocean.current[0].isNull()
             assert len(ocean.wallpapers) == 3 and ocean.rotation.interval() == 30 * 60_000
             assert abs(window.client_switch.geometry().center().x() - ocean.rect().center().x()) <= 1
-            assert window.findChild(QLabel, 'heroVerse').font().bold()
-            intro_font = window.findChild(QLabel, 'heroIntro').font()
-            assert intro_font.pointSizeF() == 12 and intro_font.weight() == QFont.Weight.DemiBold
+            verse = window.findChild(QLabel, 'heroVerse')
+            source = window.findChild(QLabel, 'heroSource')
+            intro = window.findChild(QLabel, 'heroIntro')
+            formatted = QTextDocument()
+            formatted.setHtml(intro.text())
+            assert verse.font().bold() and verse.font().pointSize() == 42
+            assert [verse.y(), source.y(), intro.y()] == sorted([verse.y(), source.y(), intro.y()])
+            assert source.text() == '唐 · 王湾《次北固山下》'
+            assert ' '.join(formatted.toPlainText().split()) == (
+                '一处开始，处处继续。 白日写到的那一行，暮归时仍等着你。 '
+                '终端续上未尽的话，掌中一瞥，便知今日行至何处。'
+            )
+            assert verse.width() >= verse.fontMetrics().horizontalAdvance(verse.text())
             task_heading = window.findChild(QLabel, 'taskPanelTitle')
             current_heading = window.conversation_heading
             assert task_heading.font() == current_heading.font()

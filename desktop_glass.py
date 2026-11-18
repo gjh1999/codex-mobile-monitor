@@ -176,13 +176,15 @@ class ClientSwitch(FrostedPanel):
     def __init__(self, backdrop, select):
         super().__init__(backdrop, radius=21, tint=QColor(8, 54, 70, 141), edge=QColor(210, 245, 255, 77))
         self.setObjectName('clientPill')
-        self.setAccessibleName('客户端')
-        self.select_client = select
+        self.setAccessibleName('切换工作区')
+        self.select_workspace = select
         layout = QHBoxLayout(self)
         layout.setContentsMargins(14, 6, 14, 6)
         layout.setSpacing(5)
         self.buttons = {}
-        for key, text, width in (('codex', 'Codex', 84), ('claude', 'Claude Code', 104)):
+        self.offsets = {}
+        offset = 0
+        for key, text, width in (('codex', 'Codex', 84), ('claude', 'Claude Code', 104), ('notebook', '吉光片羽', 99)):
             button = ClientSegment(text)
             font = button.font()
             font.setPointSizeF(11.0)
@@ -195,9 +197,11 @@ class ClientSwitch(FrostedPanel):
             button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
             button.setCheckable(True)
             button.installEventFilter(self)
-            button.clicked.connect(lambda _=False, client=key: self.select_client(client))
+            button.clicked.connect(lambda _=False, section=key: self.select_workspace(section))
             layout.addWidget(button)
             self.buttons[key] = button
+            self.offsets[key] = offset
+            offset += width + layout.spacing()
         self.active = 'codex'
         self.position = self.velocity = 0.0
         self.target = 0.0
@@ -211,11 +215,13 @@ class ClientSwitch(FrostedPanel):
         self.select('codex', animate=False)
 
     def thumb_rect(self):
-        left = self.buttons['codex'].geometry()
-        right = self.buttons['claude'].geometry()
-        progress = self.position
-        return QRectF(left.x() + (right.x() - left.x()) * progress, left.y(),
-                      left.width() + (right.width() - left.width()) * progress, left.height())
+        left_key, right_key = ('codex', 'claude') if self.position <= self.offsets['claude'] else ('claude', 'notebook')
+        left, right = self.buttons[left_key], self.buttons[right_key]
+        interval = self.offsets[right_key] - self.offsets[left_key]
+        progress = max(0.0, min(1.0, (self.position - self.offsets[left_key]) / interval))
+        first = self.buttons['codex']
+        return QRectF(first.x() + self.position, first.y(),
+                      left.width() + (right.width() - left.width()) * progress, first.height())
 
     def repaint_switch(self):
         self.update()
@@ -226,7 +232,7 @@ class ClientSwitch(FrostedPanel):
         self.active = client
         for key, button in self.buttons.items():
             button.setChecked(key == client)
-        self.target = float(client == 'claude')
+        self.target = float(self.offsets[client])
         if not animate or not self.isVisible() or not motion_enabled():
             self.spring.stop()
             self.position, self.velocity = self.target, 0.0
@@ -245,7 +251,7 @@ class ClientSwitch(FrostedPanel):
         decay = exp(-rate * elapsed)
         self.position = self.target + (distance + carry * elapsed) * decay
         self.velocity = (self.velocity - rate * carry * elapsed) * decay
-        if abs(self.position - self.target) < .001 and abs(self.velocity) < .015:
+        if abs(self.position - self.target) < .1 and abs(self.velocity) < 1.35:
             self.spring.stop()
             self.position, self.velocity = self.target, 0.0
         self.repaint_switch()
@@ -264,9 +270,8 @@ class ClientSwitch(FrostedPanel):
             anchor, start, last = self.press
             if self.dragging or abs(x - anchor) >= QApplication.startDragDistance():
                 self.dragging = True
-                travel = self.buttons['claude'].x() - self.buttons['codex'].x()
                 now = monotonic()
-                position = max(0.0, min(1.0, start + (x - anchor) / travel))
+                position = max(0.0, min(self.offsets['notebook'], start + x - anchor))
                 self.velocity = (position - self.position) / max(now - last, .01)
                 self.position = position
                 self.press = (anchor, start, now)
@@ -279,11 +284,12 @@ class ClientSwitch(FrostedPanel):
             if self.dragging:
                 self.dragging = False
                 button.setDown(False)
-                # Limit projection for a two-position control near its endpoints.
+                # Limit momentum so a quick release travels to the nearby stop.
                 velocity = self.velocity if monotonic() - last < .08 else 0.0
-                self.velocity = max(-5.0, min(5.0, velocity))
-                client = 'claude' if self.position + self.velocity * .055 >= .5 else 'codex'
-                self.select_client(client)
+                self.velocity = max(-480.0, min(480.0, velocity))
+                projected = self.position + self.velocity * .055
+                section = min(self.offsets, key=lambda key: abs(self.offsets[key] - projected))
+                self.select_workspace(section)
                 return True
             self.select(self.active)
         elif kind == QEvent.Type.UngrabMouse and self.press is not None:

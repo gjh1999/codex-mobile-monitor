@@ -138,8 +138,6 @@ QTextEdit#composer { background:transparent; border:0; }
 QTextBrowser#conversation, QTextBrowser#infoText { background:transparent; border:0; }
 QPushButton { background:#ffffff; color:#425a7b; border:1px solid #dae3f0; border-radius:8px; padding:7px 11px; }
 QPushButton:hover { background:#f2f6fe; border-color:#a9c1e7; color:#28599f; }
-QPushButton#notebookLink { color:#163e57; background:rgba(228, 248, 255, 65); border-color:transparent; padding:3px 8px; }
-QPushButton#notebookLink:hover, QPushButton#notebookLink:focus { background:#d4efff; border-color:#70a8cc; }
 QPushButton:pressed { background:#e3edff; border-color:#83a7dd; }
 QPushButton:focus { border-color:#7399db; }
 QPushButton#hoverAction { background:rgba(225, 247, 255, 154); color:#153b53; border-color:rgba(226, 245, 255, 138); padding:5px 8px; }
@@ -151,14 +149,13 @@ QPushButton#send:hover, QPushButton#approvalAllow:hover { background:#055eaa; bo
 QPushButton#send:pressed, QPushButton#approvalAllow:pressed { background:#044e90; }
 QPushButton:disabled, QPushButton#send:disabled, QPushButton#hoverAction:disabled, QPushButton#approvalAllow:disabled { background:rgba(234, 246, 252, 97); color:#507087; border-color:rgba(225, 245, 255, 80); }
 QDialog#approvalDialog { background:#d6eaf5; }
-QDialog#notebook { background:#e5f1f7; }
-QDialog#notebook QTabWidget::pane { background:#eaf6fc; border:1px solid #c8e0ec; border-radius:10px; }
-QDialog#notebook QTabBar::tab { color:#254359; background:#d9eaf4; border-radius:8px; padding:6px 17px; margin:0 4px 3px 0; }
-QDialog#notebook QTabBar::tab:selected { background:#c3e0f1; color:#123752; }
-QDialog#notebook QComboBox { background:#eff9ff; color:#15364d; border:1px solid #c4dce9; border-radius:8px; padding:5px 8px; }
-QDialog#notebook QListWidget, QDialog#notebook QPlainTextEdit { background:#f5fbff; color:#183a50; border:1px solid #d0e3ef; border-radius:8px; padding:7px; }
-QDialog#notebook QListWidget::item { border-radius:6px; padding:5px 7px; }
-QDialog#notebook QListWidget::item:selected { background:#d7ecf9; color:#153c53; }
+QWidget#notebook QTabWidget::pane { background:rgba(234, 246, 252, 141); border:1px solid #c8e0ec; border-radius:10px; }
+QWidget#notebook QTabBar::tab { color:#254359; background:#d9eaf4; border-radius:8px; padding:6px 17px; margin:0 4px 3px 0; }
+QWidget#notebook QTabBar::tab:selected { background:#c3e0f1; color:#123752; }
+QWidget#notebook QComboBox { background:#eff9ff; color:#15364d; border:1px solid #c4dce9; border-radius:8px; padding:5px 8px; }
+QWidget#notebook QListWidget, QWidget#notebook QPlainTextEdit { background:rgba(245, 251, 255, 211); color:#183a50; border:1px solid #d0e3ef; border-radius:8px; padding:7px; }
+QWidget#notebook QListWidget::item { border-radius:6px; padding:5px 7px; }
+QWidget#notebook QListWidget::item:selected { background:#d7ecf9; color:#153c53; }
 QTextBrowser#approvalDetails { background:#e6f2fb; border:1px solid #bfd9ea; border-radius:8px; }
 QScrollArea { border:0; background:transparent; }
 QScrollBar:vertical { background:transparent; width:7px; margin:3px 0; }

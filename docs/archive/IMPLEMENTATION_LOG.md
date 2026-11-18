@@ -2,6 +2,12 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-18 封面诗句与三栏工作区
+
+- 以 R6 为基线，对照开发方案头图。诗句从 34 pt 调至 42 pt 粗宋体，保留单行，下方补出处与方案封面的两行副标题。顶部滑块新增「吉光片羽」作为第三个停靠点。随记和待办进入主窗口，切回客户端前提交待保存编辑。
+- Windows 11 x64、Python 3.14.7、PySide6 6.12.0。在独立交付源码 `build-exe/verification/lanxi-verse-notebook-release/source/mobile-monitor` 设置 `QT_QPA_PLATFORM=windows`，运行 `python tests/smoke_desktop.py --output ../../windows`。核对 1020×640 和 1180×760 截图、出处和完整副标题、滑块停靠、第三栏及返回后的草稿保存。独立源码回归 `python -m unittest discover -s tests -t . -p 'test_*.py' -q` 运行 121 项，120 项通过、1 项跳过，12.029 秒。
+- 通过 PyInstaller 6.22.3 执行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-exe.ps1 -AppName Lanxi-Glass-R7`，交付文件为 `release/Lanxi-Glass-R7.exe`，54,104,555 字节；R6 为 54,103,534 字节。核对包内滑块、随记、桌面和 Windows 平台模块。运行 `python build-exe/verify-lanxi-launch.py Lanxi-Glass-R7.exe`，在 `lanxi-folder-package-9jmzedhj` 中于 1.11 秒验证原生窗口和 SQLite 控制库。
+
 ## 2026-11-18 VS Code 与 PyCharm 活动上报
 
 - 目标为将第二里程碑的活动接口接到编辑器，并区分正常退出、断网与意外退出。基线 `b00130d` 可用 CLI 报到和查询协调状态，未提供编辑器插件。环境为 Windows、Python 3.14.7、Node.js 26.13.1、VS Code 1.146.0 与 PyCharm 2026.3（PY-263.7307.206，JBR javac 25.0.4.1）。输入为临时项目、一台虚构设备及回环协调服务。

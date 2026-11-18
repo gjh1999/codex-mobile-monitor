@@ -1,5 +1,7 @@
 import json
+import hmac
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -9,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import handoff
+from handoff_sync import encode, sync_once
 from handoff import capture, git, HandoffError, prepare_resume, restore
 
 
@@ -64,6 +67,115 @@ class HandoffTests(unittest.TestCase):
 
     def unpack(self, digest):
         return restore(self.out, digest, 'alpha', self.seed, self.dest)
+
+    def sync_fixture(self):
+        left, right = self.root / 'shared-a', self.root / 'shared-b'
+        left.mkdir()
+        right.mkdir()
+        self.exchange_a, self.exchange_b = left, right
+        self.stage = self.root / 'staged'
+        self.stage.mkdir()
+        self.runtime_a, self.runtime_b = self.root / 'runtime-a', self.root / 'runtime-b'
+        self.env = {'TEST_HANDOFF_KEY': 'fixture-private-key-' * 3}
+        self.publisher = dict(device='office', projects={'alpha': dict(
+            exchange=str(left), keyEnv='TEST_HANDOFF_KEY',
+            publish=dict(repo=str(self.a), base=self.base, thread=self.thread, include=['added.txt', 'future.txt']),
+        )})
+        self.receiver = dict(device='laptop', projects={'alpha': dict(
+            exchange=str(right), keyEnv='TEST_HANDOFF_KEY',
+            receive=dict(seed=str(self.seed), staging=str(self.stage), peers=['office']),
+        )})
+
+    def ship_offer(self, data=None):
+        source = self.exchange_a / 'alpha' / 'office.json'
+        target = self.exchange_b / 'alpha' / 'office.json'
+        target.parent.mkdir(exist_ok=True)
+        target.write_bytes(source.read_bytes() if data is None else data)
+        return target
+
+    def ship_package(self, digest, damaged=False):
+        name = Path('alpha/objects') / (digest + '.zip')
+        package = self.exchange_b / name
+        package.parent.mkdir(exist_ok=True)
+        if damaged:
+            package.write_bytes(b'partial transfer')
+        else:
+            shutil.copyfile(self.exchange_a / name, package)
+
+    def publish_auto(self):
+        return sync_once(self.runtime_a, self.publisher, self.home_a, self.env)['projects']['alpha']['publish']
+
+    def receive_auto(self):
+        return sync_once(self.runtime_b, self.receiver, self.home_b, self.env)['projects']['alpha']['received'][0]
+
+    def test_automatic_delivery_arrival_order_and_saved_edits(self):
+        self.sync_fixture()
+        source_before = git(self.a, 'status', '--porcelain', '-z')
+        seed_before = git(self.seed, 'status', '--porcelain', '-z')
+        first = self.publish_auto()['lastPublished']
+        self.assertEqual(self.publish_auto()['lastPublished'], first)
+        self.assertEqual(git(self.a, 'status', '--porcelain', '-z'), source_before)
+        offer_path = self.ship_offer()
+        initial_offer = offer_path.read_bytes()
+        self.assertEqual(self.receive_auto()['status'], 'awaiting_package')
+        self.ship_package(first['sha256'], damaged=True)
+        self.assertEqual(self.receive_auto()['status'], 'restore_failed')
+        self.assertEqual(list((self.stage / 'alpha').iterdir()), [])
+        self.ship_package(first['sha256'])
+        one = self.receive_auto()
+        self.assertEqual(one['status'], 'ready')
+        self.assertEqual(self.receive_auto(), one)
+        self.assertFalse(self.home_b.exists())
+        work = Path(one['cwd'])
+        self.assertEqual((work / 'added.txt').read_bytes(), b'new\r\n')
+        self.assertEqual(git(work, 'show', ':示例.bin'), b'index\x00')
+        self.assertEqual((work / '示例.bin').read_bytes(), self.tracked.read_bytes())
+        self.assertEqual(git(self.seed, 'status', '--porcelain', '-z'), seed_before)
+
+        (work / 'added.txt').write_bytes(b'local work')
+        (self.a / 'added.txt').write_bytes(b'new source edit in same turn')
+        second = self.publish_auto()['lastPublished']
+        self.assertEqual((first['revision'], second['revision']), (1, 2))
+        self.assertEqual(first['turn'], second['turn'])
+        self.ship_offer()
+        self.ship_package(second['sha256'])
+        two = self.receive_auto()
+        self.assertEqual(two['status'], 'ready')
+        self.assertNotEqual(one['cwd'], two['cwd'])
+        self.assertEqual((Path(two['cwd']) / 'added.txt').read_bytes(), b'new source edit in same turn')
+        self.assertEqual((work / 'added.txt').read_bytes(), b'local work')
+        self.ship_offer(initial_offer)
+        stale = self.receive_auto()
+        self.assertEqual(stale['status'], 'version_conflict')
+        self.assertEqual(stale['lastStaged']['revision'], 2)
+
+    def test_automatic_verifies_signed_manifest_and_preserves_session_conflict(self):
+        self.sync_fixture()
+        first = self.publish_auto()['lastPublished']
+        path = self.ship_offer()
+        offer = json.loads(path.read_bytes())
+        offer['revision'] = 999
+        self.ship_offer(encode(offer))
+        self.assertEqual(self.receive_auto()['status'], 'invalid_manifest')
+        self.assertEqual(list(self.stage.iterdir()), [])
+
+        offer.pop('signature')
+        offer['turn'] = 'unrelated-turn'
+        signed = {**offer, 'signature': hmac.digest(self.env['TEST_HANDOFF_KEY'].encode(), encode(offer), 'sha256').hex()}
+        self.ship_offer(encode(signed))
+        self.ship_package(first['sha256'])
+        self.assertEqual(self.receive_auto()['status'], 'restore_failed')
+        self.ship_offer()
+        sessions = self.home_b / 'sessions'
+        sessions.mkdir(parents=True)
+        local_log = sessions / self.log.name
+        local_log.write_bytes(b'existing divergent history')
+        result = self.receive_auto()
+        self.assertEqual(result['status'], 'session_conflict')
+        self.assertTrue((Path(result['cwd']) / '.git/lanxi/session.jsonl').is_file())
+        self.assertEqual(local_log.read_bytes(), b'existing divergent history')
+        with self.assertRaises(HandoffError):
+            prepare_resume(Path(result['cwd']), self.home_b)
 
     def test_two_workspaces_and_session_homes(self):
         before = git(self.a, 'status', '--porcelain=v1', '-z')

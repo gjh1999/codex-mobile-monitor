@@ -58,6 +58,18 @@ class WebTests(unittest.TestCase):
         with patch('monitor.config', return_value={'handoffProjects': {'alpha': 'relative-is-invalid'}}):
             self.assertEqual(self.client.get(url).json(), {'projects': [{'project': 'alpha', 'status': 'invalid_receipt'}]})
 
+    def test_handoff_sync_requires_login_and_reads_worker_state(self):
+        url = '/api/v1/handoff-sync'
+        self.assertEqual(self.client.get(url).status_code, 401)
+        self.login()
+        with patch('monitor.config', return_value={}):
+            self.assertEqual(self.client.get(url).json(), {'status': 'disabled', 'projects': {}})
+        state = {'projects': {'vision': {'received': [{'device': 'office', 'status': 'awaiting_package'}]}}}
+        with patch('monitor.config', return_value={'handoffSync': {'device': 'laptop'}}), \
+                patch('monitor.snapshot', return_value={'handoffSyncStatus': 'running'}), \
+                patch('web_server.read_handoff_sync', return_value=state):
+            self.assertEqual(self.client.get(url).json(), {**state, 'status': 'running'})
+
     def test_project_control_requires_login_and_reports_coordinator_outage(self):
         from coordination_client import ControlDenied
         url = '/api/v1/project-control'

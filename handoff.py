@@ -180,7 +180,7 @@ def work_file(root, item):
     return limited(path), bool(path.stat().st_mode & stat.S_IXUSR) if os.name != 'nt' else False
 
 
-def capture(repo, home, project, base, thread, includes, output):
+def capture(repo, home, project, base, thread, includes, output, previous_snapshot=None):
     repo, output = repo.resolve(), output.absolute()
     require(repo == Path(git(repo, 'rev-parse', '--show-toplevel').decode().strip()).resolve(),
             '请指定项目仓库根目录')
@@ -202,6 +202,19 @@ def capture(repo, home, project, base, thread, includes, output):
     state = git_state(repo, includes)
     head, branch, index_hash, staged, dirty, extra = state
     git(repo, 'merge-base', '--is-ancestor', baseline, head)
+    manifest = dict(version=1, project=project, base=baseline, head=head, branch=branch,
+                    index_hash=index_hash, cwd=relative_cwd, thread=thread, turn=turn,
+                    rollout=source.name, files=[], objects={'index.patch': sha(staged), 'session.jsonl': sha(transcript)})
+    for i, item in enumerate([*dirty, *extra]):
+        data, executable = work_file(repo, item)
+        key = None if data is None else f'files/{i}'
+        if key:
+            manifest['objects'][key] = sha(data)
+        manifest['files'].append(dict(path=item, object=key, executable=executable, new=item in extra))
+    snapshot = sha(json.dumps(manifest, sort_keys=True, ensure_ascii=False).encode())
+    if snapshot == previous_snapshot:
+        return None
+    manifest['snapshot'] = snapshot
     if head != baseline:
         revision_range = baseline + '..' + head
         changed = names(git(repo, 'log', '-m', '--format=', '--name-only', '-z', '--no-renames', revision_range))
@@ -209,9 +222,6 @@ def capture(repo, home, project, base, thread, includes, output):
             local_path(repo, filename)
         ids = git(repo, 'rev-list', '--objects', '--no-object-names', revision_range)
         check_object_sizes(repo, ids)
-    manifest = dict(version=1, project=project, base=baseline, head=head, branch=branch,
-                    index_hash=index_hash, cwd=relative_cwd, thread=thread, turn=turn,
-                    rollout=source.name, files=[], objects={})
     with tempfile.TemporaryDirectory(dir=output.parent) as tmp:
         archive = Path(tmp) / 'handoff.zip'
         with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as bundle:
@@ -222,20 +232,22 @@ def capture(repo, home, project, base, thread, includes, output):
                 total += len(data)
                 require(len(data) <= limit and total <= MAX_TOTAL, '交接包超过容量上限')
                 bundle.writestr(key, data)
-                manifest['objects'][key] = sha(data)
 
             if baseline != head:
                 commits = Path(tmp) / 'commits.bundle'
                 git(repo, 'bundle', 'create', commits, 'HEAD', '^' + baseline)
-                put('commits.bundle', limited(commits, MAX_TOTAL), MAX_TOTAL)
+                data = limited(commits, MAX_TOTAL)
+                put('commits.bundle', data, MAX_TOTAL)
+                manifest['objects']['commits.bundle'] = sha(data)
             put('index.patch', staged)
             put('session.jsonl', transcript)
-            for i, item in enumerate([*dirty, *extra]):
-                data, executable = work_file(repo, item)
-                key = None if data is None else f'files/{i}'
+            for entry in manifest['files']:
+                data, executable = work_file(repo, entry['path'])
+                key = entry['object']
+                require((sha(data) if data is not None else None) == manifest['objects'].get(key)
+                        and executable == entry['executable'], '工作文件在封存期间发生变化，请重试')
                 if key:
                     put(key, data)
-                manifest['files'].append(dict(path=item, object=key, executable=executable, new=item in extra))
             bundle.writestr('manifest.json', json.dumps(manifest, ensure_ascii=False).encode())
         require(state == git_state(repo, includes) and limited(source) == transcript,
                 '项目或会话在封存期间发生变化，请重试')
@@ -246,15 +258,16 @@ def capture(repo, home, project, base, thread, includes, output):
         with archive.open('rb') as stream:
             checksum = file_hash(stream)
         os.link(archive, output)
-    return dict(project=project, head=head, thread=thread, turn=turn, sha256=checksum)
+    return dict(project=project, head=head, thread=thread, turn=turn, sha256=checksum, snapshot=snapshot)
 
 
-def restore(package, checksum, project, seed, dest):
+def restore(package, checksum, project, seed, dest, expected=None):
     require(DIGEST.fullmatch(checksum), '请提供封存端返回的 SHA-256')
     seed, dest = seed.resolve(strict=True), dest.absolute()
     require(not dest.exists() and not dest.is_symlink() and not dest.resolve().is_relative_to(seed),
             '恢复目录必须是基线仓库以外的新目录')
     with package.open('rb') as stream, tempfile.TemporaryDirectory(dir=dest.parent) as tmp:
+        require(os.fstat(stream.fileno()).st_size <= MAX_TOTAL + 2 * MAX_FILE, '交接包超过容量上限')
         require(file_hash(stream) == checksum, '交接包 SHA-256 不匹配')
         with zipfile.ZipFile(stream) as bundle:
             members = bundle.infolist()
@@ -263,6 +276,8 @@ def restore(package, checksum, project, seed, dest):
             require(bundle.getinfo('manifest.json').file_size <= MAX_FILE, '清单超过容量上限')
             m = json.loads(bundle.read('manifest.json'))
             require(m['version'] == 1 and m['project'] == project, '项目或交接格式版本不匹配')
+            if expected:
+                require(all(m.get(key) == value for key, value in expected.items()), '交接包与发布清单不符')
             base, head = m['base'], m['head']
             require(GIT_ID.fullmatch(base) and GIT_ID.fullmatch(head), 'Git 版本无效')
             require(set(bundle.namelist()) == {'manifest.json', *m['objects']}, '清单与对象列表不匹配')
@@ -370,6 +385,17 @@ def handoff_receipts(projects):
     return results
 
 
+def matching_session(home, thread, transcript):
+    matches = find_session(home, thread)
+    if not matches:
+        return None
+    require(len(matches) == 1 and matches[0].is_relative_to(home / 'sessions'),
+            '目标机存在同 ID 的归档或多份记录，请先核对')
+    with matches[0].open('rb') as stream:
+        require(stream.read(len(transcript)) == transcript, '目标机同一线程已有不同历史，已保留双方内容')
+    return matches[0]
+
+
 def prepare_resume(cwd, home):
     root = git(cwd, 'rev-parse', '--show-toplevel', optional=True)
     if not root:
@@ -387,8 +413,7 @@ def prepare_resume(cwd, home):
     require(sha(data) == m['sha256'] and session_info(data)[:2] == (m['thread'], m['turn']),
             '本地交接记录损坏')
     target = home / session_location(m['rollout'], m['thread'])
-    matches = find_session(home, m['thread'])
-    if not matches:
+    if matching_session(home, m['thread'], data) is None:
         target.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as stream:
             tmp = Path(stream.name)
@@ -400,11 +425,7 @@ def prepare_resume(cwd, home):
                 pass
         finally:
             tmp.unlink()
-        matches = find_session(home, m['thread'])
-    require(len(matches) == 1 and matches[0].is_relative_to(home / 'sessions'),
-            '目标机存在同 ID 的归档或多份记录，请先核对')
-    with matches[0].open('rb') as stream:
-        require(stream.read(len(data)) == data, '目标机同一线程已有不同历史，已保留双方内容')
+        require(matching_session(home, m['thread'], data) is not None, '安装后的会话未找到')
     return dict(thread=m['thread'], cwd=str(mapped))
 
 

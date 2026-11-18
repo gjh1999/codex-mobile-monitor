@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 import monitor
 from handoff import handoff_receipts
+from handoff_sync import read_state as read_handoff_sync
 from coordination_client import ControlDenied, device_client
 
 
@@ -97,6 +98,16 @@ def create_app(start_workers=True):
         if not isinstance(projects, dict):
             raise HTTPException(503, 'handoffProjects 配置应为项目与本机目录的映射')
         return {'projects': handoff_receipts(projects)}
+
+    @app.get('/api/v1/handoff-sync', dependencies=[Depends(auth)])
+    def handoff_sync():
+        try:
+            configured = monitor.config().get('handoffSync')
+            health = (monitor.snapshot().get('handoffSyncStatus') or 'awaiting_scan') if configured else 'disabled'
+            state = read_handoff_sync(monitor.ROOT) if configured else {'projects': {}}
+        except (OSError, ValueError, TypeError, AttributeError) as error:
+            raise HTTPException(503, '同步状态暂不可用') from error
+        return {**state, 'status': health}
 
     @app.get('/api/v1/project-control', dependencies=[Depends(auth)])
     def project_control():

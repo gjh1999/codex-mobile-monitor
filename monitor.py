@@ -231,8 +231,18 @@ def start_background_service(stop=None, embed_web=None):
  service_lock=ServiceLock(ROOT/'monitor.lockfile')
  worker=threading.Thread(target=poll,args=(stop,),daemon=True,name='monitor-worker')
  claude_worker=threading.Thread(target=poll_claude,args=(stop,),daemon=True,name='claude-monitor-worker')
- worker.start();claude_worker.start()
- if web_worker:web_worker.start()
+ workers=[worker,claude_worker]
+ if web_worker:workers.append(web_worker)
+ try:
+  transfer=config().get('handoffSync')
+ except (ValueError,OSError,AttributeError):
+  transfer=None
+ if transfer is not None:
+  from handoff_sync import run as run_handoff_sync
+  def report_handoff(status):update(handoffSyncStatus=status)
+  workers.append(threading.Thread(target=run_handoff_sync,args=(ROOT,transfer,stop,report_handoff),
+                                  daemon=True,name='handoff-sync'))
+ for thread in workers:thread.start()
  if os.environ.get('DINGTALK_CLIENT_ID') and os.environ.get('DINGTALK_CLIENT_SECRET'):
   from dingtalk_commands import CommandRouter,run_stream
   cfg=config()
@@ -242,4 +252,4 @@ def start_background_service(stop=None, embed_web=None):
    try:run_stream(router,os.environ['DINGTALK_CLIENT_ID'],os.environ['DINGTALK_CLIENT_SECRET'],lambda:update(streamStatus='callback_received'))
    except Exception:update(streamStatus='unavailable; credentials or SDK need local verification')
   threading.Thread(target=stream_worker,daemon=True,name='dingtalk-stream').start()
- return stop,ServiceWorkers([worker,claude_worker]+([web_worker] if web_worker else []),service_lock)
+ return stop,ServiceWorkers(workers,service_lock)

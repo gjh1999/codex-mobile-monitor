@@ -72,14 +72,13 @@ class EntryDelegate(QStyledItemDelegate):
         rect = option.rect
         selected = option.state & QStyle.StateFlag.State_Selected
         hovered = option.state & QStyle.StateFlag.State_MouseOver
-        focused = option.state & QStyle.StateFlag.State_HasFocus
         check = index.data(CHECK_STATE)
         done = check == Qt.CheckState.Checked.value
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setClipRect(rect)
-        if selected or hovered or focused:
-            painter.setPen(QPen(QColor(201, 232, 248, 145)) if focused else Qt.PenStyle.NoPen)
+        if selected or hovered:
+            painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor(200, 232, 248, 53 if selected else 23))
             painter.drawRoundedRect(QRectF(rect).adjusted(.5, 1, -.5, -1), 8, 8)
         else:

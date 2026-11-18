@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from PySide6.QtCore import QEvent, QPoint, QPointF, QTimer, Qt
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QTimer, Qt
 from PySide6.QtGui import QEnterEvent, QFontDatabase, QImage, QMouseEvent, QRawFont, QTextCursor, QTextDocument
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog, QFrame, QLabel, QMessageBox, QPushButton
@@ -138,6 +138,11 @@ def check_notebook(window, output):
             assert isinstance(panel, FrostedPanel)
             assert (panel.mapTo(window, QPoint()), panel.size()) == (position, size)
         assert workspace.heading.text() == '拾得片羽' and workspace.list.count() == 1
+        category = workspace.category_buttons['note']
+        idle_category = category.grab().toImage()
+        QTest.mouseMove(category)
+        QTest.mouseClick(category, left)
+        assert category.isChecked() and category.grab().toImage() == idle_category
         assert workspace.body.toPlainText() == '旧的随记\n\n从前写下的正文。'
         assert workspace.list.item(0).data(Qt.ItemDataRole.CheckStateRole) is None
         workspace.show_archive()
@@ -170,6 +175,11 @@ def check_notebook(window, output):
         assert [row[3] for row in store.entries('todo')] == [0, 1, 1]
         workspace.list.setCurrentRow(0)
         window.grab().save(str(output / 'todo-desktop.png'))
+        task_row = workspace.list.visualItemRect(rows[0])
+        workspace.list.setFocus()
+        focused = workspace.list.viewport().grab(task_row).toImage()
+        workspace.body.setFocus()
+        assert workspace.list.viewport().grab(task_row).toImage() == focused
         workspace.list.setCurrentItem(pending)
         QTest.keyClick(workspace.list, Qt.Key.Key_Space)
         assert pending.checkState() == Qt.CheckState.Unchecked and workspace.list.row(pending) == 1
@@ -329,10 +339,32 @@ def main():
             window.task_search.clear()
             assert not group.isExpanded()
             group.setExpanded(True)
+            tree = window.task_choice
+            viewport = tree.viewport()
+            group_rect = tree.visualItemRect(group)
+            branch_rect = QRect(0, group_rect.y(), group_rect.x(), group_rect.height())
+            QTest.mouseMove(viewport, QPoint(viewport.width() - 1, viewport.height() - 1))
+            open_branch = viewport.grab(branch_rect).toImage()
+            QTest.mouseMove(viewport, group_rect.center())
+            assert viewport.grab(branch_rect).toImage() == open_branch
+            QTest.mouseClick(viewport, Qt.MouseButton.LeftButton, pos=group_rect.center())
+            assert tree.currentItem() == group and group.isExpanded()
+            assert viewport.grab(branch_rect).toImage() == open_branch
+            window.grab().save(str(args.output / 'selected-project-group.png'))
+            QTest.mouseClick(viewport, Qt.MouseButton.LeftButton, pos=branch_rect.center())
+            assert not group.isExpanded(), 'The branch remains clickable'
+            assert viewport.grab(branch_rect).toImage() != open_branch, 'The triangle follows the expansion state'
+            QTest.mouseClick(viewport, Qt.MouseButton.LeftButton, pos=branch_rect.center())
+            assert group.isExpanded() and viewport.grab(branch_rect).toImage() == open_branch
             window.message_edit.setPlainText('单个任务的草稿')
             second_row = window.task_choice.visualItemRect(window.task_items[other]).center()
             QTest.mouseClick(window.task_choice.viewport(), Qt.MouseButton.LeftButton, pos=second_row)
             assert window.selected_thread == other and codex.calls[-1][:2] == (other, 'focus')
+            task_rect = tree.visualItemRect(window.task_items[other])
+            focused_row = viewport.grab(task_rect).toImage()
+            window.grab().save(str(args.output / 'selected-task.png'))
+            window.task_search.setFocus()
+            assert viewport.grab(task_rect).toImage() == focused_row
             assert window.message_edit.toPlainText() == ''
             window.refresh()
             assert window.task_items[other].text(0).endswith('执舟中')

@@ -18,7 +18,8 @@ from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QPainter, QPainter
 from PySide6.QtWidgets import (
     QApplication, QDialog, QFrame, QGraphicsDropShadowEffect, QGraphicsOpacityEffect,
     QHBoxLayout, QLabel, QLineEdit, QTreeWidget, QTreeWidgetItem,
-    QMainWindow, QMenu, QMessageBox, QPushButton, QSizePolicy, QStackedWidget, QStyle, QSystemTrayIcon,
+    QMainWindow, QMenu, QMessageBox, QPushButton, QSizePolicy, QStackedWidget, QStyle,
+    QStyleOptionViewItem, QSystemTrayIcon,
     QTextBrowser, QTextEdit, QVBoxLayout, QWidget,
 )
 
@@ -132,10 +133,33 @@ class VerseTitle(QLabel):
 
 class ProjectTree(QTreeWidget):
     def drawRow(self, painter, option, index):
+        option = QStyleOptionViewItem(option)
+        option.state &= ~QStyle.StateFlag.State_HasFocus
+        item_rect = self.visualRect(index)
         painter.save()
-        if index.parent().isValid():
-            painter.setClipRect(self.visualRect(index), Qt.ClipOperation.IntersectClip)
+        painter.setClipRect(item_rect, Qt.ClipOperation.IntersectClip)
         super().drawRow(painter, option, index)
+        painter.restore()
+
+        if index.parent().isValid() or not self.model().hasChildren(index):
+            return
+        # Paint the indicator outside the item's selection and hover surface.
+        direction = -1 if self.isRightToLeft() else 1
+        edge = item_rect.left() if direction == 1 else item_rect.right() + 1
+        x = edge - direction * self.indentation() / 2
+        y = item_rect.center().y() + .5
+        arrow = QPainterPath()
+        if self.isExpanded(index):
+            arrow.moveTo(x - 4, y - 2)
+            arrow.lineTo(x + 4, y - 2)
+            arrow.lineTo(x, y + 2)
+        else:
+            arrow.moveTo(x - direction * 2, y - 4)
+            arrow.lineTo(x - direction * 2, y + 4)
+            arrow.lineTo(x + direction * 2, y)
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.fillPath(arrow, QColor('#466a7e'))
         painter.restore()
 
 

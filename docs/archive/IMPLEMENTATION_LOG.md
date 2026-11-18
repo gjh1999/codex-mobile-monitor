@@ -47,6 +47,12 @@
 - `tests/smoke_desktop.py --output build-exe/verification/task-switch-desktop-smoke-02` 通过。全套 `.\.venv\Scripts\python.exe -m unittest discover -s tests -t . -p 'test_*.py' -v` 运行 147 项，146 项通过、1 项可选 Stream SDK 跳过，用时 37.993 秒，见 `build-exe/verification/task-switch-regression.txt`。
 - 运行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-exe.ps1 -AppName Lanxi-Glass-R8`，PyInstaller 完成构建约 40.89 秒。包位于 `release/Lanxi-Glass-R8.exe`，61,417,833 字节，同目录 R7 为 54,104,555 字节。归档核对包含新版桌面模块、交接后台和 Qt Windows 插件。切换测试执行的是源码窗口，新 EXE 的实机启动和操作耗时未测。
 
+## 2026-11-18 列表选中外框与展开箭头
+
+- 以 R10 的任务树和吉光片羽界面为基线。去掉任务、项目组和片羽条目的焦点外框，以及片羽分组入口的悬停和按下反馈。任务树的展开箭头独立于行底色绘制。第一次复测发现选中时底色仍延伸到箭头区，第二次复测发现原生图元在独立绘制时没有显示。最终将行背景裁到条目区域，直接绘制等尺寸三角形。
+- Windows 11 x64、Python 3.14.7、PySide6 6.12.0。使用虚构项目、任务及临时笔记库，在 `build-exe/verification/lanxi-flat-lists/r10-release` 设置 `QT_QPA_PLATFORM=windows`，运行 `python tests/smoke_desktop.py --output ../windows-r11`，约 9.43 秒通过。项目组的箭头区域在静止、悬停和选中时逐像素一致。展开与折叠可点，方向随状态变化。验证任务行、待办条目的焦点变化不改变选中外观。截图位于 `windows-r11`。
+- 在 `a096c6d` 的集成工作树以 `QT_QPA_PLATFORM=offscreen` 运行 `python -m unittest discover -s tests -t . -p 'test_*.py' -q`，173 项中 172 项通过、1 项跳过，用时 130.730 秒，日志位于 `regression.txt`。最终交付包在 R10 基线 `ff3f703` 只覆盖本次列表源码，以 PyInstaller 6.22.3 运行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-exe.ps1 -AppName Lanxi-Glass-R11`，约 37.35 秒。包为 61,433,557 字节，复制前后 SHA-256 一致，归档确认含新版桌面模块。R10 正在运行，验收使用原生源码窗口，R11 EXE 独立启动未测。
+
 ## 2026-11-18 拾得片羽与待理诸事
 
 - 以 `1bd5157` 的 R9 界面和确认过的两张概念图为基线。左栏保留两个固定入口，切换时同步更新列表和右栏组名。沿用 SQLite 表结构。新记录只写正文，编辑旧记录时在同一编辑区读回原题名和正文。待办的完成操作只更新状态，排序和时间戳保持稳定。

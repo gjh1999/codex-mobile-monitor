@@ -70,7 +70,7 @@ class ControlClient:
                 return json.load(response)
         except HTTPError as error:
             message = '项目控制权已变更或存在未确认的活动' if error.code == 409 else '协调服务拒绝设备请求'
-            raise ControlDenied(detail=message) from error
+            raise ControlDenied(code=error.code, detail=message) from error
         except (URLError, OSError, ValueError) as error:
             raise ControlDenied(detail='项目协调服务暂不可用') from error
 

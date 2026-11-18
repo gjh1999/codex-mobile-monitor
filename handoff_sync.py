@@ -131,7 +131,7 @@ def publish(exchange, project, device, key, settings, home, prior, receiver=None
     # and on the same volume for atomic publication of the final names.
     with tempfile.TemporaryDirectory(dir=exchange.parent) as scratch:
         temporary = Path(scratch) / 'sealed.zip'
-        result = capture(repo, home, project, base, thread, includes, temporary, previous_snapshot=previous)
+        result = capture(repo, home, project, base, thread, includes, temporary, previous_snapshot=previous, publish=True)
         if result is not None:
             package = local_path(objects, result['sha256'] + '.zip')
             try:
@@ -165,6 +165,11 @@ def inspect_stage(dest, project, offer, home):
     return {'status': status, 'cwd': str(cwd), 'lastStaged': {**offer_status(offer), 'cwd': str(cwd)}}
 
 
+def stage_path(staging, project, peer, offer):
+    folder = local_path(staging, project)
+    return local_path(folder, f"{peer}-{offer['revision']}-{offer['sha256'][:16]}")
+
+
 def receive(exchange, project, peer, key, settings, home, prior):
     note = {'device': peer, 'lastStaged': prior}
     root = local_path(exchange, project)
@@ -180,9 +185,8 @@ def receive(exchange, project, peer, key, settings, home, prior):
     separate(exchange, seed)
     separate(exchange, staging)
     separate(seed, staging)
-    folder = local_path(staging, project)
-    folder.mkdir(parents=True, exist_ok=True)
-    dest = local_path(folder, f"{peer}-{offer['revision']}-{offer['sha256'][:16]}")
+    dest = stage_path(staging, project, peer, offer)
+    dest.parent.mkdir(parents=True, exist_ok=True)
     details = dict(note, offer=offer_status(offer))
     if not dest.exists():
         package = local_path(root, 'objects/' + offer['sha256'] + '.zip')
@@ -212,7 +216,7 @@ def read_state(runtime):
     return state
 
 
-def sync_once(runtime, config, home, environment=None):
+def sync_once(runtime, config, home, environment=None, *, control=None, stop=None):
     runtime = runtime.resolve()
     device = identifier(config['device'])
     environment = os.environ if environment is None else environment
@@ -232,6 +236,26 @@ def sync_once(runtime, config, home, environment=None):
         except FAILURES:
             result[project] = dict(old, status='unavailable')
             continue
+        if 'receive' in settings:
+            conf = settings['receive']
+            if not isinstance(conf, dict) or not isinstance(conf.get('peers'), list):
+                row['status'] = 'unavailable'
+                row['received'] = old.get('received', [])
+            else:
+                priors = {r['device']: r.get('lastStaged') for r in old.get('received', [])}
+                for peer in sorted({p for p in conf['peers'] if isinstance(p, str)}):
+                    prior = priors.get(peer)
+                    try:
+                        identifier(peer)
+                        require(peer != device, '接收设备不能填写自己')
+                        row['received'].append(receive(exchange, project, peer, key, conf, home, prior))
+                    except FAILURES:
+                        row['received'].append({'device': peer, 'status': 'unavailable', 'lastStaged': prior})
+                if conf.get('autoApply', False) is not False:
+                    from handoff_auto import update
+
+                    row['autoApply'] = update(project, device, exchange, key, conf, row['received'], home, control,
+                                              old.get('autoApply', {}), stop)
         if 'publish' in settings:
             prior = old.get('publish', {}).get('lastPublished')
             try:
@@ -239,21 +263,6 @@ def sync_once(runtime, config, home, environment=None):
                                          settings.get('receive'))
             except FAILURES:
                 row['publish'] = {'status': 'capture_blocked', 'lastPublished': prior}
-        if 'receive' in settings:
-            conf = settings['receive']
-            if not isinstance(conf, dict) or not isinstance(conf.get('peers'), list):
-                row['status'] = 'unavailable'
-                row['received'] = old.get('received', [])
-                continue
-            priors = {r['device']: r.get('lastStaged') for r in old.get('received', [])}
-            for peer in sorted({p for p in conf['peers'] if isinstance(p, str)}):
-                prior = priors.get(peer)
-                try:
-                    identifier(peer)
-                    require(peer != device, '接收设备不能填写自己')
-                    row['received'].append(receive(exchange, project, peer, key, conf, home, prior))
-                except FAILURES:
-                    row['received'].append({'device': peer, 'status': 'unavailable', 'lastStaged': prior})
     state = {'projects': result}
     if state != previous:
         path = state_path(runtime)
@@ -266,7 +275,17 @@ def local_home():
     return Path(os.environ.get('CODEX_HOME') or Path.home() / '.codex').resolve()
 
 
-def run(runtime, configuration, stop, notify):
+def auto_control(configuration):
+    if configuration is not None:
+        from coordination_client import device_client
+
+        try:
+            return device_client({'coordination': configuration})
+        except FAILURES:
+            return None
+
+
+def run(runtime, configuration, stop, notify, coordination=None):
     try:
         delay = max(5, int(configuration.get('scanSeconds', 15)))
         lock = ServiceLock(runtime / 'handoff-sync.lockfile')
@@ -274,9 +293,10 @@ def run(runtime, configuration, stop, notify):
         notify('unavailable')
         return
     try:
+        control = auto_control(coordination)
         while not stop.is_set():
             try:
-                sync_once(runtime, configuration, local_home())
+                sync_once(runtime, configuration, local_home(), control=control, stop=stop)
                 notify('running')
             except FAILURES:
                 notify('unavailable')
@@ -292,10 +312,11 @@ def main():
     args = parser.parse_args()
     runtime = args.config.resolve().parent
     try:
-        settings = json.loads(args.config.read_text(encoding='utf-8-sig'))['handoffSync']
+        config = json.loads(args.config.read_text(encoding='utf-8-sig'))
         lock = ServiceLock(runtime / 'handoff-sync.lockfile')
         try:
-            result = sync_once(runtime, settings, args.codex_home.resolve())
+            result = sync_once(runtime, config['handoffSync'], args.codex_home.resolve(),
+                               control=auto_control(config.get('coordination')))
         finally:
             lock.close()
         print(json.dumps(result))

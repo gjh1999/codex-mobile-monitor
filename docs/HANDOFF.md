@@ -99,7 +99,7 @@ codex
 
 目标端等清单和包都到达后校验，在本机独立目录预备。已有工作区和较早的预备目录会保留。登录后可从 `GET /api/v1/handoff-sync` 查看各项目的来源、版本与本机预备路径。`ready` 表示包已还原且本机历史通过相容性检查。`advance_on_resume` 表示本机历史是较早的完整前缀，使用适配器启动时再验证原生锁并快进。`session_conflict` 表示预备成功且现有历史需核对，原记录和预备目录均保留。`awaiting_package` 表示只有清单到达。`restore_failed` 表示包或本地基线校验失败，后续扫描会重试。`version_conflict` 表示清单版本回退或同版本内容不同。
 
-在返回的预备目录中使用终端适配器续接。当前自动化覆盖封存、发布、预备和兼容历史快进，打开正确的预备目录仍由操作者决定。
+默认通过终端适配器在返回的预备目录中续接。Windows 上也可以为登记项目启用空闲时自动更新原路径。
 
 两端都要续写时，可以在同一项目条目同时配置 `publish` 和 `receive`。`publish.repo` 填本机登记仓库，`publish.thread` 填同一线程。最近完成轮次位于登记的预备区、且该目录回执与项目和线程相符时，下次自动封存会使用该预备工作区。Git 基线仍从登记仓库解析，例如其 `origin/main`。首次配对完成后，各回合之间可以复用同一份配置。
 
@@ -132,13 +132,30 @@ Windows 上可把上一步的合并结果应用到 `coordination.projects.<项�
   --prepared 'C:\LanxiStaging\vision\merged-local'
 ```
 
-命令在协调服务内取得项目的排他占用，检查原生线程写入锁，按需检出受影响文件，并把原索引和被替换的文件保存在原仓库 `.git/lanxi-switch/<切换ID>/`。原仓库的配置、其他分支和无关的未跟踪或忽略文件留在原位置。发生路径碰撞、出现本机已跟踪修改或检测到占用时，停止切换。当前支持普通文件的增删改。文件与目录互换、符号链接、连接工作树、后台自动替换和断电恢复仍待验证或实现。 [Git 按路径检出索引](https://git-scm.com/docs/git-checkout-index) · [Git 引用校验与更新](https://git-scm.com/docs/git-update-ref)
+命令在协调服务内取得项目的排他占用，检查原生线程写入锁，按需检出受影响文件，并把原索引和被替换的文件保存在原仓库 `.git/lanxi-switch/<切换ID>/`。原仓库的配置、其他分支和无关的未跟踪或忽略文件留在原位置。发生路径碰撞、出现本机已跟踪修改或检测到占用时，停止切换。当前支持普通文件的增删改。文件与目录互换、符号链接、连接工作树和断电恢复仍待验证或实现。 [Git 按路径检出索引](https://git-scm.com/docs/git-checkout-index) · [Git 引用校验与更新](https://git-scm.com/docs/git-update-ref)
 
 成功时输出版本 1 的 JSON，`status` 为 `applied`，附原路径、合并提交、线程、受影响文件数和备份目录。运行错误退出码为 2。文件被占用等中途错误会尝试自动回滚。进程中断或协调服务未确认结束时，先退出占用程序，再用以下命令继续恢复。恢复结果 `rolled_back` 表示回到切换前，`applied` 表示已完成切换且补发了结束确认，`no_pending_switch` 表示当前无等待恢复的切换。如果文件或索引在中断后又被修改，操作会保留现场供核对。切换完成前暂停封存和会话续接。切换后，下一次封存须等本机原生记录包含接收的完整历史。
 
 ```powershell
 .\.venv\Scripts\python.exe handoff_apply.py --project vision --recover
 ```
+
+## 空闲时自动应用到原路径
+
+默认关闭。确认所用 IDE、终端和会写工作区的后台都接入同一协调服务后，在 Windows 目标端的 `handoffSync.projects.<项目>.receive` 中增加 `autoApply`。协调配置使用与 `handoffSync.device` 相同的设备标识，项目路径登记为原工作区，`threads` 列出对应原生线程。`peer` 选择 `peers` 内一个受信接收端，`thread` 填实际 UUID，`branch` 使用本机分支短名。配对项目继续使用各自的交接密钥。 [跨设备项目控制](PROJECT_CONTROL.md)
+
+```json
+{
+  "seed": "C:\\Code\\Vision",
+  "staging": "C:\\LanxiStaging",
+  "peers": ["office"],
+  "autoApply": {"peer": "office", "thread": "替换为登记的线程 UUID", "branch": "main"}
+}
+```
+
+同步后台先预备快照，再检查项目占用和本机分支。已跟踪文件和暂存区干净时，会复验签名、暂存区和已封存的文件内容，按需合并并沿用原路径切换的占用与回滚流程。提交前再次核对来源版本和本机会话，已有较新会话或分叉时保留双方。应用完成后，下一次自动发布等待本机完成一个新轮次。重复收到已应用的快照时复用本机回执，跳过合并、切换和协调查询。
+
+`GET /api/v1/handoff-sync` 的项目条目含 `autoApply.status` 和 `lastApplied`。`applied` 表示已应用，`occupied`、`local_changes`、`branch_mismatch` 和 `local_session_ahead` 表示等待条件满足。`staging_changed` 表示预备目录的内容和签名包不符，`blocked` 表示应用校验或执行失败，同版本 60 秒后重试。已确认的合并冲突在本机 HEAD 或来源版本改变后重新计算。`recovery_required` 表示切换日志还在，按原路径说明运行 `--recover` 后再恢复自动更新。`already_seen` 表示扫描状态记录了旧应用，但当前工作区回执不同，保留原工作区供核对。移除 `autoApply` 或设为 `false` 后继续常规预备。
 
 ## 前端查询
 
@@ -160,8 +177,10 @@ Windows 上可把上一步的合并结果应用到 `coordination.projects.<项�
 .\.venv\Scripts\python.exe tests/smoke_handoff.py --sync --roundtrip --merge --output build-exe/verification/handoff-merge-native-repeat
 .\.venv\Scripts\python.exe tests/smoke_handoff.py --sync --roundtrip --merge --diverged --output build-exe/verification/handoff-diverged-native-repeat
 .\.venv\Scripts\python.exe tests/smoke_handoff.py --sync --roundtrip --merge --diverged --apply --stock-files 768 --output build-exe/verification/handoff-apply-repeat
+.\.venv\Scripts\python.exe tests/smoke_handoff.py --sync --roundtrip --merge --diverged --apply --automatic --stock-files 768 --output build-exe/verification/handoff-auto-repeat
 .\.venv\Scripts\python.exe -m unittest -v tests.test_handoff_merge
 .\.venv\Scripts\python.exe -m unittest -v tests.test_handoff_apply tests.test_coordination
+.\.venv\Scripts\python.exe -m unittest -v tests.test_handoff_auto tests.test_handoff
 .\.venv\Scripts\python.exe tests/bench_handoff_merge.py --output build-exe/verification/handoff-merge-repeat
 .\.venv\Scripts\python.exe tests/bench_handoff_merge.py --diverged --output build-exe/verification/handoff-diverged-repeat
 ```

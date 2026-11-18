@@ -234,13 +234,14 @@ def start_background_service(stop=None, embed_web=None):
  workers=[worker,claude_worker]
  if web_worker:workers.append(web_worker)
  try:
-  transfer=config().get('handoffSync')
+  settings=config()
+  transfer=settings.get('handoffSync')
  except (ValueError,OSError,AttributeError):
   transfer=None
  if transfer is not None:
   from handoff_sync import run as run_handoff_sync
   def report_handoff(status):update(handoffSyncStatus=status)
-  workers.append(threading.Thread(target=run_handoff_sync,args=(ROOT,transfer,stop,report_handoff),
+  workers.append(threading.Thread(target=run_handoff_sync,args=(ROOT,transfer,stop,report_handoff,settings.get('coordination')),
                                   daemon=True,name='handoff-sync'))
  for thread in workers:thread.start()
  if os.environ.get('DINGTALK_CLIENT_ID') and os.environ.get('DINGTALK_CLIENT_SECRET'):

@@ -11,7 +11,7 @@ from pathlib import Path
 from coordination_client import ControlDenied, device_client
 from handoff import (GIT_ID, MAX_FILE, HandoffError, checked_index, file_hash, git, limited, local_path,
                      names, native_publication_lock, require, session_info, session_progress, sha)
-from handoff_merge import check_checkout_paths, object_store, separate, worktree_root
+from handoff_merge import WorkspaceDirty, check_checkout_paths, object_store, separate, worktree_root
 from handoff_sync import absolute, atomic_write, encode, identifier, local_home
 from service_lock import ServiceLock
 
@@ -67,8 +67,8 @@ def checkout_settings(root):
 def clean(root):
     head, branch, _ = checked_index(root)
     require(branch, '请先切换到本机 Git 分支')
-    require(not git(root, *checkout_settings(root), 'status', '--porcelain=v1', '-z', '--untracked-files=no', isolated=True),
-            '原工作区存在已暂存或未暂存的本机修改')
+    if git(root, *checkout_settings(root), 'status', '--porcelain=v1', '-z', '--untracked-files=no', isolated=True):
+        raise WorkspaceDirty('原工作区存在已暂存或未暂存的本机修改')
     return head, 'refs/heads/' + branch
 
 
@@ -94,7 +94,7 @@ def import_objects(root, gitdir, source_git):
         git(root, 'index-pack', '--stdin', stream=stream, isolated=True)
 
 
-def prepare(root, gitdir, prepared, tx, project, home, before, ref):
+def prepare(root, gitdir, prepared, tx, project, home, before, ref, automatic=None):
     source_git = primary_repo(prepared)
     require(entry(source_git / 'lanxi') and (source_git / 'lanxi').is_dir(), '缺少交接回执目录')
     require(entry(source_git / 'lanxi/handoff.json') and entry(source_git / 'lanxi/session.jsonl'), '缺少交接回执')
@@ -112,6 +112,10 @@ def prepare(root, gitdir, prepared, tx, project, home, before, ref):
     require((thread, turn, sha(transcript)) == (marker['thread'], marker['turn'], marker['sha256']), '会话回执校验失败')
     home.mkdir(parents=True, exist_ok=True)
     session_progress(home, thread, transcript)
+    if automatic:
+        require((marker['package_sha256'], thread, turn) == (automatic['sha256'], automatic['thread'], automatic['turn'])
+                and ref == 'refs/heads/' + automatic['branch'], '自动切换来源或本机分支已变化')
+        marker['automatic'] = automatic
 
     old_tree = before + '^{tree}'
     work_changes = delta(prepared, old_tree, working)
@@ -236,7 +240,7 @@ def undo(root, gitdir, tx, plan):
         lock.unlink()
 
 
-def switch(client, project, prepared, home):
+def switch(client, project, prepared, home, *, automatic=None, revalidate=None):
     require(os.name == 'nt', '原路径切换当前支持 Windows')
     root = next(path for path, name in client.paths.items() if name == project)
     require(prepared is None or separate(prepared, root), '预备目录必须独立于原工作区')
@@ -295,11 +299,16 @@ def switch(client, project, prepared, home):
             client.event(project, session, 'switch', 1, 'open')
             before, ref = clean(root)
             tx.mkdir()
-            plan = prepare(root, gitdir, prepared, tx, project, home, before, ref)
+            plan = prepare(root, gitdir, prepared, tx, project, home, before, ref, automatic)
             data = encode(plan)
             require(len(data) <= MAX_FILE, '原工作区切换日志超过上限')
             atomic_write(plan_file, data)
             with native_publication_lock(home, plan['thread']):
+                if automatic:
+                    transcript = limited(tx / 'stage/.git/lanxi/session.jsonl')
+                    require(session_progress(home, plan['thread'], transcript, distinguish_ahead=True)[0] != 'ahead',
+                            '本机会话在自动切换期间取得了新进展')
+                    revalidate()
                 index_lock = gitdir / 'index.lock'
                 require(not entry(index_lock), '原工作区索引正在使用')
                 save('applying')

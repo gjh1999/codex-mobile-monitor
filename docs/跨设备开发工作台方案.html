@@ -288,10 +288,17 @@ figcaption { color: var(--ink); font-weight: 650; margin-bottom: 15px; }
   <p>不同设备打开的是同一个个人工作空间。工作台默认回到最近的项目、任务或会话，并用相同的名称、信息层级和状态表达，帮助用户接上上次的工作。</p>
   <ul>
     <li><strong>让当前工作先被看见。</strong> 首页优先呈现可以继续的工作和需要用户处理的事项。设备、同步、存储和算力细节收进对应页面。只有它们影响当前操作时，才在当前界面说明原因。</li>
-    <li><strong>让潮汐体现在阅读和交互节奏上。</strong> 采用有留白的排版、柔和的明暗过渡和克制的交互反馈。颜色、圆角和动效由内容和交互状态决定。浅色与深色界面都要保持清晰。</li>
     <li><strong>桌面和手机保持一致的操作语义。</strong> 桌面并排展示列表和详情，iPhone 逐层进入。审批面板保留执行设备、工作目录和实际命令。交互验收覆盖键盘焦点、触控热区、减弱动态效果和 iPhone 安全区。</li>
   </ul>
-  <p class="refs">设计依据来自《澜汐｜前端设计主导思想》。封面采用 Apple OS X Mavericks 海浪壁纸，交互参考 Emil Kowalski 的网页动效设计。 <a href="https://512pixels.net/projects/default-mac-wallpapers-in-5k/#109-mavericks">壁纸档案</a><a href="https://github.com/emilkowalski/skills/blob/main/skills/apple-design/SKILL.md">Emil Kowalski 的 Apple Design</a><a href="https://github.com/0xKoru/apple-hig-codex-skills/blob/main/skills/implement-apple-web-ui/SKILL.md">Apple Web UI 实现参考</a></p>
+  <h3>界面用词</h3>
+  <p>用简短、自然、有一点诗意的中文。首页标题可用「一处开始，处处继续。」日报页保留「每日工作报告」作导航名，页内可用「今天，写到了这里。」引出总结。空状态可写「今天还没有留下记录。」</p>
+  <p>按钮、状态、权限和错误提示直接说明动作与结果。文件尚未同步时，可写「家里台式机暂未连接，改动已保存在本机。」审批按钮用「允许一次」和「拒绝」，并展示命令、目录与设备。</p>
+  <h3>视觉与动效</h3>
+  <ul>
+    <li><strong>界面视觉参考 <code>implement-apple-web-ui</code>。</strong> 使用系统字体、清楚的文字层级、连续的留白、柔和的海蓝过渡和浅深两套语义色。半透明材质主要用于导航与工具栏，正文与操作状态保持清晰对比。</li>
+    <li><strong>交互动效参考 Emil Kowalski 的 <code>apple-design</code>。</strong> 按下控件立即反馈，支持手势的面板跟随手指，展开或收起途中可以反向操作。动效用于说明位置、状态或操作结果，并响应系统的减弱动态效果设置。</li>
+  </ul>
+  <p class="refs">设计依据来自《澜汐｜前端设计主导思想》。封面采用 Apple OS X Mavericks 海浪壁纸。 <a href="https://512pixels.net/projects/default-mac-wallpapers-in-5k/#109-mavericks">壁纸档案</a><a href="https://github.com/0xKoru/apple-hig-codex-skills/blob/main/skills/implement-apple-web-ui/SKILL.md">Apple Web UI 实现参考</a><a href="https://github.com/emilkowalski/skills/blob/main/skills/apple-design/SKILL.md">Emil Kowalski 的 Apple Design</a></p>
 </section>
 
 <section id="baseline"><h2>现有基础</h2><p>现有项目已经能在 Windows 上查看和控制本机任务。以下模块是本次开发的起点。</p>
@@ -404,7 +411,7 @@ figcaption { color: var(--ink); font-weight: 650; margin-bottom: 15px; }
 <tr><th>四 · 硬件自动调度</th><td>公司机发起 GPU 作业，核对家庭设备执行、终端结果与文件校验。笔记本测试本地资源充足、显存不足、家里忙碌和中途掉线。比较本地运行与远程端到端耗时，检查同一作业只交付一次。</td></tr>
 <tr><th>五 · 分类、额度与夜间</th><td>验证三类任务的结束条件、额度去重、超额暂停和到点重查。夜间沙箱内构建通过，越界操作留待审批，用户半夜打开 IDE 后自动审批立即停发，次日可核对全部动作。</td></tr>
 <tr><th>六 · 日报与项目记忆</th><td>用公司台式机、私人笔记本和家里台式机产生至少两个项目的记录，验证 token 去重、人工与后台时长、补传更新、iPhone 查看及项目间档案隔离。逐条核对日报结论和原始会话或实验记录。</td></tr>
-<tr><th>七 · 存储与发布</th><td>验证容量阈值、冷迁移、双副本和唯一来源离线。统一安装器复用已有工具，支持客户端或家庭中心角色、登录启动、升级与回滚。用原有 Python 回归、Qt smoke 和 Web 测试覆盖已有功能。</td></tr>
+<tr><th>七 · 存储与发布</th><td>验证容量阈值、冷迁移、双副本和唯一来源离线。统一安装器复用已有工具，支持客户端或家庭中心角色、登录启动、升级与回滚。用原有 Python 回归、Qt smoke 和 Web 测试覆盖已有功能。按前端设计章节检查首页、日报、审批和异常提示的用词，并在桌面和 iPhone 验证交互反馈及减弱动态效果。</td></tr>
 </tbody></table></div><p><strong>首轮联调要记录的现场数据</strong>包括三机实际 CLI 和终端版本、家庭 GPU 与网络带宽、典型大文件体积、公司机可同步项目、VPN 路由、常用 GPU 命令和睡眠时段。用这些数据确定兼容矩阵、性能预算及排期。</p>
 <p class="refs">需求来源　《跨设备代码与 Codex 记忆同步软件需求文档》及会话补充的设备、IDE、CLI、iPhone、VPN、GPU、人工优先、夜间沙箱、每日工作报告、项目归档与扩展接口要求。</p></section>
       <p class="end"><a href="#top">返回文档顶部 ↑</a></p>

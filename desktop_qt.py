@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 import monitor
 from desktop_glass import ClientSwitch, FrostedPanel, OceanBackdrop, motion_enabled
 from desktop_notebook import NotebookStore, NotebookWorkspace
+from desktop_poetry import COVER_VERSES
 from desktop_projects import SessionTitles, folder_name, project_group
 from desktop_theme import STYLESHEET, configure_text, format_reading_document, message_html, ui_font, warning_html
 
@@ -312,16 +313,19 @@ class MainWindow(QMainWindow):
         heading.setSpacing(16)
         title = QVBoxLayout()
         title.setSpacing(0)
-        verse = VerseTitle('潮平两岸阔，风正一帆悬。')
+        verse = self.hero_verse = VerseTitle()
+        self.verse_hour = None
         verse.setObjectName('heroVerse')
+        verse.setTextFormat(Qt.TextFormat.PlainText)
         verse_font = QFont('SimSun', 42, QFont.Weight.Bold)
         verse_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, -1.3)
         verse.setFont(verse_font)
         verse.setWordWrap(False)
         title.addWidget(verse)
         title.addSpacing(2)
-        source = label('唐 · 王湾《次北固山下》', 10, color='#d1e8f5')
+        source = self.hero_source = label('', 10, color='#d1e8f5')
         source.setObjectName('heroSource')
+        source.setWordWrap(False)
         title.addWidget(source)
         title.addSpacing(10)
         intro = label(
@@ -769,7 +773,16 @@ class MainWindow(QMainWindow):
         self.control_message.setText('已切换到 ' + ('Claude Code' if client == 'claude' else 'Codex'))
         self.refresh()
 
+    def refresh_verse(self):
+        hour = int(time.time() // 3600)
+        if hour != self.verse_hour:
+            verse, author, title = COVER_VERSES[hour % len(COVER_VERSES)]
+            self.hero_verse.setText(verse)
+            self.hero_source.setText(f'唐 · {author}《{title}》')
+            self.verse_hour = hour
+
     def refresh(self):
+        self.refresh_verse()
         snap = monitor.client_snapshot(monitor.snapshot(), self.client)
         self._last_snapshot = snap
         if self.client == 'codex':

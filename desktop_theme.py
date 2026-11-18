@@ -149,8 +149,10 @@ QPushButton:focus { border-color:#7399db; }
 QPushButton#hoverAction { background:rgba(225, 247, 255, 154); color:#153b53; border-color:rgba(226, 245, 255, 138); padding:5px 8px; }
 QPushButton#hoverAction:hover, QPushButton#hoverAction:focus { background:#d4efff; border-color:#70a8cc; }
 QPushButton#hoverAction:pressed { background:#acd8f1; }
-QWidget#notebook QPushButton#hoverAction:checked { background:rgba(212, 238, 255, 165); border-color:rgba(219, 247, 255, 220); color:#113951; }
-QWidget#notebook QPushButton#hoverAction:checked:focus { border-color:#70a8cc; }
+QWidget#notebook QPushButton#hoverAction[checkable="true"] { background:rgba(225, 247, 255, 51); border-color:transparent; }
+QWidget#notebook QPushButton#hoverAction:checked { background:rgba(212, 238, 255, 196); border-color:rgba(219, 247, 255, 220); color:#113951; }
+QWidget#notebook QPushButton#hoverAction[checkable="true"]:unchecked:hover { background:rgba(226, 246, 255, 100); }
+QWidget#notebook QPushButton#hoverAction[checkable="true"]:focus { border-color:#70a8cc; }
 QPushButton#send, QPushButton#approvalAllow { background:#096cb9; color:white; border-color:#096cb9; }
 QPushButton#send { padding:0; border-radius:17px; font-size:18px; }
 QPushButton#send:hover, QPushButton#approvalAllow:hover { background:#055eaa; border-color:#055eaa; }

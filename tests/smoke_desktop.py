@@ -18,6 +18,7 @@ import monitor
 from automation import Approvals
 from desktop_glass import FrostedPanel, OceanBackdrop
 from desktop_notebook import NotebookStore
+from desktop_poetry import COVER_VERSES
 from desktop_qt import MainWindow
 from desktop_theme import configure_text, message_html, set_reading_html, ui_font
 
@@ -145,6 +146,7 @@ def check_notebook(window, output):
         todo.title.setText('整理项目待办')
         todo.body.setPlainText('归拢同一个项目的对话，留一份下次打开时的进度。')
         QTest.mouseClick(todo.save_button, Qt.MouseButton.LeftButton)
+        QApplication.processEvents()
         window.grab().save(str(output / 'todo-desktop.png'))
         QTest.mouseClick(todo.file_button, Qt.MouseButton.LeftButton)
         assert not store.entries('todo', False) and store.entries('todo', True)
@@ -156,10 +158,13 @@ def check_notebook(window, output):
         todo.title.setText('关闭窗口时保存')
         QTest.mouseClick(todo.category_buttons['note'], Qt.MouseButton.LeftButton)
         assert note.isVisible() and note.category_buttons['note'].isChecked()
+        assert {row[1] for row in store.entries('todo', False)} == {'整理项目待办', '关闭窗口时保存'}
+        note.new_entry()
+        note.title.setText('离开工作区时保存')
         QTest.mouseClick(switch.buttons[previous_client], Qt.MouseButton.LeftButton)
         assert not workspace.isVisible() and window.task_workspace.isVisible()
         assert window.selected_thread == previous_task and window.message_edit.toPlainText() == original_draft
-        assert {row[1] for row in store.entries('todo', False)} == {'整理项目待办', '关闭窗口时保存'}
+        assert {row[1] for row in store.entries('note', False)} == {'海边的随记', '离开工作区时保存'}
 
 
 def main():
@@ -201,7 +206,15 @@ def main():
             formatted.setHtml(intro.text())
             assert verse.font().bold() and verse.font().pointSize() == 42
             assert [verse.y(), source.y(), intro.y()] == sorted([verse.y(), source.y(), intro.y()])
-            assert source.text() == '唐 · 王湾《次北固山下》'
+            with patch('desktop_qt.time', wraps=time) as clock:
+                for index, (line, author, title) in enumerate((*COVER_VERSES, COVER_VERSES[0])):
+                    clock.time.return_value = index * 3600
+                    window.refresh()
+                    assert (verse.text(), source.text()) == (line, f'唐 · {author}《{title}》')
+                    assert verse.width() >= verse.fontMetrics().horizontalAdvance(line)
+                clock.time.return_value += 3599
+                window.refresh()
+                assert verse.text() == COVER_VERSES[0][0]
             assert ' '.join(formatted.toPlainText().split()) == (
                 '一处开始，处处继续。 白日写到的那一行，暮归时仍等着你。 '
                 '终端续上未尽的话，掌中一瞥，便知今日行至何处。'

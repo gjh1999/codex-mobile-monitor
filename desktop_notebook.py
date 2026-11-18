@@ -53,10 +53,10 @@ class NotebookStore:
             )
 
 
-def record_button(text, size=9):
+def record_button(text, size=9, strong=False):
     button = QPushButton(text)
     button.setObjectName('hoverAction')
-    button.setFont(ui_font(size))
+    button.setFont(ui_font(size, strong))
     button.setCursor(Qt.CursorShape.PointingHandCursor)
     return button
 
@@ -90,7 +90,7 @@ class NotebookPage(QWidget):
         category_group = QButtonGroup(self)
         self.category_buttons = {}
         for key, text in (('note', '随记'), ('todo', '待办')):
-            button = record_button(text, 12)
+            button = record_button(text, 12, kind == key)
             button.setCheckable(True)
             button.setFixedHeight(34)
             category_group.addButton(button)
@@ -129,11 +129,11 @@ class NotebookPage(QWidget):
         self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.list.viewport().setAutoFillBackground(False)
         self.list.currentItemChanged.connect(self.select_entry)
-        navigation.addWidget(self.list, 1)
         self.empty = QLabel()
         self.empty.setFont(ui_font(9))
         self.empty.setStyleSheet('color:#24495f;')
         navigation.addWidget(self.empty)
+        navigation.addWidget(self.list, 1)
         shell.addWidget(self.list_panel)
 
         self.editor_panel = FrostedPanel(backdrop)

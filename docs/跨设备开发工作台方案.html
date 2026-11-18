@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>跨设备开发工作台 · 任务小站开发方案</title>
+<style>
+*{box-sizing:border-box}html{scroll-padding-top:20px}body{margin:0;background:#f6f7f4;color:#202e39;font:16px/1.72 "Segoe UI","Microsoft YaHei","PingFang SC",sans-serif}a{color:#116454;text-underline-offset:3px}a:focus-visible,button:focus-visible{outline:3px solid #c07919;outline-offset:3px}.frame{max-width:1500px;margin:auto;display:grid;grid-template-columns:230px minmax(0,1fr)}aside{position:sticky;top:0;height:100vh;overflow:auto;padding:38px 19px;border-right:1px solid #d5ddd7;background:#edf1ec}.brand{display:flex;gap:10px;align-items:center;font-size:22px;font-weight:750;color:#183c37}.mark{width:29px;height:29px;border-radius:8px;background:linear-gradient(135deg,#214f48 0 46%,#a9dbb5 46% 58%,#214f48 58%);display:inline-block}.date{font:13px/1.5 Consolas,monospace;color:#596861;margin:12px 0 28px}.nav{display:grid;gap:2px}.nav a{padding:6px 11px;color:#3d514b;text-decoration:none;border-left:3px solid transparent;border-radius:0 6px 6px 0}.nav a:hover,.nav a[aria-current]{background:#dce9df;border-color:#2e715a;color:#173d32}.print{font:inherit;font-size:14px;border:1px solid #9caea2;background:transparent;padding:6px 14px;border-radius:6px;margin-top:24px;color:#29473b;cursor:pointer}main{min-width:0;width:100%;max-width:1120px;padding:40px clamp(20px,4vw,70px) 70px}.hero{padding:clamp(26px,4vw,54px);border-radius:20px;background:#153c36;color:#f2f7ef}.hero .meta{color:#b2d4c3;font-size:14px;letter-spacing:.07em}.hero h1{font-size:clamp(32px,4.2vw,59px);line-height:1.15;letter-spacing:-.035em;margin:14px 0 18px}.hero p{color:#deece0;max-width:48em;margin:0}.hero footer{margin-top:24px;padding-top:14px;border-top:1px solid #48695d;color:#c9dfcc;font-size:14px}section{padding:30px 0 10px;scroll-margin-top:8px}section+section{margin-top:17px;border-top:1px solid #ccd6d0}h2{font-size:clamp(25px,3vw,34px);line-height:1.26;letter-spacing:-.035em;margin:0 0 18px}h3{font-size:18px;line-height:1.45;margin:18px 0 6px}p{margin:8px 0 14px}ul,ol{padding-left:1.4em;margin:8px 0 14px}li+li{margin-top:5px}code{font: .91em/1.5 Consolas,monospace;background:#e5ece6;border-radius:4px;padding:1px 4px;overflow-wrap:anywhere}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.card,figure{padding:17px 20px;border:1px solid #d1dcd3;background:#fff;border-radius:12px}.card h3{margin-top:0;color:#205741}.card p:last-child{margin-bottom:0}.note{border-left:4px solid #b78238;background:#f6efdf;padding:12px 16px;border-radius:0 7px 7px 0;margin:18px 0}.tbl{border:1px solid #d0d9d1;background:white;border-radius:10px;overflow:hidden;margin:14px 0}table{border-collapse:collapse;width:100%;font-size:15px;line-height:1.6}th,td{text-align:left;vertical-align:top;padding:11px 14px;overflow-wrap:anywhere}thead{background:#e4ece5;color:#244535}tbody tr+tr{border-top:1px solid #dce4de}tbody th{color:#265641;width:23%}figure{margin:12px 0;background:#edf3ed}figcaption{color:#364d41;font-weight:650;margin-bottom:14px}.topology{display:grid;grid-template-columns:1fr 74px 1.22fr 74px 1fr;align-items:center}.node{background:#fff;border:1px solid #b4c6ba;border-radius:10px;padding:12px;font-size:14px;line-height:1.55}.node b{display:block;color:#18513f;font-size:16px;margin-bottom:4px}.node.core{background:#235344;color:white;border-color:#235344}.node.core b{color:white}.wire{text-align:center;font-size:12px;color:#456453}.wire strong{font-size:23px;line-height:1.1;display:block}.refs{font-size:14px;color:#4b5e53}.refs a{margin-right:.6em}.steps{padding-left:1.55em}.steps li{padding:2px 0 5px}.steps li::marker{font-weight:bold;color:#276447}.end{margin-top:34px;font-size:14px}.skip{position:absolute;left:-9999px}.skip:focus{left:10px;top:5px;background:white;z-index:6}
+@media(max-width:950px){.frame{grid-template-columns:190px minmax(0,1fr)}main{padding:25px 22px}.topology{grid-template-columns:1fr 40px 1.15fr 40px 1fr}.wire span{display:none}}
+@media(max-width:760px){html{scroll-padding-top:8px}.frame{display:block}aside{position:static;height:auto;padding:14px 16px;border-right:0;border-bottom:1px solid #cbd6cc}.brand{font-size:18px}.mark{width:22px;height:22px}.date{display:none}.nav{display:flex;overflow-x:auto;white-space:nowrap;margin-top:10px;gap:3px;padding-bottom:6px}.nav a{font-size:14px;border-left:0;border-bottom:2px solid transparent;padding:4px 8px}.print{display:none}main{padding:17px 15px 40px}.grid{grid-template-columns:1fr}.hero{border-radius:12px}.hero footer{font-size:13px}section{padding-top:22px}th,td{padding:8px;font-size:14px}.topology{grid-template-columns:1fr}.wire strong{transform:rotate(90deg);margin:4px}.wire span{display:none}.node{text-align:center}.refs a{display:inline-block}.tbl{border-radius:7px}}
+@media print{@page{margin:15mm}body{background:white;font-size:10.5pt}.frame{display:block}aside,.skip,.end{display:none}main{padding:0;max-width:none}.hero{color:#182e23;background:white;padding:0 0 14px;border-bottom:2pt solid #365e47;border-radius:0}.hero h1{font-size:28pt}.hero p,.hero .meta,.hero footer{color:#304839}.hero footer{margin-top:8px}section{padding-top:12px}h2,h3,figcaption{break-after:avoid}h2{font-size:18pt}section+section{margin-top:12px}.tbl{overflow:visible}tr,.card,.note,figure{break-inside:avoid}.grid{display:block}.card{margin:6px 0}.topology{grid-template-columns:1fr 42px 1.2fr 42px 1fr}.wire strong{transform:none}.node.core,.node.core b{color:#183a29;background:white}th,td{font-size:10pt;padding:5px 8px}a{color:inherit}}
+</style>
+</head>
+<body id="top"><a class="skip" href="#overview">跳到正文</a>
+<div class="frame"><aside><div class="brand"><i class="mark" aria-hidden="true"></i>任务小站</div><p class="date">开发方案 / 2026.11.18</p>
+<nav class="nav" aria-label="文档目录"><a href="#overview">项目要求</a><a href="#baseline">现有基础</a><a href="#architecture">总体架构</a><a href="#stack">技术选型</a><a href="#environment">开发与运行环境</a><a href="#handoff">无感换机</a><a href="#ownership">人工优先与夜间审批</a><a href="#compute">硬件调度</a><a href="#usage">任务类型与用量</a><a href="#delivery">开发计划与验收</a></nav>
+<button class="print" type="button" onclick="window.print()">打印 / 存为 PDF</button></aside>
+<main><header class="hero"><div class="meta">mobile-monitor ／ 产品与工程设计</div><h1>跨设备开发工作台</h1><p>在公司用 VS Code 写到一半，回家打开 PyCharm，在终端输入平时的 <strong>codex</strong>，接着同一个项目和同一段对话工作。需要本地算力的步骤交给家里电脑，iPhone 随时查看进度。</p><footer>方案日期 2026 年 11 月 18 日　·　基线提交 d42de0c　·　状态：待实施与真机验收</footer></header>
+
+<section id="overview"><h2>项目要求</h2><p>三台 Windows 电脑使用同一套任务小站。一次安装、配对并登记项目后，后台负责交接。日常开发路径仍是打开 IDE、编辑、运行命令，用户无需另开工作台或点击同步。</p>
+<div class="grid"><article class="card"><h3>代码和会话一起到达</h3><p>三端保留代码副本。已保存到磁盘的未提交修改、暂存状态、允许同步的新文件和最近可恢复的 Codex 轮次必须相互对应；绝对路径按设备映射。</p></article>
+<article class="card"><h3>人拥有最高优先级</h3><p>任一设备用 VS Code 或 PyCharm 打开项目，任务小站释放该项目的自动控制。最后一个 IDE 关闭、人工 CLI 释放后，后台按原策略接回。</p></article>
+<article class="card"><h3>算力和大文件按需使用</h3><p>普通开发就近执行，GPU 任务或受本机性能限制的可迁移步骤自动调度到家里。大对象默认一份持久主副本，工作缓存按需生成，重要数据另存冷备。</p></article>
+<article class="card"><h3>夜间可独立推进</h3><p>项目按长期、短期或探索性管理。夜间在项目沙箱和预算内自动处理符合规则的操作审批，iPhone 可暂停、看结果和处理例外。</p></article></div></section>
+
+<section id="baseline"><h2>现有基础</h2><p>现有项目已经能在 Windows 上查看和控制本机任务。以下模块是本次开发的起点。</p>
+<div class="tbl"><table><thead><tr><th>已有模块</th><th>仓库现状及扩展位置</th></tr></thead><tbody>
+<tr><th>桌面与后台</th><td><code>desktop_app.py</code> 启动 Qt 工作台和托盘，<code>monitor.py</code> 管理 Codex、Claude 两套 worker。现有登录启动脚本和单实例锁可以复用。</td></tr>
+<tr><th>任务控制</th><td><code>task_control.py</code> 区分观察与控制，<code>universal_rpc.py</code> 连接 Codex app-server。现有恢复调用可作为适配入口，外部终端 CLI 的跨机恢复仍需单独验证。</td></tr>
+<tr><th>额度与审批</th><td><code>automation.py</code>、<code>quota_recovery.py</code>、<code>daemon_support.py</code> 已处理本机自动推进、额度等待和限定命令审批。扩展项目级预算、夜间规则和跨设备执行权。</td></tr>
+<tr><th>手机与 Web</th><td><code>web_server.py</code> 和 <code>web/</code> 提供 FastAPI、React 工作台和手机布局。目前桌面与 Web 分别启动后台，同一运行目录要求互斥；整合时改为共用一个后台。</td></tr>
+</tbody></table></div>
+<p>2026-11-17 的项目记录显示，Python 回归运行 118 项、跳过 1 项、失败 0 项。Edge 模拟桌面和手机视口通过两项浏览器检查。三机换机、iPhone Safari 真机、GPU 调度和夜间策略均属于新增验收。</p>
+<p class="refs">仓库依据　<a href="ARCHITECTURE.md">架构说明</a><a href="WEB.md">Web 工作台</a><a href="WEB_VALIDATION.md">历史验证记录</a><a href="RUNBOOK.md">运行手册</a></p></section>
+
+<section id="architecture"><h2>总体架构</h2><figure><figcaption>设备拓扑与职责</figcaption><div class="topology"><div class="node"><b>公司机 · 笔记本</b>本地代码与 CLI<br>设备代理、同步与探测</div><div class="wire"><strong>↔</strong><span>私网</span></div><div class="node core"><b>家里电脑</b>本地开发客户端<br>协调服务、LFS、计算 worker</div><div class="wire"><strong>↔</strong><span>HTTPS</span></div><div class="node"><b>iPhone · Safari</b>任务状态、额度、审批<br>查看结果与暂停</div></div></figure>
+<p>三台电脑分别连接项目原有的 Git 远程。家里节点保存已确认的交接版本，并协调写入权。桌面、CLI 和手机都以同一个项目标识关联任务，磁盘盘符只保存在各设备的映射里。</p>
+<div class="tbl"><table><thead><tr><th>层次</th><th>接口与持久状态</th></tr></thead><tbody>
+<tr><th>用户入口</th><td>PyCharm / VS Code 终端运行 Codex CLI。Qt 托盘与 Web 调用同一后台；iPhone 通过经鉴权的 HTTPS 入口查看项目或发起已有控制操作。</td></tr>
+<tr><th>本机设备代理</th><td>复用现有 worker 生命周期，采集文件变更、IDE 实例、CLI 活动和资源能力。本机 SQLite 持久化发送队列、最近确认版本与未完成作业，重启后对账。</td></tr>
+<tr><th>中心协调服务</th><td>在家里运行 FastAPI 和独立的 SQLite。保存项目、设备、快照清单、项目控制权、会话写入租约、作业编号和额度记录。设备凭证和浏览器登录分别鉴权。</td></tr>
+<tr><th>数据与计算</th><td>Git 管代码版本，Syncthing 搬运已封存的交接材料，Gitea LFS 存大对象。家庭 worker 按项目环境和输入版本运行作业，回传日志、退出码和输出对象。</td></tr>
+</tbody></table></div><p>协调服务用递增的控制权版本拒绝已过期设备的写入，提交同一作业编号只产生一次执行。操作结果未知时先向执行节点核对。旧设备重新上线后，先保存它的独立变更，再决定能否合并。</p></section>
+
+<section id="stack"><h2>技术选型</h2>
+<div class="tbl"><table><thead><tr><th>采用或评估</th><th>用途与集成决定</th></tr></thead><tbody>
+<tr><th>Python / SQLite</th><td>沿用现有任务控制、日志和调度代码。项目协调状态单独建库，各端通过 API 交换记录，数据库文件由本机进程管理。</td></tr>
+<tr><th>PySide6 / FastAPI / React</th><td>沿用桌面、托盘和手机页面。在统一后台上追加设备、同步、任务预算和远程作业状态，已有审批仍走原连接。</td></tr>
+<tr><th>Git / Syncthing</th><td>复用 Git 对象、索引表达和现有远程。由 Syncthing 传输独立暂存区中的不可变快照，接收端按清单逐件校验。活动工作树、凭证和运行中的状态库留在本机。 <a href="https://docs.syncthing.net/users/foldertypes">Syncthing 文件夹模式</a></td></tr>
+<tr><th>Codex CLI / App Server</th><td>终端恢复使用已验证的原生 CLI 能力。后台沿用 app-server 做状态展示和受管任务控制；不同入口对同一线程的可见性及互斥行为纳入兼容测试。 <a href="https://developers.openai.com/codex/cli/features/">CLI 文档</a> · <a href="https://developers.openai.com/codex/app-server/">App Server 协议</a></td></tr>
+<tr><th>Git LFS / Gitea</th><td>项目代码沿用原有 origin，客户端给 LFS 配置独立地址，首版数据存家里磁盘。后续验证兼容的对象存储接在同一端点之后。 <a href="https://docs.gitea.com/administration/git-lfs-setup/">Gitea LFS</a> · <a href="https://github.com/git-lfs/git-lfs/blob/main/docs/man/git-lfs-config.adoc">LFS 地址配置</a></td></tr>
+<tr><th>硬件探测与执行</th><td>优先用 psutil 读 CPU、内存、进程和 I/O，用 NVML 查询受支持的 NVIDIA 指标，nvidia-smi 作诊断。worker 复用项目现有 Python、测试、训练与构建命令。 <a href="https://psutil.readthedocs.io/">psutil</a> · <a href="https://docs.nvidia.com/deploy/nvidia-smi/index.html">NVIDIA 指标说明</a></td></tr>
+<tr><th>编辑器与网络</th><td>编辑器偏好分别交给 VS Code Settings Sync 和 JetBrains Backup and Sync。设备优先使用可达的现有私网，Tailscale 为候选。 <a href="https://code.visualstudio.com/docs/configure/settings-sync">VS Code</a> · <a href="https://www.jetbrains.com/help/pycharm/sharing-your-ide-settings.html">PyCharm</a> · <a href="https://tailscale.com/docs/reference/faq/other-vpns">VPN 共存条件</a></td></tr>
+<tr><th>多节点存储候选</th><td>优先验证 SeaweedFS 的容量分配、复制和失联行为，以及 rclone 的迁移校验。按三台 Windows 真机结果确定后端。 <a href="https://github.com/seaweedfs/seaweedfs">SeaweedFS</a> · <a href="https://rclone.org/commands/rclone_check/">rclone 校验</a></td></tr>
+</tbody></table></div></section>
+
+<section id="environment"><h2>开发与运行环境</h2><div class="grid">
+<article class="card"><h3>开发与构建</h3><p>以 Windows 11、PowerShell、Python 3.10+、Node.js 22+ 为开发基线。仓库的 Web 验证记录使用 Python 3.14 与 Node.js 26.13.1。前端按 package-lock 安装，后端依赖按用途锁定。</p><p>仓库当前声明 PySide6 6.12.0、FastAPI 0.163.1、Uvicorn 0.54.0、React 19、TypeScript 5、Vite 6，Windows EXE 沿用 PyInstaller 打包。发布时记录实测 CLI 版本及兼容清单。</p></article>
+<article class="card"><h3>日常设备</h3><p>公司机为基础显示显卡，型号待探测。笔记本为 RTX 3050，显存容量和运行时可用量以实测为准。家里电脑同时承担开发、协调与重计算，首次启动探测显卡、驱动、运行环境、内存、磁盘和可用带宽。</p><p>iPhone 使用 Safari 访问同一 Web 工作台，可添加到主屏幕。首次配置完成设备配对、项目目录映射、各端 CLI 登录和家庭节点登录启动。</p></article>
+</div><h3>在平时开启 VPN 的条件下联调</h3><p>分别探测模型服务、Git 远程和家里中心节点的可达性。优先复用已有获准网络。若 VPN 占用了默认路由、DNS 或手机的 VPN 通道，验证可共存的路由，或采用经鉴权的 HTTPS 网关访问家庭服务。iPhone 的日常路径设计为保持现有 VPN 开启，覆盖 Wi-Fi、蜂窝和网络切换后的重连。</p><p>各机维护自己的解释器、虚拟环境与驱动。工作区内引用本机绝对路径的配置按设备映射；锁定依赖和可复现的项目设置随代码版本管理。</p></section>
+
+<section id="handoff"><h2>无感换机与数据一致性</h2><ol class="steps">
+<li><b>后台准备。</b>设备代理按项目监听已保存文件，以 Git 基线、暂存版本、工作树版本和允许同步的新文件生成快照。补齐尚未推到远程的必要 Git 对象。缓存、密钥、虚拟环境和未经登记的原始大数据按排除规则处理。</li>
+<li><b>确认一组可恢复数据。</b>CLI 完成一轮且持久记录稳定时，记录项目 ID、线程 ID、轮次、工作目录映射、代码版本及所需对象哈希。中心核对对象齐备后原子发布版本；工作区随后产生的修改进入下一版。</li>
+<li><b>另一台提前准备。</b>本机后台预取最近项目，在独立目录校验，再安全更新空闲工作区。IDE 已打开或本地出现新修改时先保留本地状态。两个版本从同一基线安全合并；同一处发生冲突时保存双方内容并提示。</li>
+<li><b>终端照常启动。</b>首次登记时为受管项目配置终端启动适配。在对应目录输入 <code>codex</code> 时按项目选择已验证的线程 ID，交给真实 CLI 恢复；显式子命令、主动新建会话和未登记目录沿用 CLI 原语义。对话在目标机映射后的工作目录执行。</li>
+<li><b>中断后恢复。</b>网络离线时记录本地修改。中心不可达时可查看已确认进度，自动写入权等恢复连接后再核对。对执行结果不明的命令先查状态；已经运行的外部终端在原机到达安全点后才转移该线程。</li>
+</ol><p class="note"><strong>首项技术验证</strong>　在两台 Windows 的不同盘符、两个 IDE 的真实终端中，输入同一条日常启动命令，核对原线程 ID、历史轮次、实际工作目录和新回复。编辑器尚未落盘的缓冲区、运行中进程和 GPU 显存不能当作可恢复快照。</p>
+<h3>大文件与低磁盘</h3><p>仓库存指针，大文件按需下载工作副本。单主副本所在设备离线时，界面显示可用缓存或等待来源；重要对象按策略在另一台设备保留第二份。调度先从在线且空间充足的节点中选址，预留整次上传所需容量。初始候选阈值为剩余低于 10% 停止分配、低于 5% 进入只读，真机测试后调整。</p><p>冷文件迁移按复制、目标哈希校验、事务切换索引、清理旧副本的顺序执行。上传期间固定目标，迁移失败继续从旧副本读取。每个阶段可在重启后重试。</p></section>
+
+<section id="ownership"><h2>人工优先与夜间审批</h2><p><strong>控制权按项目判断。</strong> 任一设备用 VS Code 或 PyCharm 打开登记项目，立即阻止任务小站发起新的自动操作，释放该项目的控制连接。后台可以继续采集设备状态、封存快照和完成用户从前台发起的计算。远端快照先放入暂存区，避免改写用户正打开的工作树。</p>
+<div class="tbl"><table><thead><tr><th>事件</th><th>任务小站的行为</th></tr></thead><tbody>
+<tr><th>IDE 打开项目</th><td>通过两个 IDE 的项目打开、关闭事件和心跳报告规范化路径，覆盖多窗口和 VS Code 多根工作区。先撤销自动推进与自动审批权，取消未发送的后台操作；执行中的步骤到可安全停止的位置再释放。</td></tr>
+<tr><th>关闭 IDE 或崩溃</th><td>最后一个相关窗口关闭后核对其余设备、外部 CLI、待处理工具调用和实际进程。确认人工已释放后自动连接，按项目原有设置恢复。心跳中断或失联先核对，避免误抢控制权。</td></tr>
+<tr><th>进入睡眠时段</th><td>按用户本地时区和设定时段生效。项目已启用夜间托管、写入权有效且预算充足时，允许在项目沙箱内读写、构建和测试，并对策略覆盖的当前工具审批自动答复。</td></tr>
+<tr><th>超出沙箱或预算</th><td>项目根目录以外写入、提权、未授权联网、读取凭据及发布操作进入等待。按规范化真实路径检查链接与重解析点，子进程继承沙箱。平台无法落实对应隔离时保留待审批。次日显示动作、依据、结果与文件变更。</td></tr>
+</tbody></table></div><p>已有审批绑定原连接及请求 ID。新版本只审批仍有效的请求，记录项目、设备、时间和规则。用户在夜间打开 IDE、点击暂停或撤回托管，后台立即停止发出新的审批及调度动作。一次夜间工具审批不会替用户决定新的产品需求或扩大任务范围。</p></section>
+
+<section id="compute"><h2>硬件感知与家庭计算</h2><p>交互留在当前 IDE 和 CLI。需要 CUDA 的训练、推理、图像处理等项目命令，以及受本机资源持续限制的可迁移作业，由家里 worker 执行。Codex 通过在线模型服务生成回复；家庭显卡承担项目实际启动的本地计算程序。</p>
+<div class="tbl"><table><thead><tr><th>判断时机</th><th>决策与动作</th></tr></thead><tbody>
+<tr><th>运行前</th><td>从项目已登记的运行配置、解释器、框架探测和历史峰值取得资源需求。需要 GPU 时优先选家里可用且环境匹配的 GPU。公司机只承担已验证能跑的任务；RTX 3050 按实际显存与用户策略作为可行的本地执行端。</td></tr>
+<tr><th>运行中</th><td>按作业采样进度、耗时、显存压力、可用内存、换页、CPU 和磁盘等待。资源不足错误可立即触发重新选址，持续低吞吐需结合历史基线及多个采样窗口判断。高 GPU 利用率本身可能是正常工作。</td></tr>
+<tr><th>决定切换</th><td>比较本机剩余时间与传输、排队和家庭执行时间。中心核对家里在线、资源余量、驱动、依赖和输入版本。可断点任务保存检查点再恢复，允许重复执行的步骤从头重跑，有外部副作用或无安全边界的步骤保留现场。</td></tr>
+<tr><th>结果回到终端</th><td>用项目运行入口或 CLI 可调用的作业适配器提交，保持原命令的退出码、日志和取消语义。输入使用固定快照；输出按哈希回传，在原项目版本仍匹配时落盘。用户在前台发起的作业沿用前台所有权。</td></tr>
+</tbody></table></div><p class="note"><strong>验证范围</strong>　先接入一个项目真实使用的 GPU 命令和一个 CPU 命令。记录源设备、路由原因、队列等待、传输耗时、执行耗时和结果一致性。家庭 GPU 型号、显存、带宽及切换阈值以设备实测为准。</p></section>
+
+<section id="usage"><h2>任务类型与 Codex 用量</h2><p>项目登记时选择默认类型，单个任务可以覆盖。以下是建议默认策略，预算数值和睡眠时间由设置保存。</p>
+<div class="tbl"><table><thead><tr><th>类型</th><th>调度与结束条件</th></tr></thead><tbody>
+<tr><th>长期项目</th><td>保留跨天目标和检查点，按每日预算推进。交还给人工时保留待办，夜间仅执行已定义范围内的工作。</td></tr>
+<tr><th>短期任务</th><td>设完成条件、单任务预算和截止时间。完成或预算用尽即停止自动推进，记录交付物。</td></tr>
+<tr><th>探索性任务</th><td>在独立工作区隔离尝试，限制轮次、耗时与预算，保留结论与实验记录，由用户决定是否将成果合入主项目。</td></tr>
+</tbody></table></div><p>台账同时展示账号官方短、长额度窗口及刷新时间，以及按项目和线程累计的可观测 token、轮次与运行时长。每条记录按线程、轮次和事件标识去重。官方未提供的指标标为未知；项目统计用于预算控制，账号共享额度按服务端返回值展示。</p><p>到达项目预算后暂停该项目；账号额度耗尽时所有相关任务等待官方刷新。恢复前重新核对人工占用、任务目标、预算和沙箱策略。手机可查看“哪个项目用了多少、为何暂停、何时重查”。</p></section>
+
+<section id="delivery"><h2>开发计划与验收</h2><p>按可独立验证的里程碑交付。优先解决真实终端续接和控制权交接，再增加后台计算与夜间自动化。每阶段保存测试环境、输入、实测结果、失败记录与回滚点。</p>
+<div class="tbl"><table><thead><tr><th>里程碑</th><th>交付物与通过条件</th></tr></thead><tbody>
+<tr><th>一 · 真实 CLI 续接</th><td>双机、不同盘符和两种 IDE。A 留下已暂存、未暂存及新增文件，B 在终端输入 codex 后继续原线程。核对文件与暂存标记、线程 ID、新一轮实际目录；统计额外手动操作数，正常路径目标为 0。</td></tr>
+<tr><th>二 · 统一后台与控制权</th><td>Qt、Web 和托盘共用本机后台，接入 IDE 项目生命周期。用三机、多窗口、外部 CLI、IDE 崩溃、断网和重启验证人工优先、自动接回及冲突保全；检查没有重复指令或陈旧审批。</td></tr>
+<tr><th>三 · 手机与大文件</th><td>在现有 VPN 开启时，用真实 iPhone Safari 从 Wi-Fi、蜂窝查看进度、暂停和处理待审批。实测家庭 LFS 预取、校验失败和中断恢复，验证缺少必需对象时不会误报就绪。</td></tr>
+<tr><th>四 · 硬件自动调度</th><td>公司机发起 GPU 作业，核对家庭设备执行、终端结果与文件校验。笔记本测试本地资源充足、显存不足、家里忙碌和中途掉线。比较本地运行与远程端到端耗时，检查同一作业只交付一次。</td></tr>
+<tr><th>五 · 分类、额度与夜间</th><td>验证三类任务的结束条件、额度去重、超额暂停和到点重查。夜间沙箱内构建通过，越界操作留待审批，用户半夜打开 IDE 后自动审批立即停发，次日可核对全部动作。</td></tr>
+<tr><th>六 · 存储与发布</th><td>验证容量阈值、冷迁移、双副本和唯一来源离线。统一安装器复用已有工具，支持客户端或家庭中心角色、登录启动、升级与回滚。用原有 Python 回归、Qt smoke 和 Web 测试覆盖已有功能。</td></tr>
+</tbody></table></div><p><strong>首轮联调要记录的现场数据</strong>包括三机实际 CLI 和终端版本、家庭 GPU 与网络带宽、典型大文件体积、公司机可同步项目、VPN 路由、常用 GPU 命令和睡眠时段。用这些数据确定兼容矩阵、性能预算及排期。</p>
+<p class="refs">需求来源　《跨设备代码与 Codex 记忆同步软件需求文档》及 2026-11-18 补充的 IDE、CLI、iPhone、VPN、GPU、人工优先和夜间沙箱要求。</p></section>
+<p class="end"><a href="#top">返回文档顶部 ↑</a></p></main></div>
+<script>
+const links = Array.from(document.querySelectorAll('.nav a'));
+const sections = links.map(link => document.querySelector(link.hash));
+function updateNavigation() {
+  let active = 0;
+  for (let i = 0; i < sections.length; i++) {
+    if (sections[i].getBoundingClientRect().top <= 85) active = i;
+  }
+  links.forEach((link, i) => {
+    if (i === active) link.setAttribute('aria-current', 'location');
+    else link.removeAttribute('aria-current');
+  });
+}
+window.addEventListener('scroll', updateNavigation, {passive: true});
+window.addEventListener('resize', updateNavigation);
+updateNavigation();
+</script></body></html>

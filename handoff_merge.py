@@ -110,8 +110,9 @@ def merge_tree(repo, base, local, incoming, layer):
         return local
     if local == base:
         return incoming
+    base_arg = ['--merge-base=' + base] if base is not None else []
     result = git_process(repo, 'merge-tree', '--write-tree', '--name-only', '--messages', '-z',
-                         '--merge-base=' + base, local, incoming, isolated=True)
+                         *base_arg, local, incoming, isolated=True)
     fields = result.stdout.decode('utf-8', 'replace').split('\0')
     if result.returncode == 1:
         separator = fields.index('', 1)
@@ -129,6 +130,49 @@ def merge_tree(repo, base, local, incoming, layer):
     return fields[0]
 
 
+def history_base(repo, history, local_tree, incoming_tree):
+    local, incoming = history['localHead'], history['incomingHead']
+    if local == incoming:
+        history.update(mode='same_head', bases=[local])
+        return local_tree
+    result = git_process(repo, 'merge-base', '--all', local, incoming, isolated=True)
+    if result.returncode == 1 and not result.stdout:
+        history['reason'] = 'unrelated_history'
+        return None
+    bases = result.stdout.decode().splitlines()
+    require(result.returncode == 0 and bases and all(GIT_ID.fullmatch(base) for base in bases),
+            '无法确定两端 Git 提交的共同祖先')
+    history['bases'] = bases
+    if bases == [incoming]:
+        history['mode'] = 'local_ahead'
+        return local_tree
+    if bases == [local]:
+        history['mode'] = 'incoming_ahead'
+        return incoming_tree
+    history['mode'] = 'merge_commit'
+    return merge_tree(repo, None, local, incoming, 'history')
+
+
+def check_history_paths(repo, committed, previous):
+    raw = git(repo, 'diff-tree', '-r', '--no-renames', '--diff-filter=ACMT', '--raw', '--no-abbrev', '-z',
+              previous, committed, isolated=True)
+    entries = names(raw)
+    for header, path in zip(entries[::2], entries[1::2]):
+        require(header.split()[1] in ('100644', '100755'), '合并后的提交仅支持普通文件')
+        local_path(repo, path)
+
+
+def merged_head(repo, history, base):
+    local, incoming = history['localHead'], history['incomingHead']
+    if history['mode'] == 'incoming_ahead':
+        return incoming
+    if history['mode'] != 'merge_commit':
+        return local
+    return git(repo, '-c', 'user.name=Lanxi Workbench', '-c', 'user.email=lanxi@localhost',
+               'commit-tree', base, '-p', local, '-p', incoming,
+               '-m', 'Merge workspaces for Lanxi handoff', isolated=True).decode().strip()
+
+
 def object_store(repo):
     path = git(repo, 'rev-parse', '--path-format=absolute', '--git-path', 'objects',
                isolated=True).decode().strip()
@@ -136,8 +180,23 @@ def object_store(repo):
     return path
 
 
-def check_checkout_filters(repo):
-    paths = git(repo, 'ls-files', '-z', isolated=True)
+def check_checkout_paths(repo):
+    entries = names(git(repo, 'ls-files', '--stage', '-z', isolated=True))
+    paths, spellings = [], {}
+    for entry in entries:
+        header, path = entry.split('\t', 1)
+        require(header[:6] in ('100644', '100755'), '合并仅支持普通文件')
+        paths.append(path)
+        # Check directory names as well as files for Windows case collisions.
+        while path:
+            key = path.casefold()
+            previous = spellings.get(key)
+            require(previous is None or previous == path, '合并结果存在大小写路径冲突')
+            if previous is not None:
+                break
+            spellings[key] = path
+            path = path.rpartition('/')[0]
+    paths = ''.join(path + '\0' for path in paths).encode('utf-8')
     filters = names(git(repo, 'check-attr', '--cached', '-z', '--stdin', 'filter', data=paths, isolated=True))
     require(all(value in ('unset', 'unspecified') for value in filters[2::3]),
             '合并结果依赖 Git 内容过滤器')
@@ -150,50 +209,70 @@ def prepare_merge(local, incoming, dest, includes=(), incoming_includes=()):
             '合并预备目录必须独立于两个输入工作区')
     require(dest.parent.is_dir() and not dest.exists() and not dest.is_symlink(), '请指定尚不存在的预备目录')
 
-    head = git(local, 'rev-parse', '--verify', 'HEAD', isolated=True).decode().strip()
-    incoming_head = git(incoming, 'rev-parse', '--verify', 'HEAD', isolated=True).decode().strip()
-    if head != incoming_head:
-        return dict(version=1, status='different_head', localHead=head, incomingHead=incoming_head)
+    local_head = git(local, 'rev-parse', '--verify', 'HEAD^{commit}', isolated=True).decode().strip()
+    incoming_head = git(incoming, 'rev-parse', '--verify', 'HEAD^{commit}', isolated=True).decode().strip()
     context = resume_context(incoming)
     require(context is not None, '输入缺少已恢复的交接回执')
     receipt = json.loads(limited(context.private / 'handoff.json', 65536))
-    require(receipt['head'] == head, '预备目录已切换到与交接回执不同的提交')
+    require(receipt['head'] == incoming_head, '预备目录已切换到与交接回执不同的提交')
     transcript = limited(context.private / 'session.jsonl')
     require(sha(transcript) == context.checksum and session_info(transcript)[:2] == (context.thread, context.turn),
             '交接历史与回执不匹配')
     registered = receipt.get('included', [])
     require(isinstance(registered, list) and all(isinstance(path, str) for path in registered), '交接新文件回执无效')
     remote_paths = sorted(set(registered) | set(incoming_includes))
+    history = dict(localHead=local_head, incomingHead=incoming_head)
+    unavailable = dict(version=1, status='history_unavailable', history=history)
+    if len(local_head) != len(incoming_head):
+        history['reason'] = 'object_format'
+        return unavailable
+    if local_head != incoming_head and any(
+            git(root, 'rev-parse', '--is-shallow-repository', isolated=True).strip() == b'true'
+            for root in (local, incoming)):
+        history['reason'] = 'shallow_history'
+        return unavailable
 
     with tempfile.TemporaryDirectory(dir=dest.parent, prefix='.lanxi-merge-') as directory:
         work = Path(directory) / 'work'
         work.mkdir()
-        format_name = 'sha256' if len(head) == 64 else 'sha1'
+        format_name = 'sha256' if len(local_head) == 64 else 'sha1'
         git(work, 'init', '--quiet', '--template=', '--object-format=' + format_name, isolated=True)
         alternates = work / '.git' / 'objects' / 'info' / 'alternates'
         paths = dict.fromkeys((object_store(local), object_store(incoming)))
         alternates.write_bytes(''.join(path + '\n' for path in paths).encode('utf-8'))
-        base = git(work, 'rev-parse', head + '^{tree}', isolated=True).decode().strip()
-        here = capture_index(local, work, includes, write_objects=True)
-        there = capture_index(incoming, work, remote_paths, write_objects=True)
-        require(here.head == there.head == head, '输入提交在读取期间发生变化')
-        local_index, local_work = trees(work, here)
-        remote_index, remote_work = trees(work, there)
+        revisions = [commit + '^{tree}' for commit in (local_head, incoming_head)]
+        local_tree, incoming_tree = git(work, 'rev-parse', *revisions, isolated=True).decode().splitlines()
         try:
-            index = merge_tree(work, base, local_index, remote_index, 'index')
+            base = history_base(work, history, local_tree, incoming_tree)
+            if base is None:
+                return unavailable
+            for previous in dict.fromkeys((local_tree, incoming_tree)):
+                if base != previous:
+                    check_history_paths(work, base, previous)
+
+            here = capture_index(local, work, includes, write_objects=True)
+            there = capture_index(incoming, work, remote_paths, write_objects=True)
+            require((here.head, there.head) == (local_head, incoming_head), '输入提交在读取期间发生变化')
+            local_index, local_work = trees(work, here)
+            remote_index, remote_work = trees(work, there)
+            local_staged = merge_tree(work, local_tree, base, local_index, 'local_index')
+            incoming_staged = merge_tree(work, incoming_tree, base, remote_index, 'incoming_index')
+            index = merge_tree(work, base, local_staged, incoming_staged, 'index')
             left = merge_tree(work, local_index, index, local_work, 'local_worktree')
             right = merge_tree(work, remote_index, index, remote_work, 'incoming_worktree')
             working = merge_tree(work, index, left, right, 'worktree')
         except MergeConflict as error:
+            error.report['history'] = history
             return error.report
 
+        head = merged_head(work, history, base)
         git(work, 'read-tree', working, isolated=True)
-        check_checkout_filters(work)
+        check_checkout_paths(work)
         git(work, 'checkout-index', '--all', isolated=True)
         git(work, *DIFF, '--quiet', isolated=True)
         if index != working:
             git(work, 'read-tree', index, isolated=True)
-            check_checkout_filters(work)
+            check_checkout_paths(work)
         if here.branch:
             git(work, 'symbolic-ref', 'HEAD', 'refs/heads/' + here.branch, isolated=True)
             git(work, 'update-ref', 'HEAD', head, isolated=True)
@@ -204,7 +283,7 @@ def prepare_merge(local, incoming, dest, includes=(), incoming_includes=()):
         # HEAD in a single pack. Drop the borrowing link before publishing.
         roots = f'{head}\n{index}\n{working}\n'.encode('ascii')
         prefix = work / '.git' / 'objects' / 'pack' / 'pack'
-        git(work, '-c', 'pack.compression=1', 'pack-objects', '--quiet', '--revs', '--delta-base-offset',
+        git(work, '-c', 'pack.compression=1', '-c', 'pack.threads=2', 'pack-objects', '--quiet', '--revs', '--delta-base-offset',
             prefix, data=roots, isolated=True)
         require(capture_index(local, work, includes, write_objects=False) == here
                 and capture_index(incoming, work, remote_paths, write_objects=False) == there,
@@ -217,10 +296,11 @@ def prepare_merge(local, incoming, dest, includes=(), incoming_includes=()):
         private.mkdir()
         (private / 'session.jsonl').write_bytes(transcript)
         result = dict(version=1, status='merged', head=head, indexTree=index, worktreeTree=working, cwd=str(dest / relative),
-                      project=context.project, thread=context.thread)
+                      project=context.project, thread=context.thread, history=history)
         untracked = names(git(work, 'ls-files', '--others', '--exclude-standard', '-z', isolated=True))
         receipt['included'] = sorted(set(untracked) & (set(includes) | set(remote_paths)))
-        receipt['merge'] = {key: result[key] for key in ('indexTree', 'worktreeTree')}
+        receipt['head'] = head
+        receipt['merge'] = {key: result[key] for key in ('indexTree', 'worktreeTree', 'history')}
         (private / 'handoff.json').write_text(json.dumps(receipt, ensure_ascii=False), encoding='utf-8')
         origin = git(local, 'config', '--local', '--get', 'remote.origin.url', optional=True, isolated=True)
         if origin:

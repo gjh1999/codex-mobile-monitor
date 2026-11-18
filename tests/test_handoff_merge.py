@@ -48,9 +48,15 @@ class MergeTests(unittest.TestCase):
         data = file.read_bytes()
         file.write_bytes(data.replace(f'Line {line:02d}'.encode(), text))
 
-    def handoff(self, include=()):
+    def commit(self, root, path, content):
+        (root / path).write_bytes(content)
+        git(root, 'add', '--', path)
+        git(root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'new commit')
+        return git(root, 'rev-parse', 'HEAD').decode().strip()
+
+    def handoff(self, include=(), base='HEAD'):
         package = self.root / 'sealed.zip'
-        receipt = capture(self.sender, self.home, 'example', 'HEAD', self.thread, include, package)
+        receipt = capture(self.sender, self.home, 'example', base, self.thread, include, package)
         restore(package, receipt['sha256'], 'example', self.local, self.incoming)
 
     def merge(self, includes=()):
@@ -102,14 +108,115 @@ class MergeTests(unittest.TestCase):
         self.assertIn(b'local conflicting line', (self.local / 'shared.txt').read_bytes())
         self.assertIn(b'remote conflicting line', (self.incoming / 'shared.txt').read_bytes())
 
-    def test_different_commit_rejected_before_creating_result(self):
+    def test_preserves_local_head_when_it_is_ahead(self):
+        self.edit(self.sender, 16, b'incoming staged')
+        git(self.sender, 'add', 'shared.txt')
         self.handoff()
-        git(self.local, 'commit', '--allow-empty', '-qm', 'new base')
+        head = self.commit(self.local, 'local.txt', b'local commit\n')
+        self.edit(self.local, 4, b'local working')
         script = Path(handoff_merge.__file__)
         result = subprocess.run([sys.executable, str(script), '--local', str(self.local), '--incoming',
                                  str(self.incoming), '--dest', str(self.dest)], capture_output=True, check=False)
-        self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertEqual(json.loads(result.stdout)['status'], 'different_head')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual((report['status'], report['head'], report['history']['mode']), ('merged', head, 'local_ahead'))
+        self.assertIn(b'incoming staged', git(self.dest, 'show', ':shared.txt'))
+        self.assertIn(b'local working', (self.dest / 'shared.txt').read_bytes())
+
+    def test_fast_forwards_to_incoming_head(self):
+        base = git(self.local, 'rev-parse', 'HEAD').decode().strip()
+        head = self.commit(self.sender, 'incoming.txt', b'incoming commit\n')
+        self.edit(self.local, 2, b'local staged')
+        git(self.local, 'add', 'shared.txt')
+        self.edit(self.sender, 26, b'incoming working')
+        self.handoff(base=base)
+        report = self.merge()
+        self.assertEqual((report['head'], report['history']['mode'], report['history']['bases']),
+                         (head, 'incoming_ahead', [base]))
+        self.assertEqual(git(self.dest, 'show', 'HEAD:incoming.txt'), b'incoming commit\n')
+        self.assertIn(b'local staged', git(self.dest, 'show', ':shared.txt'))
+        self.assertIn(b'incoming working', (self.dest / 'shared.txt').read_bytes())
+        self.assertEqual(prepare_resume(self.dest, self.root / 'target-home')['thread'], self.thread)
+
+    def test_diverging_commits_preserve_both_parents_and_pending_changes(self):
+        base = git(self.local, 'rev-parse', 'HEAD').decode().strip()
+        left = self.commit(self.local, 'left.txt', b'left commit\n')
+        right = self.commit(self.sender, 'right.txt', b'right commit\n')
+        self.edit(self.local, 2, b'local staged')
+        git(self.local, 'add', 'shared.txt')
+        self.edit(self.local, 10, b'local working')
+        self.edit(self.sender, 18, b'incoming staged')
+        git(self.sender, 'add', 'shared.txt')
+        self.edit(self.sender, 26, b'incoming working')
+        self.handoff(base=base)
+        self.assertEqual(git(self.incoming, 'rev-parse', 'HEAD').decode().strip(), right)
+        indexes = [(root / '.git/index').read_bytes() for root in (self.local, self.incoming)]
+        report = self.merge()
+        self.assertEqual(report['history'], dict(mode='merge_commit', bases=[base], localHead=left, incomingHead=right))
+        self.assertEqual(git(self.dest, 'rev-list', '--parents', '-1', 'HEAD').decode().split(),
+                         [report['head'], left, right])
+        self.assertEqual(git(self.dest, 'show', 'HEAD:left.txt'), b'left commit\n')
+        self.assertEqual(git(self.dest, 'show', 'HEAD:right.txt'), b'right commit\n')
+        self.assertNotIn(b'staged', git(self.dest, 'show', 'HEAD:shared.txt'))
+        self.assertIn(b'local staged', git(self.dest, 'show', ':shared.txt'))
+        self.assertIn(b'incoming staged', git(self.dest, 'show', ':shared.txt'))
+        self.assertNotIn(b'working', git(self.dest, 'show', ':shared.txt'))
+        self.assertIn(b'local working', (self.dest / 'shared.txt').read_bytes())
+        self.assertIn(b'incoming working', (self.dest / 'shared.txt').read_bytes())
+        self.assertEqual(indexes, [(root / '.git/index').read_bytes() for root in (self.local, self.incoming)])
+        self.assertFalse((self.dest / '.git/objects/info/alternates').exists())
+        self.assertEqual(prepare_resume(self.dest, self.root / 'target-home')['thread'], self.thread)
+
+    def test_history_and_staged_overlay_conflicts_are_distinguished(self):
+        base = git(self.local, 'rev-parse', 'HEAD').decode().strip()
+        self.commit(self.sender, 'binary.dat', b'committed\x00remote')
+        self.handoff(base=base)
+        (self.local / 'binary.dat').write_bytes(b'staged\x00local')
+        git(self.local, 'add', 'binary.dat')
+        report = self.merge()
+        self.assertEqual((report['status'], report['layer'], report['paths']), ('conflict', 'local_index', ['binary.dat']))
+        self.assertFalse(self.dest.exists())
+        git(self.local, 'commit', '-qm', 'conflicting commit')
+        report = self.merge()
+        self.assertEqual((report['status'], report['layer'], report['paths']), ('conflict', 'history', ['binary.dat']))
+        self.assertFalse(self.dest.exists())
+
+    def test_rejects_unrelated_and_shallow_history(self):
+        self.handoff()
+        unrelated = git(self.local, 'commit-tree', 'HEAD^{tree}', '-m', 'unrelated').decode().strip()
+        git(self.local, 'update-ref', 'HEAD', unrelated)
+        report = self.merge()
+        self.assertEqual((report['status'], report['history']['reason']), ('history_unavailable', 'unrelated_history'))
+        (self.local / '.git/shallow').write_bytes(unrelated.encode() + b'\n')
+        report = self.merge()
+        self.assertEqual(report['history']['reason'], 'shallow_history')
+        self.assertFalse(self.dest.exists())
+
+    def test_rejects_incompatible_object_formats(self):
+        self.handoff()
+        other = self.root / 'sha256'
+        other.mkdir()
+        git(other, 'init', '-q', '--object-format=sha256')
+        self.commit(other, 'content.txt', b'sha256 fixture\n')
+        report = prepare_merge(other, self.incoming, self.dest)
+        self.assertEqual((report['status'], report['history']['reason']), ('history_unavailable', 'object_format'))
+        self.assertFalse(self.dest.exists())
+
+    def test_committed_private_paths_are_rejected(self):
+        # Check locally committed paths too. Either input might have advanced since the shared baseline.
+        self.handoff()
+        self.commit(self.local, '.env', b'fixture only')
+        with self.assertRaisesRegex(HandoffError, '私有'):
+            self.merge()
+        self.assertFalse(self.dest.exists())
+
+    def test_case_collisions_between_commits_are_rejected(self):
+        base = git(self.local, 'rev-parse', 'HEAD').decode().strip()
+        self.commit(self.local, 'Case.txt', b'a')
+        self.commit(self.sender, 'case.txt', b'b')
+        self.handoff(base=base)
+        with self.assertRaisesRegex(HandoffError, '大小写'):
+            self.merge()
         self.assertFalse(self.dest.exists())
 
     def test_invalid_new_file_and_conflicting_staged_binary(self):

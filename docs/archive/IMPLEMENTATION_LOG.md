@@ -2,6 +2,16 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-18 不同提交工作区合并与往返续接
+
+- 基线 `f39661a` 支持同 HEAD 的独立预备合并。本轮验证本机领先、接收端领先和历史分叉。存在祖先关系时使用较新的提交。分叉合并成功时，只在预备目录生成双父提交，源端暂存和未暂存修改分别叠加。环境为 Windows、Python 3.14.7、Git 2.56.0.windows.4、Codex CLI 0.169.1。输入为临时 Git 仓库和虚构会话。
+- `.\.venv\Scripts\python.exe -m unittest -v tests.test_handoff_merge` 首轮 12 项通过，30.926 秒。覆盖双向快进、双父提交、已提交内容与暂存层的冲突报告、无共同祖先、浅历史、私有路径拦截、大小写冲突、源索引字节和续接回执。输出为 `build-exe/verification/handoff-diverged-targeted-01.txt`。对象格式不兼容随后并入全量回归。
+- `.\.venv\Scripts\python.exe tests/bench_handoff_merge.py --output build-exe/verification/handoff-same-48m-03` 和同脚本的 `--diverged --output build-exe/verification/handoff-diverged-48m-01` 顺序运行。每轮为 768 个 64 KiB 的共享基线文件，共 48 MiB，外加少数文本修改。分叉样本另在两端各提交一个不同文件。同 HEAD 成功合并为 3.142 秒，未暂存层冲突为 1.267 秒。上一轮同 HEAD 为 3.334 秒和 1.288 秒。分叉样本为 2.870 秒和 1.334 秒。结果分别保存于两个目录的 `result.json`。成功各调用一次检出和对象打包，冲突均无检出或打包。打包限制两个线程。封存和还原分别为 14.141 秒和 13.979 秒，单独计时。以上均为单次本机墙钟结果，未测峰值内存和网络吞吐。
+- `.\.venv\Scripts\python.exe tests/smoke_handoff.py --sync --roundtrip --merge --diverged --output build-exe/verification/handoff-diverged-native-01` 通过。真实 CLI 在 C、D 盘间模拟往返，核对了分叉合并的两个父提交、双方文件内容、暂存层、原生历史锁及同线程续写。新一轮与合并提交再次封存到 `merged-onward.zip`。具体线程和轮次见 `result.json`。传输用本机目录复制，回复用回环服务，单轮耗时未独立记录。
+- `.\.venv\Scripts\python.exe -m unittest discover -s tests -t . -p 'test_*.py' -v` 共 164 项，163 项通过，1 项可选 Stream SDK 跳过，用时 77.332 秒，日志为 `build-exe/verification/handoff-diverged-regression.txt`。
+- 使用 Qt offscreen 运行 `.\.venv\Scripts\python.exe tests/bench_task_switch.py --output build-exe/verification/task-switch-after-diverged`。输入为 35 条长消息、每次首次读取人为延迟 140 毫秒。6 次切换的事件循环等待中位数为 1.65 毫秒，历史显示中位数为 9.14 毫秒。两次冷读显示约 180 毫秒，四次缓存命中为 7.54 至 10.14 毫秒。上次同口径的两个中位数为 1.51 和 8.39 毫秒。实验未同时运行合并，结果见 `result.json`。
+- 原路径安全切换、两台物理设备、Syncthing 和两种 IDE 的联调仍待完成。实际使用的额外操作数待测。 [工作区合并与交接说明](../HANDOFF.md)
+
 ## 2026-11-18 同提交工作区合并与性能验证
 
 - 基线 `26c0d7e` 可恢复两端各自的目录。本轮加入按需工作区合并，保持两端的 Git 暂存和工作层，以版本 1 的 JSON 报告冲突。运行环境为 Windows、Python 3.14.7、Git 2.56.0.windows.4 和 Codex CLI 0.169.1。测试输入由临时 Git 仓库和虚构会话生成。

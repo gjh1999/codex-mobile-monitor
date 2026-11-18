@@ -77,11 +77,14 @@ def main():
     parser.add_argument('--sync', action='store_true', help='stage via replicated folder scans')
     parser.add_argument('--roundtrip', action='store_true', help='continue on B and then return to the original A profile')
     parser.add_argument('--merge', action='store_true', help='merge local edits before the returning round')
+    parser.add_argument('--diverged', action='store_true', help='commit independently on A and B before merging')
     args = parser.parse_args()
     if args.roundtrip and not args.sync:
         parser.error('--roundtrip needs --sync')
     if args.merge and not args.roundtrip:
         parser.error('--merge needs --roundtrip')
+    if args.diverged and not args.merge:
+        parser.error('--diverged needs --merge')
     target = args.output.resolve()
     target.mkdir(parents=True, exist_ok=False)
     server = ThreadingHTTPServer(('127.0.0.1', 0), Replies)
@@ -137,7 +140,7 @@ def main():
                           transport='replicated filesystem folders' if args.sync else 'manual package')
             if args.roundtrip:
                 report['return'] = test_return(exe, a, b, target, base, sid, home_a, home_b, server.server_port,
-                                               merge=args.merge)
+                                               merge=args.merge, diverged=args.diverged)
             (target / 'result.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
             print(json.dumps(report))
     finally:
@@ -184,10 +187,22 @@ def through_exchange(a, target, base, thread, seed, home_a, home_b, sender='offi
     return sent['publish']['lastPublished'], Path(offer['cwd'])
 
 
-def test_return(exe, original, source_b, output, base, thread, home_a, home_b, port, merge=False):
+def commit_fixture(repo, filename):
+    content = filename.encode() + b'\n'
+    (repo / filename).write_bytes(content)
+    git(repo, 'add', '--', filename)
+    git(repo, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+        'commit', '-qm', 'Independent handoff commit', '--', filename)
+    return git(repo, 'rev-parse', 'HEAD').decode().strip()
+
+
+def test_return(exe, original, source_b, output, base, thread, home_a, home_b, port, merge=False, diverged=False):
     log_a, = find_session(home_a, thread)
     previous = log_a.read_bytes()
     assert git(source_b, 'rev-parse', '--verify', 'origin/main', optional=True) is None
+    if diverged:
+        local_head = commit_fixture(original, 'committed-a.txt')
+        incoming_head = commit_fixture(source_b, 'committed-b.txt')
     changed = 'from-b.bin' if merge else 'code.bin'
     (source_b / changed).write_bytes(b'staged-on-B\x00')
     git(source_b, 'add', changed)
@@ -203,6 +218,11 @@ def test_return(exe, original, source_b, output, base, thread, home_a, home_b, p
         result = prepare_merge(original, cwd, merged, ['new.txt'])
         assert result['status'] == 'merged', result
         assert git(merged, 'show', ':from-a.bin') == b'staged on A\x00'
+        if diverged:
+            assert result['history']['mode'] == 'merge_commit', result
+            assert git(merged, 'rev-list', '--parents', '-1', 'HEAD').decode().split() == [result['head'], local_head, incoming_head]
+            for name in ('committed-a.txt', 'committed-b.txt'):
+                assert git(merged, 'show', 'HEAD:' + name) == name.encode() + b'\n'
         cwd = Path(result['cwd'])
     env = dict(os.environ, CODEX_HOME=str(home_a), NO_PROXY='localhost,127.0.0.1')
     process = subprocess.Popen([exe, 'app-server', '--stdio'], cwd=original, env=env, stdin=subprocess.PIPE,
@@ -237,11 +257,15 @@ def test_return(exe, original, source_b, output, base, thread, home_a, home_b, p
     _, current_turn, current_cwd = session_info(contents)
     assert current_turn != returned['turn'] and Path(current_cwd).resolve() == cwd
     assert b'reply-on-return' in contents
+    if diverged:
+        sealed = capture(cwd, home_a, 'fixture', base, thread, ['new.txt'], output / 'merged-onward.zip')
+        assert sealed['head'] == result['head'] and sealed['turn'] == current_turn
     (output / 'return-local-before.jsonl').write_bytes(previous)
     (output / 'return-local-after.jsonl').write_bytes(contents)
     return dict(incoming_turn=returned['turn'], new_turn=current_turn, cwd=current_cwd,
                 reply='reply-on-return', active_writer_blocked=True, backup_verified=True,
-                paired_config_reused=True, merged_local_changes=merge)
+                paired_config_reused=True, merged_local_changes=merge,
+                merged_diverging_commits=diverged)
 
 
 if __name__ == '__main__':

@@ -38,6 +38,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--files', type=int, default=768)
     parser.add_argument('--file-kib', type=int, default=64)
+    parser.add_argument('--diverged', action='store_true', help='measure independent commits with the same shared baseline')
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     fixture = MergeTests()
@@ -50,12 +51,18 @@ def main():
         git(fixture.local, 'add', 'fixtures')
         git(fixture.local, 'commit', '-qm', 'larger shared baseline')
         git(fixture.sender, 'pull', '--quiet', '--ff-only')
+        baseline = 'HEAD'
+        if args.diverged:
+            baseline = git(fixture.local, 'rev-parse', 'HEAD').decode().strip()
+            fixture.commit(fixture.local, 'left.txt', b'local commit\n')
+            fixture.commit(fixture.sender, 'right.txt', b'incoming commit\n')
         fixture.edit(fixture.local, 2, b'local staged')
         git(fixture.local, 'add', 'shared.txt')
         fixture.edit(fixture.sender, 26, b'incoming working')
-        _, transfer = measured(fixture.handoff)
+        _, transfer = measured(lambda: fixture.handoff(base=baseline))
         result, success = measured(fixture.merge)
         assert result['status'] == 'merged', result
+        assert result['history']['mode'] == ('merge_commit' if args.diverged else 'same_head')
         assert success['commands']['checkout-index'] == success['commands']['pack-objects'] == 1
         assert b'incoming working' in (fixture.dest / 'shared.txt').read_bytes()
         fixture.edit(fixture.local, 18, b'left conflict')
@@ -65,7 +72,8 @@ def main():
         assert 'checkout-index' not in conflict['commands'] and 'pack-objects' not in conflict['commands']
         data = dict(files=args.files, file_kib=args.file_kib, shared_mib=args.files * args.file_kib / 1024,
                     git=git(fixture.local, '--version').decode().strip(),
-                    capture_and_restore=transfer, merge=success, conflict=conflict)
+                    mode=result['history']['mode'], capture_and_restore=transfer, merge=success,
+                    conflict=dict(conflict, layer=rejected['layer']))
         (args.output / 'result.json').write_text(json.dumps(data, indent=2), encoding='utf-8')
         print(json.dumps(data))
     finally:

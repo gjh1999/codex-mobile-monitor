@@ -105,7 +105,7 @@ codex
 
 ## 合并本机和已接收的工作区
 
-两份工作区的 HEAD 相同且各自已有本机改动时，可按需生成独立的合并工作区。既有的两个输入目录都保留。`--incoming` 指向带恢复回执的目录。`--dest` 使用尚不存在的目录，父目录需已存在。
+两份工作区有共同提交历史时，可按需生成独立的合并工作区。既有的两个输入目录都保留。`--incoming` 指向带恢复回执的目录。`--dest` 使用尚不存在的目录，父目录需已存在。
 
 ```powershell
 .\.venv\Scripts\python.exe handoff_merge.py `
@@ -113,9 +113,13 @@ codex
   --dest 'C:\LanxiStaging\vision\merged-local' --include 'notes/mine.md'
 ```
 
-本机未跟踪文件用 `--include` 逐个列出。接收端使用恢复回执里的逐文件清单。旧回执没有该字段时，可用 `--include-incoming` 指定。合并使用 Git 的三方树合并，分别计算暂存区和未暂存层。无冲突时只检出一次，并打包并校验独立工作区所需的 Git 对象。放在已登记预备区下的结果可使用终端适配器续接原线程。 [Git 三方树合并](https://git-scm.com/docs/git-merge-tree)
+本机未跟踪文件用 `--include` 逐个列出。接收端使用恢复回执里的逐文件清单。旧回执没有该字段时，可用 `--include-incoming` 指定。存在祖先关系时采用较新的提交。历史分叉时由 Git 根据共同祖先合并已提交内容，并在预备目录创建一个双父提交，提交者显示为 `Lanxi Workbench <lanxi@localhost>`。本机提交为第一父提交，接收端提交为第二父提交。随后分别计算暂存区和未暂存层，保留未提交修改的状态。成功路径只检出和打包各一次，打包最多使用两个线程。放在已登记预备区下的结果可使用终端适配器续接原线程。 [Git 三方树合并](https://git-scm.com/docs/git-merge-tree) · [Git 共同祖先](https://git-scm.com/docs/git-merge-base) · [Git 构建提交](https://git-scm.com/docs/git-commit-tree)
 
-命令返回版本 1 的 JSON。成功为 `merged`，包含两个结果树标识、线程和可打开的目录。发生冲突时返回 `conflict`、所在层、文件路径与 Git 冲突类型，且退出码为 1。HEAD 不同时返回 `different_head` 和两端提交，同样使用退出码 1。配置错误、数据不一致和运行失败使用退出码 2。当前入口为按需执行，支持普通文件，合并结果的暂存区和工作区均会检查内容过滤器。Git 子模块、特殊索引标志、不同提交的分支合并与原路径内切换留待支持。
+命令返回版本 1 的 JSON。`history` 记录两端原始 HEAD，找到共同祖先时还包括 `bases`。成功为 `merged`，返回结果 `head`、两个结果树标识、线程和可打开的目录。`history.mode` 为 `same_head`、`local_ahead`、`incoming_ahead` 或 `merge_commit`。
+
+发生冲突时返回 `conflict`、所在层、文件路径和 Git 冲突类型。`history` 层表示已提交内容冲突，`local_index` 或 `incoming_index` 表示一端的暂存区与新提交基线冲突，`index` 表示两端暂存区相互冲突。后续工作层分别报告 `local_worktree`、`incoming_worktree` 或 `worktree`。没有共同历史、不同对象格式或浅克隆遇到不同 HEAD 时，返回 `history_unavailable` 和 `history.reason`，分别为 `unrelated_history`、`object_format` 和 `shallow_history`。这些结果使用退出码 1，配置、校验和运行错误使用退出码 2。
+
+合并只支持普通文件，使用隔离的 Git 配置。最终的暂存区和工作区均会检查内容过滤器及大小写路径冲突。已提交树新带入的路径还会检查私有文件及跨机路径规则。Git 子模块、特殊索引标志和原路径内切换留待支持。
 
 ## 前端查询
 
@@ -125,7 +129,7 @@ codex
 {"handoffProjects": {"vision": "C:\\Code\\Vision-continued"}}
 ```
 
-登录后读取 `GET /api/v1/handoffs`。响应的 `projects` 数组按登记项返回。状态 `restored` 带有已恢复快照的 `head`、`thread`、`turn` 和包的 `sha256`。`awaiting_restore` 表示尚未发现回执，`invalid_receipt` 表示映射或回执异常。未配置项目时数组为空。接口只读取 `.git/lanxi/handoff.json` 的摘要字段；状态描述上次恢复结果，实时运行状态仍使用现有任务接口。
+登录后读取 `GET /api/v1/handoffs`。响应的 `projects` 数组按登记项返回。状态 `restored` 带有预备工作区的 `head`、`thread`、`turn` 和接收包的 `sha256`。如果登记的是独立合并目录，`head` 为合并结果的 HEAD。`awaiting_restore` 表示尚未发现回执，`invalid_receipt` 表示映射或回执异常。未配置项目时数组为空。接口读取 `.git/lanxi/handoff.json` 的摘要字段。实时运行状态使用现有任务接口。
 
 ## 本机跨盘复验
 
@@ -135,8 +139,10 @@ codex
 .\.venv\Scripts\python.exe tests/smoke_handoff.py --sync --output build-exe/verification/handoff-sync-repeat
 .\.venv\Scripts\python.exe tests/smoke_handoff.py --sync --roundtrip --output build-exe/verification/handoff-roundtrip-repeat
 .\.venv\Scripts\python.exe tests/smoke_handoff.py --sync --roundtrip --merge --output build-exe/verification/handoff-merge-native-repeat
+.\.venv\Scripts\python.exe tests/smoke_handoff.py --sync --roundtrip --merge --diverged --output build-exe/verification/handoff-diverged-native-repeat
 .\.venv\Scripts\python.exe -m unittest -v tests.test_handoff_merge
 .\.venv\Scripts\python.exe tests/bench_handoff_merge.py --output build-exe/verification/handoff-merge-repeat
+.\.venv\Scripts\python.exe tests/bench_handoff_merge.py --diverged --output build-exe/verification/handoff-diverged-repeat
 ```
 
 每次为 smoke 指定新输出目录。它在系统临时目录创建源仓库，在输出目录创建目标仓库，运行本机真实 Codex CLI，使用不同的临时 Codex 数据目录和仅监听回环的回复服务。第二轮仅在收到第一轮历史后返回预期文本。脚本验证 Git 状态、原线程、新轮次和实际工作目录，保存 `result.json`、封存包和目标端现场。双机、两种 IDE、实际模型服务及日常操作次数需另行验收。

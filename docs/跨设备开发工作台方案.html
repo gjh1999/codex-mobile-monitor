@@ -3,26 +3,268 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light">
-<title>跨设备开发工作台 · 任务小站开发方案</title>
+<meta name="color-scheme" content="light dark">
+<title>澜汐 · 跨设备开发工作台方案</title>
 <style>
-*{box-sizing:border-box}html{scroll-padding-top:20px}body{margin:0;background:#f6f7f4;color:#202e39;font:16px/1.72 "Segoe UI","Microsoft YaHei","PingFang SC",sans-serif}a{color:#116454;text-underline-offset:3px}a:focus-visible,button:focus-visible{outline:3px solid #c07919;outline-offset:3px}.frame{max-width:1500px;margin:auto;display:grid;grid-template-columns:230px minmax(0,1fr)}aside{position:sticky;top:0;height:100vh;overflow:auto;padding:38px 19px;border-right:1px solid #d5ddd7;background:#edf1ec}.brand{display:flex;gap:10px;align-items:center;font-size:22px;font-weight:750;color:#183c37}.mark{width:29px;height:29px;border-radius:8px;background:linear-gradient(135deg,#214f48 0 46%,#a9dbb5 46% 58%,#214f48 58%);display:inline-block}.date{font:13px/1.5 Consolas,monospace;color:#596861;margin:12px 0 28px}.nav{display:grid;gap:2px}.nav a{padding:6px 11px;color:#3d514b;text-decoration:none;border-left:3px solid transparent;border-radius:0 6px 6px 0}.nav a:hover,.nav a[aria-current]{background:#dce9df;border-color:#2e715a;color:#173d32}.print{font:inherit;font-size:14px;border:1px solid #9caea2;background:transparent;padding:6px 14px;border-radius:6px;margin-top:24px;color:#29473b;cursor:pointer}main{min-width:0;width:100%;max-width:1120px;padding:40px clamp(20px,4vw,70px) 70px}.hero{padding:clamp(26px,4vw,54px);border-radius:20px;background:#153c36;color:#f2f7ef}.hero .meta{color:#b2d4c3;font-size:14px;letter-spacing:.07em}.hero h1{font-size:clamp(32px,4.2vw,59px);line-height:1.15;letter-spacing:-.035em;margin:14px 0 18px}.hero p{color:#deece0;max-width:48em;margin:0}.hero footer{margin-top:24px;padding-top:14px;border-top:1px solid #48695d;color:#c9dfcc;font-size:14px}section{padding:30px 0 10px;scroll-margin-top:8px}section+section{margin-top:17px;border-top:1px solid #ccd6d0}h2{font-size:clamp(25px,3vw,34px);line-height:1.26;letter-spacing:-.035em;margin:0 0 18px}h3{font-size:18px;line-height:1.45;margin:18px 0 6px}p{margin:8px 0 14px}ul,ol{padding-left:1.4em;margin:8px 0 14px}li+li{margin-top:5px}code{font: .91em/1.5 Consolas,monospace;background:#e5ece6;border-radius:4px;padding:1px 4px;overflow-wrap:anywhere}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.card,figure{padding:17px 20px;border:1px solid #d1dcd3;background:#fff;border-radius:12px}.card h3{margin-top:0;color:#205741}.card p:last-child{margin-bottom:0}.note{border-left:4px solid #b78238;background:#f6efdf;padding:12px 16px;border-radius:0 7px 7px 0;margin:18px 0}.tbl{border:1px solid #d0d9d1;background:white;border-radius:10px;overflow:hidden;margin:14px 0}table{border-collapse:collapse;width:100%;font-size:15px;line-height:1.6}th,td{text-align:left;vertical-align:top;padding:11px 14px;overflow-wrap:anywhere}thead{background:#e4ece5;color:#244535}tbody tr+tr{border-top:1px solid #dce4de}tbody th{color:#265641;width:23%}figure{margin:12px 0;background:#edf3ed}figcaption{color:#364d41;font-weight:650;margin-bottom:14px}.topology{display:grid;grid-template-columns:1fr 74px 1.22fr 74px 1fr;align-items:center}.node{background:#fff;border:1px solid #b4c6ba;border-radius:10px;padding:12px;font-size:14px;line-height:1.55}.node b{display:block;color:#18513f;font-size:16px;margin-bottom:4px}.node.core{background:#235344;color:white;border-color:#235344}.node.core b{color:white}.wire{text-align:center;font-size:12px;color:#456453}.wire strong{font-size:23px;line-height:1.1;display:block}.refs{font-size:14px;color:#4b5e53}.refs a{margin-right:.6em}.steps{padding-left:1.55em}.steps li{padding:2px 0 5px}.steps li::marker{font-weight:bold;color:#276447}.end{margin-top:34px;font-size:14px}.skip{position:absolute;left:-9999px}.skip:focus{left:10px;top:5px;background:white;z-index:6}
-@media(max-width:950px){.frame{grid-template-columns:190px minmax(0,1fr)}main{padding:25px 22px}.topology{grid-template-columns:1fr 40px 1.15fr 40px 1fr}.wire span{display:none}}
-@media(max-width:760px){html{scroll-padding-top:8px}.frame{display:block}aside{position:static;height:auto;padding:14px 16px;border-right:0;border-bottom:1px solid #cbd6cc}.brand{font-size:18px}.mark{width:22px;height:22px}.date{display:none}.nav{display:flex;overflow-x:auto;white-space:nowrap;margin-top:10px;gap:3px;padding-bottom:6px}.nav a{font-size:14px;border-left:0;border-bottom:2px solid transparent;padding:4px 8px}.print{display:none}main{padding:17px 15px 40px}.grid{grid-template-columns:1fr}.hero{border-radius:12px}.hero footer{font-size:13px}section{padding-top:22px}th,td{padding:8px;font-size:14px}.topology{grid-template-columns:1fr}.wire strong{transform:rotate(90deg);margin:4px}.wire span{display:none}.node{text-align:center}.refs a{display:inline-block}.tbl{border-radius:7px}}
-@media print{@page{margin:15mm}body{background:white;font-size:10.5pt}.frame{display:block}aside,.skip,.end{display:none}main{padding:0;max-width:none}.hero{color:#182e23;background:white;padding:0 0 14px;border-bottom:2pt solid #365e47;border-radius:0}.hero h1{font-size:28pt}.hero p,.hero .meta,.hero footer{color:#304839}.hero footer{margin-top:8px}section{padding-top:12px}h2,h3,figcaption{break-after:avoid}h2{font-size:18pt}section+section{margin-top:12px}.tbl{overflow:visible}tr,.card,.note,figure{break-inside:avoid}.grid{display:block}.card{margin:6px 0}.topology{grid-template-columns:1fr 42px 1.2fr 42px 1fr}.wire strong{transform:none}.node.core,.node.core b{color:#183a29;background:white}th,td{font-size:10pt;padding:5px 8px}a{color:inherit}}
+:root {
+  color-scheme: light dark;
+  --paper: #fff;
+  --surface: #f5f5f7;
+  --silver: #ecedf1;
+  --ink: #1d1d1f;
+  --muted: #5b5b61;
+  --edge: #d8d8de;
+  --accent: #0066cc;
+  --tint: #eaf4ff;
+  --glass: rgb(255 255 255 / 91%);
+  --gutter: clamp(20px, 4vw, 64px);
+  --bar-height: 57px;
+}
+* { box-sizing: border-box; }
+html { scroll-padding-top: calc(var(--bar-height) + 24px); }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 16px/1.7 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+a { color: var(--accent); text-underline-offset: .18em; }
+a:focus-visible, button:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+.masthead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--paper);
+  border-bottom: 1px solid var(--edge);
+  padding-inline: max(var(--gutter), env(safe-area-inset-left)) max(var(--gutter), env(safe-area-inset-right));
+}
+@supports (backdrop-filter: blur(20px)) {
+  .masthead { background: var(--glass); backdrop-filter: blur(20px); }
+}
+.masthead-inner {
+  min-height: 56px;
+  max-width: 1130px;
+  margin-inline: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.brand {
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 20px;
+  font-weight: 680;
+  letter-spacing: -.04em;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+.print {
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 0 15px;
+  min-height: 38px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.print:hover { background: var(--silver); }
+.hero {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  justify-content: center;
+  background: #ecf4f9;
+  color: #102d45;
+  padding: clamp(58px, 8.2vw, 122px) var(--gutter) clamp(50px, 7.6vw, 108px);
+  text-align: center;
+  overflow: hidden;
+}
+.hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(ellipse 78% 48% at 60% 108%, #9abccb 0%, #b8d4e0 48%, transparent 88%),
+    radial-gradient(ellipse 81% 93% at 21% 114%, #bcd8e9, transparent 74%),
+    radial-gradient(ellipse 62% 50% at 50% 14%, #fff 0%, transparent 100%),
+    linear-gradient(158deg, #edf1f6 8%, #f1f7fb 44%, #dceaf4 100%);
+}
+.hero-copy { max-width: 720px; }
+.hero .meta { color: #39586f; font-size: 14px; font-weight: 650; }
+.hero h1 { font-size: clamp(40px, 6vw, 78px); font-weight: 680; line-height: 1.13; letter-spacing: -.048em; margin: 12px 0 20px; }
+.hero p { margin: 0 auto; max-width: 36em; color: #25465d; font-size: clamp(16px, 1.75vw, 22px); line-height: 1.65; }
+.hero footer { margin-top: 27px; color: #405b6f; font-size: 13px; }
+.frame {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  column-gap: clamp(26px, 6vw, 94px);
+  max-width: 1258px;
+  padding: 54px var(--gutter) 72px;
+  margin-inline: auto;
+}
+aside { align-self: start; position: sticky; top: calc(var(--bar-height) + 26px); min-width: 0; max-height: calc(100vh - var(--bar-height) - 45px); overflow: auto; padding: 5px 6px; }
+details > summary { font-weight: 650; font-size: 14px; color: var(--ink); cursor: pointer; margin: 0 0 10px; min-height: 34px; align-content: center; }
+.nav { display: grid; gap: 2px; }
+.nav a { display: flex; align-items: center; min-height: 36px; padding: 5px 10px; border-radius: 9px; color: var(--muted); font-size: 14px; text-decoration: none; line-height: 1.4; }
+.nav a:hover { background: var(--surface); color: var(--ink); }
+.nav a[aria-current] { background: var(--tint); color: var(--accent); font-weight: 650; }
+.content { min-width: 0; }
+section { padding-bottom: 12px; }
+section + section { margin-top: 38px; padding-top: 38px; border-top: 1px solid var(--edge); }
+h2 { margin: 0 0 14px; font-size: clamp(27px, 3.3vw, 39px); font-weight: 680; line-height: 1.2; letter-spacing: -.036em; }
+h3 { font-size: 19px; line-height: 1.4; margin: 22px 0 7px; }
+p { margin: 8px 0 15px; }
+ul, ol { padding-left: 1.4em; margin: 8px 0 14px; }
+li + li { margin-top: 6px; }
+code { font: .9em/1.5 "SF Mono", Consolas, monospace; background: var(--silver); border-radius: 5px; padding: 2px 4px; overflow-wrap: anywhere; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.card, figure { padding: clamp(17px, 2.6vw, 28px); background: var(--surface); border-radius: 19px; }
+.card h3 { margin-top: 0; }
+.card p { color: var(--muted); }
+.card p:last-child { margin-bottom: 0; }
+.note { background: var(--tint); padding: 15px 18px; border-radius: 13px; margin: 20px 0; }
+.note strong { color: var(--accent); }
+.tbl { border: 1px solid var(--edge); border-radius: 14px; overflow: hidden; margin: 17px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 15px; line-height: 1.65; }
+th, td { text-align: left; vertical-align: top; padding: 12px 16px; overflow-wrap: anywhere; }
+thead { background: var(--surface); }
+tbody tr + tr { border-top: 1px solid var(--edge); }
+tbody th { width: 24%; font-weight: 650; }
+figure { margin: 15px 0; }
+figcaption { color: var(--ink); font-weight: 650; margin-bottom: 15px; }
+.topology { display: grid; grid-template-columns: 1fr 56px 1.18fr 56px 1fr; align-items: stretch; }
+.node { background: var(--paper); border: 1px solid var(--edge); border-radius: 12px; padding: 13px; color: var(--muted); font-size: 14px; line-height: 1.55; }
+.node b { display: block; color: var(--ink); font-size: 15px; margin-bottom: 5px; }
+.node.core { background: var(--tint); border-color: transparent; }
+.wire { align-self: center; text-align: center; font-size: 12px; color: var(--muted); }
+.wire strong { font-size: 22px; line-height: 1.1; display: block; color: var(--accent); }
+.refs, .end { font-size: 14px; color: var(--muted); }
+.refs a { display: inline-block; margin-right: .65em; }
+.steps { padding-left: 1.6em; }
+.steps li { padding: 3px 0 6px 4px; }
+.steps li::marker { font-weight: 680; color: var(--accent); }
+.end { margin-top: 32px; }
+.skip { position: absolute; left: -9999px; }
+.skip:focus { left: 10px; top: 5px; background: var(--paper); z-index: 6; padding: 8px; }
+@media (prefers-color-scheme: dark) {
+  :root { --paper: #151517; --surface: #212125; --silver: #303036; --ink: #f5f5f7; --muted: #b5b5bf; --edge: #404046; --accent: #78b8ff; --tint: #212f45; --glass: rgb(21 21 23 / 91%); }
+  .hero { background: #162e46; color: #f1f6fc; }
+  .hero::before {
+    background: radial-gradient(ellipse 95% 65% at 60% 112%, #356174 0%, transparent 95%),
+                radial-gradient(ellipse 92% 93% at 19% 108%, #203d59, transparent 78%),
+                linear-gradient(160deg, #151821, #182a41 67%, #172f45);
+  }
+  .hero p, .hero .meta, .hero footer { color: #cbdeee; }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .masthead { background: var(--paper); backdrop-filter: none; }
+}
+@media (max-width: 950px) {
+  .frame { grid-template-columns: 170px minmax(0, 1fr); column-gap: 28px; }
+  .topology { grid-template-columns: 1fr 30px 1.15fr 30px 1fr; }
+  .wire span { display: none; }
+}
+@media (max-width: 760px) {
+  .frame { display: block; padding-top: 26px; }
+  aside { position: static; max-height: none; margin-bottom: 32px; padding: 0; }
+  details { border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
+  details > summary { min-height: 44px; }
+  .nav { grid-template-columns: 1fr 1fr; padding-bottom: 6px; }
+  .nav a, .print { min-height: 44px; }
+  .hero { padding-inline: max(var(--gutter), env(safe-area-inset-left)) max(var(--gutter), env(safe-area-inset-right)); }
+  .hero h1 { max-width: 9em; margin-inline: auto; }
+  .grid { grid-template-columns: 1fr; }
+  section + section { margin-top: 25px; padding-top: 29px; }
+  th, td { padding: 9px 10px; font-size: 14px; }
+  .topology { grid-template-columns: 1fr; }
+  .wire strong { transform: rotate(90deg); margin: 5px; }
+  .node { text-align: center; }
+}
+@media print {
+  @page { margin: 15mm; }
+  :root { color-scheme: light; --paper: #fff; --surface: #f6f6f6; --silver: #eee; --ink: #111; --muted: #333; --edge: #bbb; --accent: #14344f; --tint: #f0f4f7; }
+  body { font-size: 10.5pt; }
+  .frame { display: block; padding: 14px 0 0; max-width: none; }
+  .masthead, aside, .skip, .end, .hero::before { display: none; }
+  .hero { display: block; color: var(--ink); background: white; padding: 0 0 14px; border-bottom: 1pt solid #333; text-align: left; }
+  .hero h1 { font-size: 29pt; max-width: none; }
+  .hero p, .hero .meta, .hero footer { color: var(--ink); font-size: 10.5pt; margin-inline: 0; }
+  .hero footer { margin-top: 8px; }
+  section + section { margin-top: 12px; padding-top: 12px; }
+  h2, h3, figcaption { break-after: avoid; }
+  h2 { font-size: 18pt; }
+  .tbl { overflow: visible; }
+  tr, .card, .note, figure { break-inside: avoid; }
+  .grid { display: block; }
+  .card { margin: 6px 0; padding: 9px 12px; }
+  .topology { grid-template-columns: 1fr 32px 1.18fr 32px 1fr; }
+  .wire strong { transform: none; }
+  th, td { font-size: 10pt; padding: 5px 8px; }
+}
 </style>
 </head>
-<body id="top"><a class="skip" href="#overview">跳到正文</a>
-<div class="frame"><aside><div class="brand"><i class="mark" aria-hidden="true"></i>任务小站</div><p class="date">开发方案 / 2026.11.18</p>
-<nav class="nav" aria-label="文档目录"><a href="#overview">项目要求</a><a href="#baseline">现有基础</a><a href="#architecture">总体架构</a><a href="#stack">技术选型</a><a href="#environment">开发与运行环境</a><a href="#handoff">无感换机</a><a href="#ownership">人工优先与夜间审批</a><a href="#compute">硬件调度</a><a href="#usage">任务类型与用量</a><a href="#delivery">开发计划与验收</a></nav>
-<button class="print" type="button" onclick="window.print()">打印 / 存为 PDF</button></aside>
-<main><header class="hero"><div class="meta">mobile-monitor ／ 产品与工程设计</div><h1>跨设备开发工作台</h1><p>在公司用 VS Code 写到一半，回家打开 PyCharm，在终端输入平时的 <strong>codex</strong>，接着同一个项目和同一段对话工作。需要本地算力的步骤交给家里电脑，iPhone 随时查看进度。</p><footer>方案日期 2026 年 11 月 18 日　·　基线提交 d42de0c　·　状态：待实施与真机验收</footer></header>
+<body id="top">
+<a class="skip" href="#overview">跳到正文</a>
+<header class="masthead">
+  <div class="masthead-inner">
+    <a class="brand" href="#top" aria-label="澜汐，返回顶部">澜汐</a>
+    <button class="print" type="button" onclick="window.print()">打印 / 存为 PDF</button>
+  </div>
+</header>
+<main>
+  <header class="hero">
+    <div class="hero-copy">
+      <div class="meta">澜汐开发方案</div>
+      <h1>一个跨设备的<br>个人开发空间</h1>
+      <p>在公司用 VS Code 开始，回家用 PyCharm 接着写。照常在终端运行 <strong>codex</strong>，继续同一个项目和原来的对话。计算由合适的设备完成，进度随时可以在 iPhone 上查看。</p>
+      <footer>2026 年 11 月 18 日 · 基线 d42de0c · 待实施与真机验收</footer>
+    </div>
+  </header>
+  <div class="frame">
+    <aside>
+      <details id="contents" open>
+        <summary>文档目录</summary>
+        <nav class="nav" aria-label="文档目录">
+          <a href="#overview">项目要求</a>
+          <a href="#design">前端设计</a>
+          <a href="#baseline">现有基础</a>
+          <a href="#architecture">总体架构</a>
+          <a href="#stack">技术选型</a>
+          <a href="#environment">开发与运行环境</a>
+          <a href="#handoff">无感换机</a>
+          <a href="#ownership">人工优先与夜间审批</a>
+          <a href="#compute">硬件调度</a>
+          <a href="#usage">任务类型与用量</a>
+          <a href="#delivery">开发计划与验收</a>
+        </nav>
+      </details>
+    </aside>
+    <div class="content">
 
-<section id="overview"><h2>项目要求</h2><p>三台 Windows 电脑使用同一套任务小站。一次安装、配对并登记项目后，后台负责交接。日常开发路径仍是打开 IDE、编辑、运行命令，用户无需另开工作台或点击同步。</p>
+<section id="overview"><h2>项目要求</h2><p>三台 Windows 电脑使用同一套澜汐。一次安装、配对并登记项目后，后台负责交接。日常开发路径仍是打开 IDE、编辑、运行命令，用户无需另开工作台或点击同步。</p>
 <div class="grid"><article class="card"><h3>代码和会话一起到达</h3><p>三端保留代码副本。已保存到磁盘的未提交修改、暂存状态、允许同步的新文件和最近可恢复的 Codex 轮次必须相互对应；绝对路径按设备映射。</p></article>
-<article class="card"><h3>人拥有最高优先级</h3><p>任一设备用 VS Code 或 PyCharm 打开项目，任务小站释放该项目的自动控制。最后一个 IDE 关闭、人工 CLI 释放后，后台按原策略接回。</p></article>
+<article class="card"><h3>人拥有最高优先级</h3><p>任一设备用 VS Code 或 PyCharm 打开项目，澜汐释放该项目的自动控制。最后一个 IDE 关闭、人工 CLI 释放后，后台按原策略接回。</p></article>
 <article class="card"><h3>算力和大文件按需使用</h3><p>普通开发就近执行，GPU 任务或受本机性能限制的可迁移步骤自动调度到家里。大对象默认一份持久主副本，工作缓存按需生成，重要数据另存冷备。</p></article>
 <article class="card"><h3>夜间可独立推进</h3><p>项目按长期、短期或探索性管理。夜间在项目沙箱和预算内自动处理符合规则的操作审批，iPhone 可暂停、看结果和处理例外。</p></article></div></section>
+
+<section id="design">
+  <h2>前端设计</h2>
+  <p>不同设备打开的是同一个个人工作空间。工作台默认回到最近的项目、任务或会话，并用相同的名称、信息层级和状态表达，帮助用户接上上次的工作。</p>
+  <ul>
+    <li><strong>让当前工作先被看见。</strong> 首页优先呈现可以继续的工作和需要用户处理的事项。设备、同步、存储和算力细节收进对应页面。只有它们影响当前操作时，才在当前界面说明原因。</li>
+    <li><strong>让潮汐体现在阅读和交互节奏上。</strong> 采用有留白的排版、柔和的明暗过渡和克制的交互反馈。颜色、圆角和动效由内容和交互状态决定。浅色与深色界面都要保持清晰。</li>
+    <li><strong>桌面和手机保持一致的操作语义。</strong> 桌面并排展示列表和详情，iPhone 逐层进入。审批面板保留执行设备、工作目录和实际命令。交互验收覆盖键盘焦点、触控热区、减弱动态效果和 iPhone 安全区。</li>
+  </ul>
+  <p class="refs">设计依据来自《澜汐｜前端设计主导思想》，实现参考 <a href="https://github.com/0xKoru/apple-hig-codex-skills/blob/main/skills/implement-apple-web-ui/SKILL.md">implement-apple-web-ui</a>。</p>
+</section>
 
 <section id="baseline"><h2>现有基础</h2><p>现有项目已经能在 Windows 上查看和控制本机任务。以下模块是本次开发的起点。</p>
 <div class="tbl"><table><thead><tr><th>已有模块</th><th>仓库现状及扩展位置</th></tr></thead><tbody>
@@ -69,8 +311,8 @@
 </ol><p class="note"><strong>首项技术验证</strong>　在两台 Windows 的不同盘符、两个 IDE 的真实终端中，输入同一条日常启动命令，核对原线程 ID、历史轮次、实际工作目录和新回复。编辑器尚未落盘的缓冲区、运行中进程和 GPU 显存不能当作可恢复快照。</p>
 <h3>大文件与低磁盘</h3><p>仓库存指针，大文件按需下载工作副本。单主副本所在设备离线时，界面显示可用缓存或等待来源；重要对象按策略在另一台设备保留第二份。调度先从在线且空间充足的节点中选址，预留整次上传所需容量。初始候选阈值为剩余低于 10% 停止分配、低于 5% 进入只读，真机测试后调整。</p><p>冷文件迁移按复制、目标哈希校验、事务切换索引、清理旧副本的顺序执行。上传期间固定目标，迁移失败继续从旧副本读取。每个阶段可在重启后重试。</p></section>
 
-<section id="ownership"><h2>人工优先与夜间审批</h2><p><strong>控制权按项目判断。</strong> 任一设备用 VS Code 或 PyCharm 打开登记项目，立即阻止任务小站发起新的自动操作，释放该项目的控制连接。后台可以继续采集设备状态、封存快照和完成用户从前台发起的计算。远端快照先放入暂存区，避免改写用户正打开的工作树。</p>
-<div class="tbl"><table><thead><tr><th>事件</th><th>任务小站的行为</th></tr></thead><tbody>
+<section id="ownership"><h2>人工优先与夜间审批</h2><p><strong>控制权按项目判断。</strong> 任一设备用 VS Code 或 PyCharm 打开登记项目，立即阻止澜汐发起新的自动操作，释放该项目的控制连接。后台可以继续采集设备状态、封存快照和完成用户从前台发起的计算。远端快照先放入暂存区，避免改写用户正打开的工作树。</p>
+<div class="tbl"><table><thead><tr><th>事件</th><th>澜汐的行为</th></tr></thead><tbody>
 <tr><th>IDE 打开项目</th><td>通过两个 IDE 的项目打开、关闭事件和心跳报告规范化路径，覆盖多窗口和 VS Code 多根工作区。先撤销自动推进与自动审批权，取消未发送的后台操作；执行中的步骤到可安全停止的位置再释放。</td></tr>
 <tr><th>关闭 IDE 或崩溃</th><td>最后一个相关窗口关闭后核对其余设备、外部 CLI、待处理工具调用和实际进程。确认人工已释放后自动连接，按项目原有设置恢复。心跳中断或失联先核对，避免误抢控制权。</td></tr>
 <tr><th>进入睡眠时段</th><td>按用户本地时区和设定时段生效。项目已启用夜间托管、写入权有效且预算充足时，允许在项目沙箱内读写、构建和测试，并对策略覆盖的当前工具审批自动答复。</td></tr>
@@ -102,20 +344,37 @@
 <tr><th>六 · 存储与发布</th><td>验证容量阈值、冷迁移、双副本和唯一来源离线。统一安装器复用已有工具，支持客户端或家庭中心角色、登录启动、升级与回滚。用原有 Python 回归、Qt smoke 和 Web 测试覆盖已有功能。</td></tr>
 </tbody></table></div><p><strong>首轮联调要记录的现场数据</strong>包括三机实际 CLI 和终端版本、家庭 GPU 与网络带宽、典型大文件体积、公司机可同步项目、VPN 路由、常用 GPU 命令和睡眠时段。用这些数据确定兼容矩阵、性能预算及排期。</p>
 <p class="refs">需求来源　《跨设备代码与 Codex 记忆同步软件需求文档》及 2026-11-18 补充的 IDE、CLI、iPhone、VPN、GPU、人工优先和夜间沙箱要求。</p></section>
-<p class="end"><a href="#top">返回文档顶部 ↑</a></p></main></div>
+      <p class="end"><a href="#top">返回文档顶部 ↑</a></p>
+    </div>
+  </div>
+</main>
 <script>
 const links = Array.from(document.querySelectorAll('.nav a'));
 const sections = links.map(link => document.querySelector(link.hash));
+const contents = document.getElementById('contents');
+const compact = window.matchMedia('(max-width: 760px)');
+
+function updateDirectory() {
+  contents.open = !compact.matches;
+}
+
 function updateNavigation() {
   let active = 0;
   for (let i = 0; i < sections.length; i++) {
-    if (sections[i].getBoundingClientRect().top <= 85) active = i;
+    if (sections[i].getBoundingClientRect().top <= 86) active = i;
   }
   links.forEach((link, i) => {
     if (i === active) link.setAttribute('aria-current', 'location');
     else link.removeAttribute('aria-current');
   });
 }
+for (const link of links) {
+  link.addEventListener('click', () => {
+    if (compact.matches) contents.open = false;
+  });
+}
+compact.addEventListener('change', updateDirectory);
+updateDirectory();
 window.addEventListener('scroll', updateNavigation, {passive: true});
 window.addEventListener('resize', updateNavigation);
 updateNavigation();

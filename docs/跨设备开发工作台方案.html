@@ -19,6 +19,7 @@
   --glass: rgb(255 255 255 / 91%);
   --gutter: clamp(20px, 4vw, 64px);
   --bar-height: 57px;
+  --font-verse: "Songti SC", "Noto Serif CJK SC", "SimSun", serif;
 }
 * { box-sizing: border-box; }
 html { scroll-padding-top: calc(var(--bar-height) + 24px); }
@@ -93,13 +94,15 @@ a:focus-visible, button:focus-visible, summary:focus-visible {
 .hero-copy { max-width: 510px; }
 .hero .meta { color: #dcf2ff; font-size: 15px; font-weight: 620; }
 .hero h1 {
-  margin: 14px 0 19px;
-  font-family: "Songti SC", "Noto Serif CJK SC", "SimSun", serif;
-  font-size: clamp(50px, 6.9vw, 91px);
+  margin: 14px 0 9px;
+  font-family: var(--font-verse);
+  font-size: clamp(46px, 6vw, 80px);
   font-weight: 680;
   line-height: 1.13;
   letter-spacing: -.04em;
 }
+.hero .poem-source { margin-bottom: 18px; color: #d1e8f5; font-size: 14px; }
+.hero .poem-source a { color: inherit; }
 .hero p { max-width: 25em; margin: 0; color: #e3f3fd; font-size: clamp(16px, 1.5vw, 19px); line-height: 1.7; }
 .hero-link {
   display: inline-flex;
@@ -140,6 +143,8 @@ section + section { margin-top: 38px; padding-top: 38px; border-top: 1px solid v
 h2 { margin: 0 0 14px; font-size: clamp(27px, 3.3vw, 39px); font-weight: 680; line-height: 1.2; letter-spacing: -.036em; }
 h3 { font-size: 19px; line-height: 1.4; margin: 22px 0 7px; }
 p { margin: 8px 0 15px; }
+.verse { color: var(--accent); font: 650 clamp(18px, 2.1vw, 24px)/1.6 var(--font-verse); }
+.verse-source { display: block; color: var(--muted); font: 400 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; }
 ul, ol { padding-left: 1.4em; margin: 8px 0 14px; }
 li + li { margin-top: 6px; }
 code { font: .9em/1.5 "SF Mono", Consolas, monospace; background: var(--silver); border-radius: 5px; padding: 2px 4px; overflow-wrap: anywhere; }
@@ -201,7 +206,7 @@ figcaption { color: var(--ink); font-weight: 650; margin-bottom: 15px; }
     background-image: linear-gradient(180deg, rgb(8 52 113 / 19%) 12%, rgb(3 28 49 / 60%) 46%, rgb(3 22 42 / 96%) 91%), url("assets/os-x-mavericks-wave.jpg");
     background-position: 73% center;
   }
-  .hero h1 { font-size: clamp(44px, 11.7vw, 68px); }
+  .hero h1 { font-size: clamp(40px, 11vw, 66px); }
   .grid { grid-template-columns: 1fr; }
   section + section { margin-top: 25px; padding-top: 29px; }
   th, td { padding: 9px 10px; font-size: 14px; }
@@ -217,7 +222,7 @@ figcaption { color: var(--ink); font-weight: 650; margin-bottom: 15px; }
   .masthead, aside, .skip, .end, .hero-link { display: none; }
   .hero { display: block; min-height: 0; color: var(--ink); background: white; padding: 0 0 14px; border-bottom: 1pt solid #333; text-align: left; }
   .hero h1 { font-size: 29pt; max-width: none; }
-  .hero p, .hero .meta, .hero footer { color: var(--ink); font-size: 10.5pt; margin-inline: 0; }
+  .hero p, .hero .poem-source, .hero .meta, .hero footer { color: var(--ink); font-size: 10.5pt; margin-inline: 0; }
   .hero footer { margin-top: 8px; }
   section + section { margin-top: 12px; padding-top: 12px; }
   h2, h3, figcaption { break-after: avoid; }
@@ -245,8 +250,9 @@ figcaption { color: var(--ink); font-weight: 650; margin-bottom: 15px; }
     <div class="hero-inner">
       <div class="hero-copy">
         <div class="meta">澜汐 · 跨设备开发工作台</div>
-        <h1>一处开始，<br>处处继续。</h1>
-        <p>在公司写下的代码，回家打开还是原来的项目。终端里继续上一段对话，iPhone 上也能看到工作进度。</p>
+        <h1>潮平两岸阔，<br>风正一帆悬。</h1>
+        <p class="poem-source">唐 · 王湾 <a href="https://zh.wikisource.org/wiki/次北固山下">《次北固山下》</a></p>
+        <p><strong>一处开始，处处继续。</strong> 在公司写下的代码，回家打开还是原来的项目。终端里继续上一段对话，iPhone 上也能看到工作进度。</p>
         <a class="hero-link" href="#overview">阅读开发方案 <span aria-hidden="true">↓</span></a>
         <footer>2026 年 11 月 18 日 · 开发方案 · 待真机验收</footer>
       </div>
@@ -291,7 +297,8 @@ figcaption { color: var(--ink); font-weight: 650; margin-bottom: 15px; }
     <li><strong>桌面和手机保持一致的操作语义。</strong> 桌面并排展示列表和详情，iPhone 逐层进入。审批面板保留执行设备、工作目录和实际命令。交互验收覆盖键盘焦点、触控热区、减弱动态效果和 iPhone 安全区。</li>
   </ul>
   <h3>界面用词</h3>
-  <p>用简短、自然、有一点诗意的中文。首页标题可用「一处开始，处处继续。」日报页保留「每日工作报告」作导航名，页内可用「今天，写到了这里。」引出总结。空状态可写「今天还没有留下记录。」</p>
+  <p>首页、日报和技术探索用贴合当下情境的古诗原句。参考 <code>poetry-skills</code> 按主题、意象和关键词选句，核对原文、作者和篇名后再使用。首页可借江潮写跨设备接续，日报可借暮色收束一天，技术探索可用登高写视野的展开。 <a href="https://github.com/Wscats/poetry-skills">Wscats / poetry-skills</a></p>
+  <p>导航保留「每日工作报告」「项目长期记忆」等直白标题，诗句用于页首或引言，正文明说用户能看到什么、做什么。</p>
   <p>按钮、状态、权限和错误提示直接说明动作与结果。文件尚未同步时，可写「家里台式机暂未连接，改动已保存在本机。」审批按钮用「允许一次」和「拒绝」，并展示命令、目录与设备。</p>
   <h3>视觉与动效</h3>
   <ul>
@@ -373,6 +380,7 @@ figcaption { color: var(--ink); font-weight: 650; margin-bottom: 15px; }
 
 <section id="reports">
   <h2>每日工作报告</h2>
+  <p class="verse">山光忽西落，池月渐东上。 <span class="verse-source">唐 · 孟浩然 <a href="https://zh.wikisource.org/zh-hans/孟浩然集_(四庫全書本)/卷1">《夏日南亭怀辛大》</a></span></p>
   <p>澜汐按用户所在时区每天自动生成一份报告，可设置出报时间。桌面工作台和 iPhone 查看同一份内容，可回看历史日期。中心节点离线时补生成，设备晚到的数据合并到原日的报告，并标出更新时间。</p>
   <div class="tbl"><table><thead><tr><th>报告内容</th><th>统计口径与证据</th></tr></thead><tbody>
     <tr><th>今天做了什么</th><td>按项目列出当天参与的任务、编辑、对话、运行结果和变更。汇总人工操作与 Codex 后台推进，并链接具体任务、会话、提交或验证记录。</td></tr>
@@ -382,6 +390,8 @@ figcaption { color: var(--ink); font-weight: 650; margin-bottom: 15px; }
     <tr><th>今日技术探索</th><td>按问题、尝试、结果、结论和待验证项记录调研与实验，保留失败或无改善的尝试。引用原始会话、实验记录和输出位置。</td></tr>
   </tbody></table></div>
   <p>同一用户、同一本地日期对应一份日报。报告完成时保存所用事件版本，次日补传后可更新并追溯。无法分配给具体项目的用量或时长标为未归类，采集缺口标为未知。</p>
+  <h3>技术探索引言示例</h3>
+  <p class="verse">欲穷千里目，更上一层楼。 <span class="verse-source">唐 · 王之涣 <a href="https://zh.wikisource.org/zh-hans/登鸛鵲樓">《登鹳雀楼》</a></span></p>
 </section>
 
 <section id="memory">
@@ -412,7 +422,7 @@ figcaption { color: var(--ink); font-weight: 650; margin-bottom: 15px; }
 <tr><th>四 · 硬件自动调度</th><td>公司机发起 GPU 作业，核对家庭设备执行、终端结果与文件校验。笔记本测试本地资源充足、显存不足、家里忙碌和中途掉线。比较本地运行与远程端到端耗时，检查同一作业只交付一次。</td></tr>
 <tr><th>五 · 分类、额度与夜间</th><td>验证三类任务的结束条件、额度去重、超额暂停和到点重查。夜间沙箱内构建通过，越界操作留待审批，用户半夜打开 IDE 后自动审批立即停发，次日可核对全部动作。</td></tr>
 <tr><th>六 · 日报与项目记忆</th><td>用公司台式机、私人笔记本和家里台式机产生至少两个项目的记录，验证 token 去重、人工与后台时长、补传更新、iPhone 查看及项目间档案隔离。逐条核对日报结论和原始会话或实验记录。</td></tr>
-<tr><th>七 · 存储与发布</th><td>验证容量阈值、冷迁移、双副本和唯一来源离线。统一安装器复用已有工具，支持客户端或家庭中心角色、登录启动、升级与回滚。用原有 Python 回归、Qt smoke 和 Web 测试覆盖已有功能。按前端设计章节检查首页、日报、审批和异常提示的用词，并在桌面和 iPhone 验证视觉层级、交互反馈及减弱动态效果。</td></tr>
+<tr><th>七 · 存储与发布</th><td>验证容量阈值、冷迁移、双副本和唯一来源离线。统一安装器复用已有工具，支持客户端或家庭中心角色、登录启动、升级与回滚。用原有 Python 回归、Qt smoke 和 Web 测试覆盖已有功能。核对首页、日报和技术探索的诗句与出处，检查审批和异常提示的用词，并在桌面和 iPhone 验证视觉层级、交互反馈及减弱动态效果。</td></tr>
 </tbody></table></div><p><strong>首轮联调要记录的现场数据</strong>包括三机实际 CLI 和终端版本、家庭 GPU 与网络带宽、典型大文件体积、公司机可同步项目、VPN 路由、常用 GPU 命令和睡眠时段。用这些数据确定兼容矩阵、性能预算及排期。</p>
 <p class="refs">需求来源　《跨设备代码与 Codex 记忆同步软件需求文档》及会话补充的设备、IDE、CLI、iPhone、VPN、GPU、人工优先、夜间沙箱、每日工作报告、项目归档与扩展接口要求。</p></section>
       <p class="end"><a href="#top">返回文档顶部 ↑</a></p>

@@ -3,24 +3,28 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import threading
 import time
 import uuid
-from pathlib import Path, PureWindowsPath
+from collections import Counter
+from pathlib import Path
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QSharedMemory, QSignalBlocker, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QPainter, QPainterPath, QPen, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QDialog, QFrame, QGraphicsDropShadowEffect, QGraphicsOpacityEffect,
-    QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+    QHBoxLayout, QLabel, QLineEdit, QTreeWidget, QTreeWidgetItem,
     QMainWindow, QMenu, QMessageBox, QPushButton, QSizePolicy, QStackedWidget, QStyle, QSystemTrayIcon,
     QTextBrowser, QTextEdit, QVBoxLayout,
 )
 
 import monitor
 from desktop_glass import ClientSwitch, FrostedPanel, OceanBackdrop, motion_enabled
+from desktop_notebook import NotebookDialog, NotebookStore
+from desktop_projects import SessionTitles, folder_name, project_group
 from desktop_theme import STYLESHEET, configure_text, message_html, set_reading_html, ui_font, warning_html
 
 MUTED = '#24495f'
@@ -33,10 +37,6 @@ UUID_PATTERN = re.compile(r'\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a
 def display_text(value):
     """Identifiers remain in data, not in task captions or operation notices."""
     return UUID_PATTERN.sub('此任务', str(value or ''))
-
-
-def folder_name(directory):
-    return PureWindowsPath(directory).name if isinstance(directory, str) and directory else ''
 
 
 def label(text, size=13, bold=False, color=None):
@@ -89,6 +89,15 @@ class VerseTitle(QLabel):
         pen = QPen(ink, .85)
         pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
         painter.strokePath(glyphs, pen)
+
+
+class ProjectTree(QTreeWidget):
+    def drawRow(self, painter, option, index):
+        painter.save()
+        if index.parent().isValid():
+            painter.setClipRect(self.visualRect(index), Qt.ClipOperation.IntersectClip)
+        super().drawRow(painter, option, index)
+        painter.restore()
 
 
 class ActionHeader(QFrame):
@@ -203,12 +212,17 @@ class MainWindow(QMainWindow):
         self._error_events = {}
         self._dialogs = []
         self._task_signature = None
+        self.session_titles = SessionTitles()
+        self.project_items = {}
+        self.task_items = {}
+        self.collapsed_projects = {'codex': set(), 'claude': set()}
         self._pending_approvals = {}
         self._shown_approvals = set()
         self.approval_dialog = None
         self._review_token = None
         self._rename_target = None
         self._project_directory = None
+        self.notebook = None
         self._conversation_signature = None
         self.setWindowTitle(WINDOW_TITLE)
         icon_path = Path(getattr(sys, '_MEIPASS', monitor.ROOT)) / 'app.ico'
@@ -326,15 +340,18 @@ class MainWindow(QMainWindow):
         self.task_search.setPlaceholderText('寻一件案头事')
         self.task_search.textChanged.connect(self.filter_tasks)
         side.addWidget(self.task_search)
-        self.task_choice = QListWidget()
+        self.task_choice = ProjectTree()
         self.task_choice.setObjectName('taskList')
-        self.task_choice.setAccessibleName('任务列表')
-        self.task_choice.setSpacing(3)
+        self.task_choice.setAccessibleName('项目与对话')
+        self.task_choice.setHeaderHidden(True)
+        self.task_choice.setIndentation(14)
         self.task_choice.setWordWrap(True)
         self.task_choice.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.task_choice.currentItemChanged.connect(self.select_task)
         self.task_choice.itemClicked.connect(self.focus_task)
         self.task_choice.itemActivated.connect(self.focus_task)
+        self.task_choice.itemExpanded.connect(self.expand_project)
+        self.task_choice.itemCollapsed.connect(self.collapse_project)
         self.task_choice.viewport().setAutoFillBackground(False)
         side.addWidget(self.task_choice, 1)
         self.task_empty = label('', 9, color=MUTED)
@@ -342,7 +359,14 @@ class MainWindow(QMainWindow):
         side.addWidget(self.task_empty)
         self.live = label('○ 正在连接', 9, color=MUTED)
         self.live.setObjectName('status')
-        side.addWidget(self.live)
+        footer = QHBoxLayout()
+        footer.addWidget(self.live, 1)
+        notebook_button = QPushButton('吉光片羽')
+        notebook_button.setObjectName('notebookLink')
+        notebook_button.setToolTip('随记、归档与待办')
+        notebook_button.clicked.connect(self.open_notebook)
+        footer.addWidget(notebook_button)
+        side.addLayout(footer)
         middle.addWidget(self.task_panel)
 
         self.conversation_card = FrostedPanel(root)
@@ -464,7 +488,7 @@ class MainWindow(QMainWindow):
             if action == 'open_project':
                 button.clicked.connect(self.open_project)
             elif action == 'attach':
-                button.clicked.connect(lambda: self.focus_task(self.task_choice.currentItem()))
+                button.clicked.connect(lambda: self.focus_task(self.task_items.get(self.selected_thread)))
             else:
                 button.clicked.connect(lambda _=False, action=action: self.operate(action))
             self.action_buttons[action] = button
@@ -476,6 +500,7 @@ class MainWindow(QMainWindow):
         self.tray.setToolTip(WINDOW_TITLE)
         menu = QMenu(self)
         menu.addAction('打开澜汐', self.show_window)
+        menu.addAction('吉光片羽', self.open_notebook)
         menu.addAction('运行与额度', self.show_details)
         menu.addAction('查看待审批请求', lambda: self.offer_approval(force=True))
         menu.addSeparator()
@@ -503,6 +528,8 @@ class MainWindow(QMainWindow):
             return
         self._shutdown_complete = True
         self._quitting = True
+        if self.notebook is not None:
+            self.notebook.flush()
         self.stop.set()
         self.timer.stop()
         if self.worker:
@@ -514,9 +541,22 @@ class MainWindow(QMainWindow):
         self.details_dialog.show()
         self.details_dialog.raise_()
 
+    def open_notebook(self):
+        if self.notebook is None:
+            try:
+                self.notebook = NotebookDialog(NotebookStore(monitor.ROOT / 'lanxi-notebook.sqlite3'), self)
+            except sqlite3.Error:
+                self._popup('吉光片羽暂未打开', '暂时无法读写本机笔记库。')
+                return
+        self.notebook.show()
+        self.notebook.raise_()
+        self.notebook.activateWindow()
+
     def select_task(self, current, _previous):
-        self.change_task(self.client, current.data(Qt.ItemDataRole.UserRole) if current else '')
-        self.refresh()
+        tid = current.data(0, Qt.ItemDataRole.UserRole) if current else None
+        if tid:
+            self.change_task(self.client, tid)
+            self.refresh()
 
     def change_task(self, client, tid):
         previous = (self.client, self.selected_thread)
@@ -527,27 +567,45 @@ class MainWindow(QMainWindow):
             self.message_edit.setPlainText(self.task_drafts.get(selected, ''))
             self._conversation_signature = None
 
-    def focus_task(self, item):
+    def focus_task(self, item, _column=0):
         if item is None:
             return
-        tid = item.data(Qt.ItemDataRole.UserRole)
+        tid = item.data(0, Qt.ItemDataRole.UserRole)
+        if not tid:
+            return
         last = next((operation for (client, _), operation in reversed(self._pending_operations.items())
                      if client == self.client and operation['action'] == 'focus'), None)
         if not last or last['threadId'] != tid:
             self.operate('focus', tid=tid)
 
     def task_title(self):
-        item = self.task_choice.currentItem()
-        return item.data(TASK_TITLE_ROLE) if item is not None else ''
+        item = self.task_items.get(self.selected_thread)
+        return item.data(0, TASK_TITLE_ROLE) if item is not None else ''
+
+    def expand_project(self, item):
+        if not self.task_search.text().strip():
+            self.collapsed_projects[self.client].discard(item.data(0, TASK_DIRECTORY_ROLE))
+
+    def collapse_project(self, item):
+        if not self.task_search.text().strip():
+            self.collapsed_projects[self.client].add(item.data(0, TASK_DIRECTORY_ROLE))
 
     def filter_tasks(self):
         query = self.task_search.text().strip().casefold()
         matches = 0
-        for row in range(self.task_choice.count()):
-            item = self.task_choice.item(row)
-            visible = query in item.data(TASK_TITLE_ROLE).casefold() or query in (item.data(TASK_DIRECTORY_ROLE) or '').casefold()
-            item.setHidden(not visible)
-            matches += int(visible)
+        with QSignalBlocker(self.task_choice):
+            for key, group in self.project_items.items():
+                group_matches = 0
+                for row in range(group.childCount()):
+                    item = group.child(row)
+                    visible = (query in item.data(0, TASK_TITLE_ROLE).casefold()
+                               or query in (item.data(0, TASK_DIRECTORY_ROLE) or '').casefold()
+                               or query in group.text(0).casefold())
+                    item.setHidden(not visible)
+                    group_matches += int(visible)
+                group.setHidden(group_matches == 0)
+                group.setExpanded(bool(query) or key not in self.collapsed_projects[self.client])
+                matches += group_matches
         self.task_empty.setText('案头未见这一件，换个词再寻。' if query else '案头暂空，待写新篇。')
         self.task_empty.setVisible(matches == 0)
 
@@ -568,26 +626,46 @@ class MainWindow(QMainWindow):
                 caption = '暂泊中' if self.client == 'claude' and status == 'active' else '已暂泊 · 待续航'
             else:
                 caption = {'active': '行舟中', 'systemError': '执行异常'}.get(status, '已执舟')
-            rows.append((tid, title, caption, directory))
-        if rows != self._task_signature:
+            rows.append((tid, title, caption, directory, project_group(directory)))
+        signature = (self.client, rows)
+        if signature != self._task_signature:
             previous_scroll = self.task_choice.verticalScrollBar().value()
-            self._task_signature = rows
+            self._task_signature = signature
+            group_names = Counter({row[4][0]: row[4][1].casefold() for row in rows}.values())
             with QSignalBlocker(self.task_choice):
+                self.task_items.clear()
+                self.project_items.clear()
                 self.task_choice.clear()
-                for tid, title, caption, directory in rows:
-                    item = QListWidgetItem(f'{title}\n{caption}', self.task_choice)
-                    item.setData(Qt.ItemDataRole.UserRole, tid)
-                    item.setData(TASK_TITLE_ROLE, title)
-                    item.setData(TASK_DIRECTORY_ROLE, directory)
-                    item.setToolTip('\n'.join(filter(None, (title, caption, directory))))
+                seen_titles = {}
+                for tid, title, caption, directory, (key, group_name, workspace) in rows:
+                    group = self.project_items.get(key)
+                    if group is None:
+                        qualifier = folder_name(str(Path(workspace).parent))
+                        caption_name = (f'{group_name} · {qualifier}' if qualifier and group_names[group_name.casefold()] > 1
+                                        else group_name)
+                        group = QTreeWidgetItem(self.task_choice, [caption_name])
+                        group.setFont(0, ui_font(10, True))
+                        group.setData(0, TASK_DIRECTORY_ROLE, key)
+                        group.setToolTip(0, workspace)
+                        self.project_items[key] = group
+                    title_key = key, title.casefold()
+                    seen_titles[title_key] = seen_titles.get(title_key, 0) + 1
+                    count = seen_titles[title_key]
+                    visible_title = f'{title} · {count}' if count > 1 else title
+                    item = QTreeWidgetItem(group, [f'{visible_title}\n{caption}'])
+                    item.setData(0, Qt.ItemDataRole.UserRole, tid)
+                    item.setData(0, TASK_TITLE_ROLE, title)
+                    item.setData(0, TASK_DIRECTORY_ROLE, directory)
+                    item.setToolTip(0, '\n'.join(filter(None, (visible_title, caption, directory))))
+                    self.task_items[tid] = item
                 self.filter_tasks()
             self.task_choice.verticalScrollBar().setValue(previous_scroll)
-        index = next((i for i, row in enumerate(rows) if row[0] == self.selected_thread), 0 if rows else -1)
-        if self.task_choice.currentRow() != index:
+        if self.selected_thread not in self.task_items:
+            self.change_task(self.client, next(iter(self.task_items), ''))
+        item = self.task_items.get(self.selected_thread)
+        if self.task_choice.currentItem() is None and item is not None and item.parent().isExpanded():
             with QSignalBlocker(self.task_choice):
-                self.task_choice.setCurrentRow(index)
-        item = self.task_choice.currentItem()
-        self.change_task(self.client, item.data(Qt.ItemDataRole.UserRole) if item is not None else '')
+                self.task_choice.setCurrentItem(item)
 
     def all_tasks(self, snap, client=None):
         client = client or self.client
@@ -603,10 +681,13 @@ class MainWindow(QMainWindow):
             history = labels.get(tid, {})
             directory = next((value for value in (thread.get('cwd'), control.get('cwd'), history.get('cwd'))
                               if isinstance(value, str) and value), '')
-            title = names.get(tid) or folder_name(directory)
+            title = names.get(tid)
             if not title:
-                title = display_text(thread.get('title') or thread.get('name') or control.get('title')
-                                     or history.get('title') or '未命名任务')
+                project = project_group(directory)[1]
+                title = display_text(self.session_titles.title(
+                    tid, project, thread.get('title'), thread.get('name'), control.get('title'),
+                    history.get('title'), codex=client == 'codex',
+                ) or '未题会话')
             projects[tid] = title, directory
         return projects
 
@@ -623,6 +704,8 @@ class MainWindow(QMainWindow):
 
     def refresh(self):
         snap = monitor.client_snapshot(monitor.snapshot(), self.client)
+        if self.client == 'codex':
+            self.session_titles.refresh()
         connected = snap.get('connection') == 'connected'
         self.live.setText('● 已连接' if connected else '○ 连接待检查')
         if self.live.property('connected') != str(connected).lower():

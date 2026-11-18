@@ -2,6 +2,7 @@
 import argparse
 import copy
 import sys
+import tempfile
 import time
 from pathlib import Path
 from unittest.mock import patch
@@ -16,6 +17,7 @@ from PySide6.QtWidgets import QApplication, QDialog, QFrame, QLabel, QMessageBox
 import monitor
 from automation import Approvals
 from desktop_glass import FrostedPanel, OceanBackdrop
+from desktop_notebook import NotebookStore
 from desktop_qt import MainWindow
 from desktop_theme import configure_text, message_html, set_reading_html, ui_font
 
@@ -98,6 +100,44 @@ def check_client_switch(window, output):
         assert switch.position == 0.0 and not switch.spring.isActive()
 
 
+def check_notebook(window, output):
+    with tempfile.TemporaryDirectory() as directory, patch.object(monitor, 'ROOT', Path(directory)):
+        entry = window.findChild(QPushButton, 'notebookLink')
+        QTest.mouseClick(entry, Qt.MouseButton.LeftButton)
+        dialog = window.notebook
+        assert dialog is not None and dialog.isVisible()
+        note = dialog.notes
+        note.title.setText('海边的随记')
+        note.body.setPlainText('记录日常灵感，晚上再回看。')
+        QTest.qWait(520)
+        store = NotebookStore(Path(directory) / 'lanxi-notebook.sqlite3')
+        assert store.entries('note', False)[0][1:] == ('海边的随记', '记录日常灵感，晚上再回看。')
+        dialog.grab().save(str(output / 'notebook-desktop.png'))
+        QTest.mouseClick(note.file_button, Qt.MouseButton.LeftButton)
+        assert not store.entries('note', False)
+        note.view.setCurrentIndex(1)
+        note.list.setCurrentRow(0)
+        assert note.body.toPlainText() == '记录日常灵感，晚上再回看。'
+        QTest.mouseClick(note.file_button, Qt.MouseButton.LeftButton)
+        assert not store.entries('note', True) and store.entries('note', False)
+
+        dialog.tabs.setCurrentWidget(dialog.todos)
+        todo = dialog.todos
+        todo.title.setText('整理项目待办')
+        QTest.mouseClick(todo.save_button, Qt.MouseButton.LeftButton)
+        QTest.mouseClick(todo.file_button, Qt.MouseButton.LeftButton)
+        assert not store.entries('todo', False) and store.entries('todo', True)
+        todo.view.setCurrentIndex(1)
+        todo.list.setCurrentRow(0)
+        assert todo.title.text() == '整理项目待办'
+        QTest.mouseClick(todo.file_button, Qt.MouseButton.LeftButton)
+        todo.new_entry()
+        todo.title.setText('关闭窗口时保存')
+        dialog.close()
+        assert not dialog.isVisible()
+        assert {row[1] for row in store.entries('todo', False)} == {'整理项目待办', '关闭窗口时保存'}
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output', type=Path, required=True)
@@ -176,9 +216,9 @@ def main():
             QTest.qWait(190)
             assert window.conversation_header.opacity.opacity() == 0.0
             window.task_search.setText('不存在的任务')
-            assert window.task_choice.item(0).isHidden() and window.task_empty.isVisible()
+            assert window.task_items[CODEX].isHidden() and window.task_empty.isVisible()
             window.task_search.clear()
-            assert not window.task_choice.item(0).isHidden()
+            assert not window.task_items[CODEX].isHidden()
             assert not hasattr(window, 'operation_log'), 'History must not be in the visible UI'
             # Reproduce the cold-start sequence, not only a preloaded snapshot:
             # placeholder -> DB ready with old failures -> more old pages arrive.
@@ -205,21 +245,35 @@ def main():
                     cold_window.close()
                     cold_window.deleteLater()
                     app.processEvents()
-            assert window.task_title() == Path(project_directory).name
+            assert window.task_title() == '中文界面测试'
             other = '22222222-2222-4222-8222-222222222222'
+            separate = '33333333-3333-4333-8333-333333333333'
             primary = {'id': CODEX, 'title': '中文界面测试', 'status': {'type': 'active'}, 'cwd': project_directory}
-            monitor.update(threads=[primary, {'id': other, 'title': '上次会话摘要', 'cwd': 'D:\\Archive\\示例项目\\'}])
+            monitor.update(threads=[
+                primary, {'id': other, 'title': '整理笔记归档', 'cwd': project_directory},
+                {'id': separate, 'title': '不同项目的会话', 'cwd': 'D:/Archive/mobile-monitor'},
+            ])
             window.refresh()
-            assert window.conversation_heading.text() == Path(project_directory).name
-            assert window.task_choice.item(1).text() == '示例项目\n待执舟'
+            assert window.conversation_heading.text() == '中文界面测试'
+            group = window.task_items[CODEX].parent()
+            assert group.text(0).startswith(Path(project_directory).name) and group.childCount() == 2
+            assert window.task_items[other].parent() is group
+            assert window.task_items[separate].parent() is not group
+            assert window.task_items[other].text(0) == '整理笔记归档\n待执舟'
+            group.setExpanded(False)
+            window.task_search.setText('笔记归档')
+            assert group.isExpanded() and not window.task_items[other].isHidden()
+            window.task_search.clear()
+            assert not group.isExpanded()
+            group.setExpanded(True)
             window.message_edit.setPlainText('单个任务的草稿')
-            second_row = window.task_choice.visualItemRect(window.task_choice.item(1)).center()
+            second_row = window.task_choice.visualItemRect(window.task_items[other]).center()
             QTest.mouseClick(window.task_choice.viewport(), Qt.MouseButton.LeftButton, pos=second_row)
             assert window.selected_thread == other and codex.calls[-1][:2] == (other, 'focus')
             assert window.message_edit.toPlainText() == ''
             window.refresh()
-            assert window.task_choice.currentItem().text().endswith('执舟中')
-            first_row = window.task_choice.visualItemRect(window.task_choice.item(0)).center()
+            assert window.task_items[other].text(0).endswith('执舟中')
+            first_row = window.task_choice.visualItemRect(window.task_items[CODEX]).center()
             QTest.mouseClick(window.task_choice.viewport(), Qt.MouseButton.LeftButton, pos=first_row)
             assert codex.calls[-1][:2] == (CODEX, 'focus')
             assert window.message_edit.toPlainText() == '单个任务的草稿'
@@ -463,7 +517,7 @@ def main():
             codex.data['tasks'][0]['paused'] = True
             window.refresh()
             QTest.qWait(20)
-            assert window.task_choice.currentItem().text().endswith('已暂泊 · 待续航')
+            assert window.task_items[CODEX].text(0).endswith('已暂泊 · 待续航')
             assert window.message_hint.text() == '已暂泊，点「续航」后即可发送。'
             assert window.action_buttons['resume'].isEnabled()
             codex.data['tasks'][0]['paused'] = False
@@ -485,6 +539,7 @@ def main():
             window.show_window()
             QTest.qWait(30)
             assert window.isVisible(), 'The tray action must reopen the workspace'
+            check_notebook(window, args.output)
             print('Qt smoke passed: glass, rotation, hover/focus, approval, dual-client controls, drafts, rename, failure dialogs, Chinese glyphs, layout and tray.')
     finally:
         if window is not None:

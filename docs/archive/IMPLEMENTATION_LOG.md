@@ -2,6 +2,14 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-18 项目会话分组与吉光片羽
+
+- 在 R4 界面基线上增设案头项目树，同一 Git 根目录下的会话入同组，其他项目按实际工作目录归组。组内以现有会话标题及本地 Codex 用户消息命名，手动标题优先。同名项目显示父路径。只计算本机历史命名覆盖，4 段记录为 `codexDesk` 的 Codex 会话均能取得已有标题或首条话题。
+- 「吉光片羽」从案头底部或托盘打开，含随记与待办。本机 `lanxi-notebook.sqlite3` 保存两种记录。输入后 450 毫秒自动保存，关闭窗口时提交尚未保存的编辑。Qt 测试验证创建、归档、恢复、待办完成及再次打开数据库读回。
+- Windows 11 x64、Python 3.14.7、PySide6 6.12.0。独立交付源码目录为 `build-exe/verification/lanxi-project-notebook-release/delivery-source/mobile-monitor`，以 R5 的 `9f4ff0d` 为快照叠加本次桌面文件。设置 `QT_QPA_PLATFORM=windows` 后运行 `python tests/smoke_desktop.py --output ../../windows-delivery`。早期项目树截图在缩进处出现多余高亮，最终限制子行绘制区域后复查消失。R4 与 R6 的顶部滑块及诗句截图逐像素一致，右栏差异仅在悬停工具栏的渲染像素范围内。
+- 执行 `python -m unittest discover -s tests -t . -p 'test_*.py' -q`，独立交付源运行 121 项，120 项通过、1 项跳过，11.857 秒。与并行后端工作区的联合回归运行 142 项，141 项通过、1 项跳过，29.622 秒。
+- 在独立源码目录用 PyInstaller 6.22.3 执行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-exe.ps1 -AppName Lanxi-Glass-R6`。交付 `release/Lanxi-Glass-R6.exe` 为 54,103,534 字节，R5 为 54,088,903 字节。归档核对包含项目树、笔记与原生桌面模块。使用 `python build-exe/verify-lanxi-launch.py Lanxi-Glass-R6.exe` 验证隔离副本，在 `build-exe/verification/lanxi-folder-package-l0oc1bfc` 于 1.32 秒检测到窗口和控制库。启动验证使用独立目录，实际模型调用与跨设备联调未执行。
+
 ## 2026-11-18 跨设备项目控制与桌面共用后台
 
 - 目的为验证人工活动能撤销下一次后台写入许可，且原生写入锁在交还后可重新取得。上一阶段 `b707345` 完成跨盘会话续接，回归 128 项、通过 127 项、跳过 1 项。此次实现中心 SQLite 事务、设备身份验证、活动序号和项目版本，接入 Codex 原生发送边界。试验在 Windows、Python 3.14.7、Codex CLI 0.169.1 下进行。

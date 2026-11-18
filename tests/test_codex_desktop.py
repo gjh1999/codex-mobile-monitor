@@ -73,7 +73,7 @@ class Tests(unittest.TestCase):
     def test_continue_unlocks_messages_without_starting_or_steering_another_turn(self):
         self.window.message_edit.setPlainText('补充当前任务方向')
         self.assertFalse(self.window.send_button.isEnabled())
-        resume = self.window.task_action_buttons[TARGET]['resume']
+        resume = self.window.action_buttons['resume']
         self.assertTrue(resume.isEnabled(), 'A controlled running Codex task must allow local Continue')
         self.assertIn('后台运行', self.window.message_hint.text())
         QTest.mouseClick(resume, Qt.MouseButton.LeftButton)
@@ -84,8 +84,8 @@ class Tests(unittest.TestCase):
         self.assertFalse(self.control.snapshot()['tasks'][0]['managed'])
         self.assertEqual(self.window.message_edit.toPlainText(), '补充当前任务方向')
         self.assertTrue(self.window.send_button.isEnabled())
-        self.assertTrue(self.window.task_action_buttons[TARGET]['pause'].isEnabled())
-        self.assertNotIn('resume', self.window.task_action_buttons[TARGET])
+        self.assertTrue(self.window.action_buttons['pause'].isEnabled())
+        self.assertFalse(self.window.action_buttons['resume'].isEnabled())
         self.assertFalse([m for m, p in self.rpc.calls if m in ('turn/start', 'turn/steer', 'thread/goal/set')])
         QTest.mouseClick(self.window.send_button, Qt.MouseButton.LeftButton)
         self.control.tick(self.rpc)
@@ -104,7 +104,7 @@ class Tests(unittest.TestCase):
         self.control.tick(self.rpc)
         self.window.refresh()
         self.assertFalse(self.control.snapshot()['tasks'][0]['canControl'])
-        self.assertFalse(self.window.task_action_buttons[TARGET]['resume'].isEnabled())
+        self.assertFalse(self.window.action_buttons['resume'].isEnabled())
         self.assertFalse(self.window.send_button.isEnabled())
         self.assertFalse([m for m, p in self.rpc.calls if m in ('turn/start', 'turn/steer')])
 

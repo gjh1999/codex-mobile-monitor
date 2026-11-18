@@ -55,9 +55,30 @@ def set_reading_html(widget, html):
     widget.setHtml(html)
     block = widget.document().begin()
     while block.isValid():
-        fmt = QTextBlockFormat()
+        cursor = QTextCursor(block)
+        fmt = block.blockFormat()
+        table = cursor.currentTable()
+        if table is not None:
+            cell_background = table.cellAt(cursor).format().background()
+            # HTML import also assigns the cell color to its text runs.
+            if fmt.background() == cell_background:
+                fmt.clearBackground()
+            runs = []
+            fragment = block.begin()
+            while not fragment.atEnd():
+                item = fragment.fragment()
+                char_format = item.charFormat()
+                if char_format.hasProperty(char_format.Property.BackgroundBrush) and char_format.background() == cell_background:
+                    char_format.clearBackground()
+                    runs.append((item.position(), item.length(), char_format))
+                fragment += 1
+            for position, length, char_format in runs:
+                selection = QTextCursor(widget.document())
+                selection.setPosition(position)
+                selection.setPosition(position + length, QTextCursor.MoveMode.KeepAnchor)
+                selection.setCharFormat(char_format)
         fmt.setLineHeight(150, QTextBlockFormat.LineHeightTypes.ProportionalHeight.value)
-        QTextCursor(block).mergeBlockFormat(fmt)
+        cursor.setBlockFormat(fmt)
         block = block.next()
 
 
@@ -80,9 +101,9 @@ def message_html(role, text, assistant):
         else:
             blocks.extend('<p style="color:#24344d;font-size:10pt;">' + _inline(paragraph) + '</p>'
                           for paragraph in part.strip().split('\n\n') if paragraph)
-    surface = '#f6f8fc' if assistant else '#edf3ff'
+    surface = 'rgba(235,249,255,0.62)' if assistant else 'rgba(214,240,255,0.84)'
     spacer = '<td width="7%"></td>'
-    bubble = (f'<td width="93%" bgcolor="{surface}" style="padding:12px;">'
+    bubble = (f'<td width="93%" style="padding:10px;background-color:{surface};">'
               '<p style="margin-top:0;margin-bottom:7px;font-size:9pt;color:#61738c;">'
               f'<b>{escape(role)}</b></p>{"".join(blocks)}</td>')
     return ('<table width="100%" cellspacing="0" cellpadding="0"><tr>' +
@@ -98,29 +119,21 @@ def warning_html(text):
 
 
 STYLESHEET = '''
-QMainWindow, QWidget#shell { background:#f3f6fb; color:#24344d; }
-QWidget#workspace, QWidget#details { background:transparent; }
-QFrame#sidebar { background:#ffffff; border:1px solid #e1e8f2; border-radius:16px; }
-QFrame#focus, QFrame#sectionCard, QFrame#conversationCard { background:#ffffff; border:1px solid #e1e8f2; border-radius:14px; }
-QFrame#taskCard { background:transparent; border:0; }
-QFrame#sidebarStats { background:#f6f8fc; border:0; border-radius:10px; }
-QFrame#composerBox { background:#f7f9fd; border:1px solid #e1e8f2; border-radius:10px; }
-QFrame#divider { background:#e8edf5; border:0; max-height:1px; }
+QMainWindow { background:#25465e; color:#24344d; }
+QFrame#oceanStats { background:rgba(8, 34, 58, 198); border:1px solid rgba(219, 245, 255, 65); border-radius:13px; }
+QFrame#clientPill { background:rgba(5, 38, 61, 207); border:1px solid rgba(220, 248, 255, 106); border-radius:21px; }
+QFrame#clientThumb { background:#c8eaf8; border-radius:16px; }
+QFrame#composerBox { background:rgba(225, 247, 255, 80); border:1px solid rgba(226, 248, 255, 160); border-radius:11px; }
+QFrame#divider { background:rgba(230, 249, 255, 118); border:0; max-height:1px; }
 QLabel { color:#24344d; background:transparent; }
-QLabel#brand, QLabel#pageTitle, QLabel#taskTitle { color:#1c3151; }
-QLabel#brandMark { color:#ffffff; background:#2b63c6; border-radius:10px; }
-QLabel#sectionTitle { color:#304664; }
-QLabel#eyebrow, QLabel#messageNotice { color:#61738c; }
-QLabel#status { background:#edf6f3; color:#266b57; border-radius:8px; padding:7px 10px; }
-QLabel#status[connected="false"] { background:#f1f3f7; color:#61738c; }
-QLabel#taskState { background:#edf3ff; color:#315d9b; border-radius:7px; padding:5px 9px; }
-QLabel#taskState[tone="warning"] { background:#fff7e9; color:#825719; }
-QLabel#taskState[tone="muted"] { background:#f1f3f7; color:#61738c; }
-QComboBox, QLineEdit { background:#f8faff; color:#24344d; border:1px solid #dce5f2; border-radius:8px; padding:8px 10px; min-height:22px; }
-QComboBox { padding-right:24px; }
-QComboBox::drop-down { border:0; width:24px; }
-QComboBox QAbstractItemView { background:#ffffff; color:#24344d; selection-background-color:#edf3ff; selection-color:#254b86; border:1px solid #dce5f2; padding:4px; }
-QComboBox:focus, QLineEdit:focus { border-color:#7399db; }
+QLabel#status[connected="true"] { color:#154e41; }
+QLineEdit { background:rgba(234, 249, 255, 188); color:#15364d; border:1px solid rgba(234, 250, 255, 182); border-radius:8px; padding:5px 9px; min-height:22px; }
+QLineEdit:focus { border-color:#327fb2; }
+QListWidget#taskList { background:transparent; border:0; color:#16384d; outline:0; }
+QListWidget#taskList::item { border:1px solid transparent; border-radius:9px; padding:7px 9px; }
+QListWidget#taskList::item:hover { background:rgba(226, 246, 255, 100); }
+QListWidget#taskList::item:selected { background:rgba(212, 238, 255, 165); border-color:rgba(219, 247, 255, 150); color:#113951; }
+QListWidget#taskList::item:focus { border-color:#327fb2; }
 QTextEdit, QTextBrowser { color:#24344d; background:transparent; border:0; padding:0; selection-background-color:#d9e6fc; selection-color:#1c3151; }
 QTextEdit#composer { background:transparent; border:0; }
 QTextBrowser#conversation, QTextBrowser#infoText { background:transparent; border:0; }
@@ -128,17 +141,20 @@ QPushButton { background:#ffffff; color:#425a7b; border:1px solid #dae3f0; borde
 QPushButton:hover { background:#f2f6fe; border-color:#a9c1e7; color:#28599f; }
 QPushButton:pressed { background:#e3edff; border-color:#83a7dd; }
 QPushButton:focus { border-color:#7399db; }
-QPushButton[tone="soft"] { background:#edf3ff; border-color:#dbe6fa; color:#315d9b; }
-QPushButton[tone="soft"]:hover { background:#e3edff; border-color:#bad0f3; }
-QPushButton[tone="quiet"] { background:transparent; border-color:transparent; color:#61738c; }
-QPushButton[tone="quiet"]:hover { background:#f0f4fb; color:#315d9b; }
-QPushButton#clientSwitch { background:transparent; color:#61738c; border:1px solid transparent; text-align:left; padding:10px 13px; }
-QPushButton#clientSwitch:checked { background:#edf3ff; color:#275db5; border-color:#d6e4fc; }
-QPushButton#clientSwitch:hover { background:#f2f6fe; }
-QPushButton#send, QPushButton#attachPrimary { background:#2b63c6; color:#ffffff; border-color:#2b63c6; padding:8px 16px; }
-QPushButton#send:hover, QPushButton#attachPrimary:hover { background:#2458b4; border-color:#2458b4; }
-QPushButton#send:pressed, QPushButton#attachPrimary:pressed { background:#1e4b9c; border-color:#1e4b9c; }
-QPushButton:disabled, QPushButton#send:disabled, QPushButton#attachPrimary:disabled, QPushButton#taskAction:disabled { background:#f1f3f7; color:#8996a8; border-color:#e5e9f0; }
+QPushButton#clientSwitch { background:transparent; color:#f1faff; border:1px solid transparent; border-radius:16px; padding:0; }
+QPushButton#clientSwitch:checked { color:#103a55; }
+QPushButton#clientSwitch:hover { border-color:rgba(231, 248, 255, 113); }
+QPushButton#clientSwitch:focus { border-color:#93dffa; }
+QPushButton#hoverAction { background:rgba(225, 247, 255, 154); color:#153b53; border-color:rgba(226, 245, 255, 138); padding:5px 8px; }
+QPushButton#hoverAction:hover, QPushButton#hoverAction:focus { background:#d4efff; border-color:#70a8cc; }
+QPushButton#hoverAction:pressed { background:#acd8f1; }
+QPushButton#send, QPushButton#approvalAllow { background:#096cb9; color:white; border-color:#096cb9; }
+QPushButton#send { padding:0; border-radius:17px; font-size:18px; }
+QPushButton#send:hover, QPushButton#approvalAllow:hover { background:#055eaa; border-color:#055eaa; }
+QPushButton#send:pressed, QPushButton#approvalAllow:pressed { background:#044e90; }
+QPushButton:disabled, QPushButton#send:disabled, QPushButton#hoverAction:disabled, QPushButton#approvalAllow:disabled { background:rgba(234, 246, 252, 97); color:#507087; border-color:rgba(225, 245, 255, 80); }
+QDialog#approvalDialog { background:#d6eaf5; }
+QTextBrowser#approvalDetails { background:#e6f2fb; border:1px solid #bfd9ea; border-radius:8px; }
 QScrollArea { border:0; background:transparent; }
 QScrollBar:vertical { background:transparent; width:7px; margin:3px 0; }
 QScrollBar::handle:vertical { background:#d0dae9; border-radius:3px; min-height:26px; }

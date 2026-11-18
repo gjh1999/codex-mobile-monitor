@@ -1,51 +1,57 @@
-"""Create the small C-mark icon used by the Qt window, tray and EXE."""
-import math
+"""Render the translucent 澜 icon for Windows Explorer, the window and tray."""
 import struct
-import zlib
+import sys
 from pathlib import Path
 
+from PySide6.QtCore import QByteArray, QBuffer, QIODevice, QRectF, Qt
+from PySide6.QtGui import QBrush, QColor, QFont, QGuiApplication, QImage, QLinearGradient, QPainter, QPainterPath, QPen
 
-def png(size):
-    pixels = bytearray(size * size * 4)
-    for y in range(size):
-        for x in range(size):
-            scale = size / 256
-            px, py = x / scale, y / scale
-            # Deep navy field.
-            r, g, b, a = 23, 34, 53, 255
-            dx, dy = abs(px - 128), abs(py - 128)
-            if dx <= 112 and dy <= 112 and (dx - 112) ** 2 + (dy - 112) ** 2 <= 0:
-                r, g, b = 45, 108, 223
-            # Rounded-square approximation for the blue mark.
-            qx, qy = max(abs(px - 128) - 100, 0), max(abs(py - 128) - 100, 0)
-            if qx * qx + qy * qy <= 22 * 22:
-                r, g, b = 45, 108, 223
-            radius = math.hypot(px - 128, py - 128)
-            angle = math.degrees(math.atan2(py - 128, px - 128)) % 360
-            # White C, leaving a clean opening on the right.
-            if 54 <= radius <= 78 and 48 <= angle <= 312:
-                r, g, b = 247, 249, 252
-            i = (y * size + x) * 4
-            pixels[i:i + 4] = bytes((r, g, b, a))
-    raw = b"".join(b"\x00" + bytes(pixels[y * size * 4:(y + 1) * size * 4]) for y in range(size))
-    def chunk(kind, data):
-        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
-    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b"")
+
+def icon_png(size):
+    image = QImage(size, size, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(image)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.scale(size / 256, size / 256)
+    surface = QPainterPath()
+    surface.addRoundedRect(QRectF(11, 11, 234, 234), 57, 57)
+    glass = QLinearGradient(34, 14, 209, 244)
+    glass.setColorAt(0, QColor(228, 251, 255, 234))
+    glass.setColorAt(.48, QColor(146, 223, 246, 220))
+    glass.setColorAt(1, QColor(67, 165, 217, 225))
+    painter.fillPath(surface, QBrush(glass))
+    painter.setPen(QPen(QColor(233, 252, 255, 196), 6))
+    painter.drawPath(surface)
+    font = QFont('Microsoft YaHei', 122, QFont.Weight.Bold)
+    glyph = QPainterPath()
+    glyph.addText(0, 0, font, '澜')
+    center = glyph.boundingRect().center()
+    painter.translate(128 - center.x(), 126 - center.y())
+    painter.fillPath(glyph, QColor('#133e58'))
+    painter.end()
+    result = QByteArray()
+    buffer = QBuffer(result)
+    buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+    if not image.save(buffer, 'PNG'):
+        raise RuntimeError('Could not encode icon frame')
+    return bytes(result)
 
 
 def main():
-    sizes = (16, 32, 48, 64, 128, 256)
-    blobs = [png(size) for size in sizes]
+    app = QGuiApplication(sys.argv[:1])
+    sizes = (16, 24, 32, 48, 64, 128, 256)
+    blobs = [icon_png(size) for size in sizes]
     offset = 6 + 16 * len(blobs)
-    directory = struct.pack("<HHH", 0, 1, len(blobs))
     entries = []
     for size, data in zip(sizes, blobs):
-        entries.append(struct.pack("<BBBBHHII", 0 if size == 256 else size, 0 if size == 256 else size, 0, 0, 1, 32, len(data), offset))
+        dimension = size % 256
+        entries.append(struct.pack('<BBBBHHII', dimension, dimension, 0, 0, 1, 32, len(data), offset))
         offset += len(data)
-    out = Path(__file__).resolve().parents[2] / "app.ico"
-    out.write_bytes(directory + b"".join(entries) + b"".join(blobs))
+    out = Path(__file__).resolve().parents[2] / 'app.ico'
+    out.write_bytes(struct.pack('<HHH', 0, 1, len(blobs)) + b''.join(entries) + b''.join(blobs))
     print(out)
+    app.quit()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

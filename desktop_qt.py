@@ -1,26 +1,31 @@
 ﻿"""Native task workspace: light cards, soft-blue actions and explicit failures."""
 import json
+import os
 import re
+import shutil
+import subprocess
 import sys
 import threading
 import time
 import uuid
 from pathlib import Path
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QRectF, QSharedMemory, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QIcon, QImage, QLinearGradient, QPainter, QPainterPath
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QSharedMemory, QSignalBlocker, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QFrame, QGraphicsDropShadowEffect, QGridLayout,
-    QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow,
-    QMenu, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QStyle, QSystemTrayIcon,
-    QTextBrowser, QTextEdit, QVBoxLayout, QWidget,
+    QApplication, QDialog, QFrame, QGraphicsDropShadowEffect, QGraphicsOpacityEffect, QGridLayout,
+    QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+    QMainWindow, QMenu, QMessageBox, QPushButton, QSizePolicy, QStackedWidget, QStyle, QSystemTrayIcon,
+    QTextBrowser, QTextEdit, QVBoxLayout,
 )
 
 import monitor
+from desktop_glass import ClientSwitch, FrostedPanel, OceanBackdrop, motion_enabled
 from desktop_theme import STYLESHEET, configure_text, message_html, set_reading_html, ui_font, warning_html
 
-MUTED = '#61738c'
+MUTED = '#24495f'
 WINDOW_TITLE = '澜汐'
+TASK_TITLE_ROLE = Qt.ItemDataRole.UserRole + 1
 UUID_PATTERN = re.compile(r'\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b')
 
 
@@ -39,45 +44,70 @@ def label(text, size=13, bold=False, color=None):
     return widget
 
 
-class Card(QFrame):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setObjectName('taskCard')
+def vscode_executable():
+    found = shutil.which('Code.exe')
+    if found:
+        return Path(found)
+    launcher = shutil.which('code.cmd')
+    candidates = [Path(launcher).parent.parent / 'Code.exe'] if launcher else []
+    for root in ('LOCALAPPDATA', 'ProgramFiles', 'ProgramFiles(x86)'):
+        if os.environ.get(root):
+            directory = Path(os.environ[root])
+            if root == 'LOCALAPPDATA':
+                directory /= 'Programs'
+            candidates.append(directory / 'Microsoft VS Code' / 'Code.exe')
+    return next((candidate for candidate in candidates if candidate.is_file()), None)
 
 
-class OceanCover(QWidget):
+class TaskTitle(QLabel):
+    edit_requested = Signal()
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.edit_requested.emit()
+            event.accept()
+        else:
+            super().mouseDoubleClickEvent(event)
+
+
+class ActionHeader(QFrame):
+    """Reveal actions without moving the conversation or losing keyboard access."""
     def __init__(self):
         super().__init__()
-        bundle = Path(getattr(sys, '_MEIPASS', monitor.ROOT))
-        self.image = QImage(str(bundle / 'docs' / 'assets' / 'os-x-mavericks-wave.jpg'))
-        self.setMinimumHeight(92)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(19, 11, 19, 11)
-        layout.setSpacing(4)
-        verse = label('潮平两岸阔，风正一帆悬。', 20, False, '#ffffff')
-        verse.setFont(QFont('SimSun', 20))
-        layout.addWidget(verse)
-        layout.addWidget(label('白日写到的那一行，暮归时仍等着你。', 9, False, '#e4f3ff'))
+        self.actions = QFrame()
+        self.opacity = QGraphicsOpacityEffect(self.actions)
+        self.opacity.setOpacity(0.0)
+        self.actions.setGraphicsEffect(self.opacity)
+        self.animation = QPropertyAnimation(self.opacity, b'opacity', self)
+        self.animation.setDuration(160)
+        self.animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.target = 0.0
+        self.hovered = False
+        QApplication.instance().focusChanged.connect(self.sync_actions)
 
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.SmoothPixmapTransform)
-        bounds = QRectF(self.rect())
-        clip = QPainterPath()
-        clip.addRoundedRect(bounds, 14, 14)
-        painter.setClipPath(clip)
-        painter.fillRect(bounds, QColor('#0c3350'))
-        if not self.image.isNull() and not bounds.isEmpty():
-            scale = max(bounds.width() / self.image.width(), bounds.height() / self.image.height())
-            width, height = bounds.width() / scale, bounds.height() / scale
-            source = QRectF((self.image.width() - width) * .55, (self.image.height() - height) * .55, width, height)
-            painter.drawImage(bounds, self.image, source)
-        shade = QLinearGradient(bounds.topLeft(), bounds.topRight())
-        shade.setColorAt(0, QColor(4, 24, 45, 233))
-        shade.setColorAt(.53, QColor(5, 33, 57, 181))
-        shade.setColorAt(1, QColor(12, 65, 118, 24))
-        painter.fillRect(bounds, shade)
-        painter.end()
+    def sync_actions(self, *_):
+        focus = QApplication.focusWidget()
+        value = float(self.hovered or (focus is not None and self.actions.isAncestorOf(focus)))
+        if value == self.target:
+            return
+        self.target = value
+        self.animation.stop()
+        if motion_enabled():
+            self.animation.setStartValue(self.opacity.opacity())
+            self.animation.setEndValue(value)
+            self.animation.start()
+        else:
+            self.opacity.setOpacity(value)
+
+    def enterEvent(self, event):
+        super().enterEvent(event)
+        self.hovered = True
+        self.sync_actions()
+
+    def leaveEvent(self, event):
+        super().leaveEvent(event)
+        self.hovered = False
+        self.sync_actions()
 
 
 class ActionButton(QPushButton):
@@ -97,6 +127,9 @@ class ActionButton(QPushButton):
 
     def animate_to(self, radius):
         self.animation.stop()
+        if not motion_enabled():
+            self.effect.setBlurRadius(radius if self.isEnabled() else 0)
+            return
         self.animation.setStartValue(self.effect.blurRadius())
         self.animation.setEndValue(radius if self.isEnabled() else 0)
         self.animation.start()
@@ -142,15 +175,20 @@ class MainWindow(QMainWindow):
         self.client = 'codex'
         self.selected_thread = ''
         self.client_selections = {'codex': '', 'claude': ''}
-        self.client_drafts = {'codex': '', 'claude': ''}
+        self.task_drafts = {}
         self._pending_operations = {}
         self._started_at = time.time()
         self._seen_operation_states = {'codex': {}, 'claude': {}}
         self._error_events = {}
         self._dialogs = []
-        self._control_signature = None
+        self._task_signature = None
+        self._pending_approvals = {}
+        self._shown_approvals = set()
+        self.approval_dialog = None
+        self._review_token = None
+        self._rename_target = None
+        self._project_directory = None
         self._conversation_signature = None
-        self.task_action_buttons = {}
         self.setWindowTitle(WINDOW_TITLE)
         icon_path = Path(getattr(sys, '_MEIPASS', monitor.ROOT)) / 'app.ico'
         if icon_path.exists():
@@ -170,216 +208,212 @@ class MainWindow(QMainWindow):
 
     def build_ui(self):
         self.setStyleSheet(STYLESHEET)
-        root = QWidget()
-        root.setObjectName('shell')
+        try:
+            minutes = monitor.config().get('desktopWallpaperMinutes', 30)
+        except (OSError, ValueError, AttributeError):
+            minutes = 30
+        root = OceanBackdrop(Path(getattr(sys, '_MEIPASS', monitor.ROOT)), minutes)
         self.setCentralWidget(root)
-        shell = QHBoxLayout(root)
-        shell.setContentsMargins(18, 18, 18, 18)
-        shell.setSpacing(18)
+        page = QVBoxLayout(root)
+        page.setContentsMargins(24, 18, 24, 24)
+        page.setSpacing(17)
 
-        sidebar = QFrame()
-        sidebar.setObjectName('sidebar')
-        sidebar.setFixedWidth(224)
-        side = QVBoxLayout(sidebar)
-        side.setContentsMargins(16, 22, 16, 18)
-        side.setSpacing(10)
-        brand_row = QHBoxLayout()
-        mark = label('澜', 15, True)
-        mark.setObjectName('brandMark')
-        mark.setFixedSize(40, 40)
-        mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        brand_row.addWidget(mark)
-        brand_copy = QVBoxLayout()
-        brand_copy.setSpacing(2)
-        brand = label('澜汐', 16, True)
-        brand.setObjectName('brand')
-        brand_copy.addWidget(brand)
-        brand_copy.addWidget(label('一处开始，处处继续。', 8.5, False, MUTED))
-        brand_row.addLayout(brand_copy)
-        brand_row.addStretch()
-        side.addLayout(brand_row)
-        side.addSpacing(20)
-        side.addWidget(label('工作空间', 9, True, MUTED))
-        self.client_buttons = {}
-        for key, title in (('codex', 'Codex'), ('claude', 'Claude Code')):
-            button = QPushButton(title)
-            button.setFont(ui_font(10.5, True))
-            button.setObjectName('clientSwitch')
-            button.setCursor(Qt.CursorShape.PointingHandCursor)
-            button.setCheckable(True)
-            button.setChecked(key == self.client)
-            button.clicked.connect(lambda _=False, c=key: self.switch_client(c))
-            self.client_buttons[key] = button
-            side.addWidget(button)
-        self.live = label('○ 正在连接', 9)
-        self.live.setObjectName('status')
-        side.addWidget(self.live)
-        side.addSpacing(17)
-        side.addWidget(label('我的任务', 10, True))
-        self.task_choice = QComboBox()
-        self.task_choice.setFont(ui_font(9.5))
-        self.task_choice.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.task_choice.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        self.task_choice.setMinimumContentsLength(8)
-        self.task_choice.currentIndexChanged.connect(self.select_task)
-        side.addWidget(self.task_choice)
-        self.rename_button = ActionButton('修改任务名称')
-        self.rename_button.setProperty('tone', 'quiet')
-        self.rename_button.clicked.connect(self.rename_task)
-        side.addWidget(self.rename_button)
-        self.attach_button = ActionButton('接入当前任务')
-        self.attach_button.setObjectName('attachPrimary')
-        self.attach_button.clicked.connect(lambda: self.operate('attach'))
-        side.addWidget(self.attach_button)
-        create = ActionButton('＋ 创建测试任务')
-        create.setProperty('tone', 'quiet')
-        create.clicked.connect(lambda: self.operate('create_test'))
-        side.addWidget(create)
-        side.addStretch()
-        summary = QFrame()
-        summary.setObjectName('sidebarStats')
-        counts = QGridLayout(summary)
-        counts.setContentsMargins(12, 12, 12, 12)
-        counts.setHorizontalSpacing(10)
-        counts.setVerticalSpacing(4)
-        self.stat_total, self.stat_running, self.stat_pending = (label('—', 17, True) for _ in range(3))
-        for column, (value, caption) in enumerate(((self.stat_total, '任务'), (self.stat_running, '运行'), (self.stat_pending, '待确认'))):
-            value.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            counts.addWidget(value, 0, column)
-            caption_label = label(caption, 8.5, False, MUTED)
-            caption_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            counts.addWidget(caption_label, 1, column)
-        side.addWidget(summary)
-        side.addSpacing(5)
-        side.addWidget(label('● 关闭窗口后继续在托盘运行', 8, False, MUTED))
-        shell.addWidget(sidebar)
+        self.client_switch = ClientSwitch(self.switch_client)
+        self.client_buttons = self.client_switch.buttons
+        page.addWidget(self.client_switch, 0, Qt.AlignmentFlag.AlignHCenter)
 
-        workspace = QWidget()
-        workspace.setObjectName('workspace')
-        page = QVBoxLayout(workspace)
-        page.setContentsMargins(0, 3, 0, 0)
-        page.setSpacing(14)
         heading = QHBoxLayout()
+        heading.setContentsMargins(12, 14, 4, 8)
         title = QVBoxLayout()
-        title.setSpacing(3)
-        page_title = label('任务工作台', 20, True)
-        page_title.setObjectName('pageTitle')
-        title.addWidget(page_title)
-        self.workspace_subtitle = label('Codex · 所有任务都在本机', 9, False, MUTED)
-        title.addWidget(self.workspace_subtitle)
+        title.setSpacing(16)
+        verse = label('潮平两岸阔，风正一帆悬。', 31, color='#ffffff')
+        verse.setFont(QFont('SimSun', 31))
+        verse.setWordWrap(False)
+        title.addWidget(verse)
+        title.addWidget(label('一处开始，处处继续。百日写的那一行，暮归时仍等着你。', 10, color='#effaff'))
         heading.addLayout(title, 1)
-        refresh = ActionButton('刷新状态')
-        refresh.setProperty('tone', 'quiet')
-        refresh.clicked.connect(self.refresh)
-        heading.addWidget(refresh)
-        page.addLayout(heading)
-        page.addWidget(OceanCover())
 
-        focus = QFrame()
-        focus.setObjectName('focus')
-        body = QVBoxLayout(focus)
-        body.setContentsMargins(16, 13, 16, 13)
-        body.setSpacing(7)
-        self.control_cards = QVBoxLayout()
-        self.control_cards.setSpacing(8)
-        body.addLayout(self.control_cards)
-        self.control_message = label('操作结果会在这里显示', 8.5, False, MUTED)
-        self.control_message.setObjectName('messageNotice')
-        body.addWidget(self.control_message)
-        page.addWidget(focus)
+        summary = QFrame()
+        summary.setObjectName('oceanStats')
+        counts = QGridLayout(summary)
+        counts.setContentsMargins(11, 10, 11, 10)
+        counts.setHorizontalSpacing(10)
+        counts.setVerticalSpacing(3)
+        self.stat_total, self.stat_running, self.stat_pending = (label('0', 16, True, '#f3fbff') for _ in range(3))
+        for column, (value, caption, meaning) in enumerate((
+            (self.stat_total, '案头', '任务总数'), (self.stat_running, '行舟', '运行中的任务'),
+            (self.stat_pending, '待你定夺', '待审批的请求'),
+        )):
+            caption_label = label(caption, 9, color='#d5edf9')
+            caption_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            caption_label.setToolTip(meaning)
+            caption_label.setAccessibleName(meaning)
+            counts.addWidget(caption_label, 0, column)
+            value.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            value.setAccessibleName(meaning)
+            counts.addWidget(value, 1, column)
+        heading.addWidget(summary, 0, Qt.AlignmentFlag.AlignBottom)
+        page.addLayout(heading)
 
         middle = QHBoxLayout()
-        middle.setSpacing(14)
-        self.conversation_card = QFrame()
-        self.conversation_card.setObjectName('conversationCard')
-        self.conversation_card.setMinimumWidth(360)
+        middle.setSpacing(7)
+        self.task_panel = FrostedPanel(root)
+        self.task_panel.setFixedWidth(266)
+        side = QVBoxLayout(self.task_panel)
+        side.setContentsMargins(13, 13, 13, 10)
+        side.setSpacing(8)
+        task_header = QHBoxLayout()
+        task_header.addWidget(label('案头诸事', 12, True), 1)
+        create = ActionButton('＋')
+        create.setToolTip('创建测试任务')
+        create.setAccessibleName('创建测试任务')
+        create.clicked.connect(lambda: self.operate('create_test'))
+        task_header.addWidget(create)
+        side.addLayout(task_header)
+        self.task_search = QLineEdit()
+        self.task_search.setAccessibleName('搜索任务')
+        self.task_search.setPlaceholderText('寻一件案头事')
+        self.task_search.textChanged.connect(self.filter_tasks)
+        side.addWidget(self.task_search)
+        self.task_choice = QListWidget()
+        self.task_choice.setObjectName('taskList')
+        self.task_choice.setAccessibleName('任务列表')
+        self.task_choice.setSpacing(3)
+        self.task_choice.setWordWrap(True)
+        self.task_choice.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.task_choice.currentItemChanged.connect(self.select_task)
+        self.task_choice.itemClicked.connect(self.focus_task)
+        self.task_choice.itemActivated.connect(self.focus_task)
+        self.task_choice.viewport().setAutoFillBackground(False)
+        side.addWidget(self.task_choice, 1)
+        self.task_empty = label('', 9, color=MUTED)
+        self.task_empty.hide()
+        side.addWidget(self.task_empty)
+        self.live = label('○ 正在连接', 9, color=MUTED)
+        self.live.setObjectName('status')
+        side.addWidget(self.live)
+        middle.addWidget(self.task_panel)
+
+        self.conversation_card = FrostedPanel(root)
         conversation_layout = QVBoxLayout(self.conversation_card)
-        conversation_layout.setContentsMargins(18, 17, 18, 14)
-        conversation_layout.setSpacing(10)
-        conversation_header = QHBoxLayout()
+        conversation_layout.setContentsMargins(15, 12, 15, 12)
+        conversation_layout.setSpacing(8)
+        self.conversation_header = ActionHeader()
+        conversation_header = QHBoxLayout(self.conversation_header)
+        conversation_header.setContentsMargins(0, 0, 0, 0)
         conversation_title = QVBoxLayout()
         conversation_title.setSpacing(3)
-        self.conversation_heading = label('任务对话', 12, True)
-        self.conversation_heading.setObjectName('sectionTitle')
-        conversation_title.addWidget(self.conversation_heading)
-        self.conversation_subtitle = label('最近消息 · 仅保存在本机', 8.5, False, MUTED)
-        conversation_title.addWidget(self.conversation_subtitle)
+        conversation_title.addWidget(label('灯下对谈', 9, color=MUTED))
+        self.title_stack = QStackedWidget()
+        self.title_stack.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.conversation_heading = TaskTitle('未尽的话，可以接着说。')
+        self.conversation_heading.setFont(ui_font(13, True))
+        self.conversation_heading.setTextFormat(Qt.TextFormat.PlainText)
+        self.conversation_heading.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.conversation_heading.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.conversation_heading.setWordWrap(False)
+        self.conversation_heading.edit_requested.connect(self.begin_rename)
+        QShortcut(QKeySequence('F2'), self.conversation_heading, self.begin_rename,
+                  context=Qt.ShortcutContext.WidgetShortcut)
+        self.title_editor = QLineEdit()
+        self.title_editor.setMaxLength(80)
+        self.title_editor.setAccessibleName('任务名称')
+        self.title_editor.returnPressed.connect(self.save_rename)
+        QShortcut(QKeySequence('Escape'), self.title_editor, self.cancel_rename,
+                  context=Qt.ShortcutContext.WidgetShortcut)
+        self.title_stack.addWidget(self.conversation_heading)
+        self.title_stack.addWidget(self.title_editor)
+        conversation_title.addWidget(self.title_stack)
         conversation_header.addLayout(conversation_title, 1)
-        record_badge = label('本机记录', 8, False, MUTED)
-        conversation_header.addWidget(record_badge)
-        conversation_layout.addLayout(conversation_header)
+        self.build_task_actions()
+        conversation_header.addWidget(self.conversation_header.actions)
+        conversation_layout.addWidget(self.conversation_header)
         divider = QFrame()
         divider.setObjectName('divider')
         divider.setFixedHeight(1)
         conversation_layout.addWidget(divider)
+
         self.conversation = QTextBrowser()
         self.conversation.setObjectName('conversation')
-        configure_text(self.conversation, 10, 2)
+        configure_text(self.conversation, 10, 3)
         self.conversation.setMinimumHeight(130)
         self.conversation.setOpenExternalLinks(False)
+        self.conversation.viewport().setAutoFillBackground(False)
         conversation_layout.addWidget(self.conversation, 1)
 
+        self.review_button = ActionButton('查看待审批请求')
+        self.review_button.clicked.connect(lambda: self.offer_approval(force=True))
+        self.review_button.hide()
+        conversation_layout.addWidget(self.review_button, 0, Qt.AlignmentFlag.AlignLeft)
         composer_box = QFrame()
         composer_box.setObjectName('composerBox')
         composer_layout = QVBoxLayout(composer_box)
-        composer_layout.setContentsMargins(11, 7, 11, 10)
-        composer_layout.setSpacing(4)
+        composer_layout.setContentsMargins(10, 6, 10, 7)
+        composer_layout.setSpacing(3)
         self.message_edit = Composer()
         self.message_edit.setObjectName('composer')
         configure_text(self.message_edit, 10, 3)
-        self.message_edit.setFixedHeight(70)
-        self.message_edit.setPlaceholderText('输入下一步指令，或补充任务需要的信息…')
+        self.message_edit.viewport().setAutoFillBackground(False)
+        self.message_edit.setFixedHeight(57)
+        self.message_edit.setPlaceholderText('把下一步，写在这里…')
+        self.message_edit.setAccessibleName('任务指令')
         self.message_edit.setAcceptRichText(False)
         self.message_edit.send_requested.connect(lambda: self.operate('message') if self.send_button.isEnabled() else None)
         composer_layout.addWidget(self.message_edit)
         send_row = QHBoxLayout()
-        send_row.addWidget(label('Ctrl + Enter 发送 · Enter 换行', 8, False, MUTED), 1)
-        self.send_button = ActionButton('发送指令  →')
+        self.message_hint = label('', 8.5, color=MUTED)
+        send_row.addWidget(self.message_hint, 1)
+        self.send_button = ActionButton('↑')
         self.send_button.setObjectName('send')
+        self.send_button.setFixedSize(34, 34)
+        self.send_button.setToolTip('发送指令 · Ctrl+Enter')
+        self.send_button.setAccessibleName('发送指令')
         self.send_button.clicked.connect(lambda: self.operate('message'))
         send_row.addWidget(self.send_button)
         composer_layout.addLayout(send_row)
         conversation_layout.addWidget(composer_box)
-        self.message_hint = label('请先接入当前任务', 8.5, False, MUTED)
-        conversation_layout.addWidget(self.message_hint)
+        self.control_message = label('', 8.5, color=MUTED)
+        conversation_layout.addWidget(self.control_message)
         middle.addWidget(self.conversation_card, 1)
-
-        self.details_scroll = QScrollArea()
-        self.details_scroll.setWidgetResizable(True)
-        self.details_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.details_scroll.setFixedWidth(264)
-        details = QWidget()
-        details.setObjectName('details')
-        detail_layout = QVBoxLayout(details)
-        detail_layout.setContentsMargins(0, 0, 0, 0)
-        detail_layout.setSpacing(12)
-        approval_group = QFrame()
-        approval_group.setObjectName('sectionCard')
-        self.approval_layout = QVBoxLayout(approval_group)
-        self.approval_layout.setContentsMargins(14, 15, 14, 15)
-        self.approval_layout.setSpacing(10)
-        detail_layout.addWidget(approval_group)
-        for heading, attr in (('连接与自动推进', 'guard_text'), ('账户额度', 'quota_text')):
-            card = QFrame()
-            card.setObjectName('sectionCard')
-            card_layout = QVBoxLayout(card)
-            card_layout.setContentsMargins(14, 15, 14, 13)
-            card_layout.setSpacing(8)
-            section_title = label(heading, 10, True)
-            section_title.setObjectName('sectionTitle')
-            card_layout.addWidget(section_title)
-            text = QTextBrowser()
-            text.setObjectName('infoText')
-            configure_text(text, 9, 0)
-            text.setFixedHeight(118 if attr == 'guard_text' else 105)
-            setattr(self, attr, text)
-            card_layout.addWidget(text)
-            detail_layout.addWidget(card)
-        detail_layout.addStretch()
-        self.details_scroll.setWidget(details)
-        middle.addWidget(self.details_scroll)
         page.addLayout(middle, 1)
-        shell.addWidget(workspace, 1)
+
+        self.details_dialog = QDialog(self)
+        self.details_dialog.setWindowTitle('运行与额度')
+        self.details_dialog.resize(520, 380)
+        details = QVBoxLayout(self.details_dialog)
+        for title, attr in (('连接与自动推进', 'guard_text'), ('账户额度', 'quota_text')):
+            details.addWidget(label(title, 11, True))
+            content = QTextBrowser()
+            configure_text(content, 10, 4)
+            setattr(self, attr, content)
+            details.addWidget(content, 1)
+
+    def build_task_actions(self):
+        self.action_buttons = {}
+        actions = QHBoxLayout(self.conversation_header.actions)
+        actions.setContentsMargins(0, 0, 0, 0)
+        actions.setSpacing(5)
+        for action, text, meaning in (
+            ('attach', '执舟', '接入任务'), ('pause', '暂泊', '暂停任务'),
+            ('resume', '续航', '继续任务'), ('manage', '扬帆', '开启自动推进'),
+            ('unmanage', '收帆', '关闭自动推进'), ('detach', '移离案头', '移出任务'),
+            ('open_project', '启卷', '在 VS Code 打开任务项目'),
+        ):
+            button = QPushButton(text)
+            button.setObjectName('hoverAction')
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+            button.setFont(ui_font(9))
+            button.setToolTip(meaning)
+            button.setAccessibleName(meaning)
+            if action == 'open_project':
+                button.clicked.connect(self.open_project)
+            elif action == 'attach':
+                button.clicked.connect(lambda: self.focus_task(self.task_choice.currentItem()))
+            else:
+                button.clicked.connect(lambda _=False, action=action: self.operate(action))
+            self.action_buttons[action] = button
+            actions.addWidget(button)
 
     def build_tray(self):
         self.tray = QSystemTrayIcon(self)
@@ -387,6 +421,8 @@ class MainWindow(QMainWindow):
         self.tray.setToolTip(WINDOW_TITLE)
         menu = QMenu(self)
         menu.addAction('打开澜汐', self.show_window)
+        menu.addAction('运行与额度', self.show_details)
+        menu.addAction('查看待审批请求', lambda: self.offer_approval(force=True))
         menu.addSeparator()
         menu.addAction('退出程序', self.quit_app)
         self.tray.setContextMenu(menu)
@@ -418,15 +454,83 @@ class MainWindow(QMainWindow):
             self.worker.join(timeout=8)
         self.tray.hide()
 
-    def select_task(self):
-        self.selected_thread = self.task_choice.currentData() or ''
-        self._conversation_signature = None
+    def show_details(self):
+        self.refresh()
+        self.details_dialog.show()
+        self.details_dialog.raise_()
+
+    def select_task(self, current, _previous):
+        self.change_task(self.client, current.data(Qt.ItemDataRole.UserRole) if current else '')
         self.refresh()
 
-    def all_tasks(self, snap):
+    def change_task(self, client, tid):
+        previous = (self.client, self.selected_thread)
+        selected = (client, tid)
+        if selected != previous:
+            self.task_drafts[previous] = self.message_edit.toPlainText()
+            self.client, self.selected_thread = selected
+            self.message_edit.setPlainText(self.task_drafts.get(selected, ''))
+            self._conversation_signature = None
+
+    def focus_task(self, item):
+        if item is None:
+            return
+        tid = item.data(Qt.ItemDataRole.UserRole)
+        last = next((operation for (client, _), operation in reversed(self._pending_operations.items())
+                     if client == self.client and operation['action'] == 'focus'), None)
+        if not last or last['threadId'] != tid:
+            self.operate('focus', tid=tid)
+
+    def task_title(self):
+        item = self.task_choice.currentItem()
+        return item.data(TASK_TITLE_ROLE) if item is not None else ''
+
+    def filter_tasks(self):
+        query = self.task_search.text().strip().casefold()
+        matches = 0
+        for row in range(self.task_choice.count()):
+            item = self.task_choice.item(row)
+            visible = query in item.data(TASK_TITLE_ROLE).casefold()
+            item.setHidden(not visible)
+            matches += int(visible)
+        self.task_empty.setText('案头未见这一件，换个词再寻。' if query else '案头暂空，待写新篇。')
+        self.task_empty.setVisible(matches == 0)
+
+    def render_tasks(self, titles, threads, controls):
+        thread_status = {task.get('id'): (task.get('status') or {}).get('type') for task in threads}
+        active_controls = {task.get('threadId'): task for task in controls}
+        rows = []
+        for tid, title in titles:
+            control = active_controls.get(tid) or {}
+            status = (control.get('threadStatus') or {}).get('type') or thread_status.get(tid)
+            caption = '暂泊' if control.get('paused') else {
+                'active': '行舟中', 'idle': '闲泊', 'systemError': '执行异常',
+            }.get(status, '待接入')
+            rows.append((tid, title, caption))
+        if rows != self._task_signature:
+            previous_scroll = self.task_choice.verticalScrollBar().value()
+            self._task_signature = rows
+            with QSignalBlocker(self.task_choice):
+                self.task_choice.clear()
+                for tid, title, caption in rows:
+                    item = QListWidgetItem(f'{title}\n{caption}', self.task_choice)
+                    item.setData(Qt.ItemDataRole.UserRole, tid)
+                    item.setData(TASK_TITLE_ROLE, title)
+                    item.setToolTip(f'{title}\n{caption}')
+                self.filter_tasks()
+            self.task_choice.verticalScrollBar().setValue(previous_scroll)
+        index = next((i for i, row in enumerate(rows) if row[0] == self.selected_thread), 0 if rows else -1)
+        if self.task_choice.currentRow() != index:
+            with QSignalBlocker(self.task_choice):
+                self.task_choice.setCurrentRow(index)
+        item = self.task_choice.currentItem()
+        self.change_task(self.client, item.data(Qt.ItemDataRole.UserRole) if item is not None else '')
+
+    def all_tasks(self, snap, client=None):
+        client = client or self.client
         controls = snap.get('controls') or {}
         names = controls.get('names') or {}
-        labels = (getattr(monitor, 'history_labels', {}) or {}) if self.client == 'codex' else {}
+        labels = (getattr(monitor, 'history_labels', {}) or {}) if client == 'codex' else {}
         result = {}
         for task in snap.get('threads') or []:
             tid = task.get('id')
@@ -442,13 +546,9 @@ class MainWindow(QMainWindow):
             self.client_buttons[client].setChecked(True)
             return
         self.client_selections[self.client] = self.selected_thread
-        self.client_drafts[self.client] = self.message_edit.toPlainText()
-        self.client = client
-        self.selected_thread = self.client_selections[client]
-        self.message_edit.setPlainText(self.client_drafts[client])
-        self._conversation_signature = None
-        for key, button in self.client_buttons.items():
-            button.setChecked(key == client)
+        self.change_task(client, self.client_selections[client])
+        self.client_switch.select(client)
+        self.task_search.clear()
         self.control_message.setText('已切换到 ' + ('Claude Code' if client == 'claude' else 'Codex'))
         self.refresh()
 
@@ -460,46 +560,71 @@ class MainWindow(QMainWindow):
             self.live.setProperty('connected', str(connected).lower())
             self.live.style().unpolish(self.live)
             self.live.style().polish(self.live)
-        client_name = 'Claude Code' if self.client == 'claude' else 'Codex'
-        self.workspace_subtitle.setText(client_name + ' · 所有任务都在本机')
         threads = snap.get('threads') or []
-        self.stat_total.setText(str(len(threads)))
-        self.stat_running.setText(str(sum(1 for task in threads if (task.get('status') or {}).get('type') == 'active'
-                                           and not (task.get('status') or {}).get('activeFlags'))))
-        pending = [a for a in snap.get('approvals') or [] if not a.get('decision') and a.get('expires', time.time() + 1) > time.time()]
-        self.stat_pending.setText(str(len(pending)))
+        controls = (snap.get('controls') or {}).get('tasks') or []
         titles = self.all_tasks(snap)
-        self.task_choice.blockSignals(True)
-        self.task_choice.clear()
-        for tid, title in titles:
-            self.task_choice.addItem(title, tid)
-        index = self.task_choice.findData(self.selected_thread)
-        if index < 0 and titles:
-            index = 0
-        self.task_choice.setCurrentIndex(index)
-        self.selected_thread = self.task_choice.currentData() or ''
-        self.task_choice.setToolTip(self.task_choice.currentText())
-        self.task_choice.blockSignals(False)
-        selected_title = self.task_choice.currentText() if self.selected_thread else '任务对话'
-        self.conversation_heading.setText('任务对话')
-        self.conversation_heading.setToolTip(selected_title)
-        self.conversation_subtitle.setText(('Claude Code' if self.client == 'claude' else 'Codex') + ' · 最近消息 · 本机记录')
+        running = {task.get('id') for task in threads if (task.get('status') or {}).get('type') == 'active'}
+        for task in controls:
+            tid = task.get('threadId')
+            if task.get('paused'):
+                running.discard(tid)
+            elif (task.get('threadStatus') or {}).get('type') == 'active':
+                running.add(tid)
+        self.stat_total.setText(str(len(titles)))
+        self.stat_running.setText(str(len(running)))
+        self.render_tasks(titles, threads, controls)
+        if self._rename_target is not None and self._rename_target != (self.client, self.selected_thread):
+            self.cancel_rename()
+        task_title = self.task_title() or '未尽的话，可以接着说。'
+        self.conversation_heading.setText(task_title)
+        self.conversation_heading.setToolTip(f'{task_title}\n双击标题或按 F2 改名' if self.selected_thread else '')
+        self.conversation_heading.setAccessibleDescription('双击标题或按 F2 改名' if self.selected_thread else '')
+        directory = next((entry['cwd'] for entries, key in ((threads, 'id'), (controls, 'threadId'))
+                          for entry in entries if entry.get(key) == self.selected_thread and entry.get('cwd')), None)
+        self._project_directory = Path(directory) if isinstance(directory, str) and Path(directory).is_absolute() else None
         self.render_controls(snap)
         self.render_guard_quota(snap)
-        self.render_approvals(pending)
         self.refresh_conversation()
+        self.refresh_approvals()
 
-    def rename_task(self):
+    def begin_rename(self):
         if not self.selected_thread:
             return
-        target, client = self.selected_thread, self.client
-        title, accepted = QInputDialog.getText(self, '修改任务名称', '名称（1–80字，仅修改本机显示）',
-                                              QLineEdit.EchoMode.Normal, self.task_choice.currentText())
-        if accepted:
-            if client != self.client:
-                self._popup('名称未保存', '客户端已切换，请在原任务上重新修改名称。')
-            else:
-                self.operate('rename', title, tid=target)
+        self._rename_target = (self.client, self.selected_thread)
+        self.title_editor.setText(self.task_title())
+        self.title_stack.setCurrentWidget(self.title_editor)
+        self.title_editor.setFocus()
+        self.title_editor.selectAll()
+
+    def cancel_rename(self):
+        had_focus = self.title_editor.hasFocus()
+        self._rename_target = None
+        self.title_stack.setCurrentWidget(self.conversation_heading)
+        if had_focus:
+            self.conversation_heading.setFocus()
+
+    def save_rename(self):
+        target = self._rename_target
+        title = self.title_editor.text().strip()
+        if not title or target != (self.client, self.selected_thread):
+            return
+        self.cancel_rename()
+        if title != self.task_title():
+            self.operate('rename', title, tid=target[1])
+
+    def open_project(self):
+        directory = self._project_directory
+        if directory is None or not directory.is_dir():
+            self._popup('无法启卷', '当前任务的项目目录在本机不可用。')
+            return
+        editor = vscode_executable()
+        if editor is None:
+            self._popup('无法启卷', '本机未找到 VS Code。')
+            return
+        try:
+            subprocess.Popen([str(editor), str(directory)])
+        except OSError as error:
+            self._popup('无法启卷', f'VS Code 启动失败。{error}')
 
     def _popup(self, title, message):
         QTimer.singleShot(0, lambda title=title, message=message: self._popup_now(title, message))
@@ -535,7 +660,9 @@ class MainWindow(QMainWindow):
             self._pending_operations[(self.client, operation)] = {'action': action, 'threadId': target, 'text': text}
             if action == 'message':
                 self.message_edit.clear()
-            self.control_message.setText('正在请求暂停当前执行…' if action == 'pause' else '正在保存任务名称…' if action == 'rename' else '已提交，等待确认')
+            self.control_message.setText({
+                'pause': '正在请求暂停当前执行…', 'rename': '正在保存任务名称…', 'focus': '正在接入选中的任务…',
+            }.get(action, '已提交，等待确认'))
         except Exception as error:
             self._popup('操作失败', str(error))
 
@@ -548,9 +675,14 @@ class MainWindow(QMainWindow):
             previous = states.get(key)
             own = self._pending_operations.get((self.client, key))
             fresh = operation.get('stamp', 0) >= self._started_at
-            if status in ('failed', 'unknown') and previous != status and (own or fresh):
-                if own and own['action'] == 'message' and own['threadId'] == self.selected_thread and not self.message_edit.toPlainText():
+            if own and own['action'] == 'message' and status in ('failed', 'unknown', 'cancelled'):
+                if own['threadId'] == self.selected_thread and not self.message_edit.toPlainText():
                     self.message_edit.setPlainText(own['text'])
+                elif own['threadId'] != self.selected_thread:
+                    key = (self.client, own['threadId'])
+                    if not self.task_drafts.get(key):
+                        self.task_drafts[key] = own['text']
+            if status in ('failed', 'unknown') and previous != status and (own or fresh):
                 self._popup('消息发送失败' if operation.get('action') == 'message' else '操作未完成', operation.get('message') or '请检查当前任务状态。')
             if own and status in ('succeeded', 'cancelled', 'failed', 'unknown'):
                 self.control_message.setText(display_text(operation.get('message') or '操作已处理'))
@@ -565,118 +697,39 @@ class MainWindow(QMainWindow):
         if not selected or selected.get('paused') or not selected.get('managed'):
             quota_wait = None
         waiting_quota = bool(quota_wait and quota_wait.get('state') in ('waiting', 'checking', 'reserved'))
-        titles = dict(self.all_tasks(snap))
-        visible = {key: selected.get(key) for key in ('threadId', 'paused', 'managed', 'canControl', 'message', 'threadStatus', 'autoProgress')} if selected else None
-        signature = json.dumps([self.client, self.selected_thread, visible, quota_wait, titles.get(self.selected_thread)], ensure_ascii=False, sort_keys=True)
-        if signature != self._control_signature:
-            self._control_signature = signature
-            while self.control_cards.count():
-                item = self.control_cards.takeAt(0)
-                if item.widget():
-                    item.widget().deleteLater()
-            self.task_action_buttons = {}
-            card = Card()
-            body = QVBoxLayout(card)
-            body.setContentsMargins(0, 0, 0, 0)
-            body.setSpacing(8)
-            row = QHBoxLayout()
-            row.setSpacing(12)
-            task_title = label(titles.get(self.selected_thread) or '从左侧选择一个任务', 12, True)
-            task_title.setObjectName('taskTitle')
-            row.addWidget(task_title, 1)
-            active = bool(selected and (selected.get('threadStatus') or {}).get('type') == 'active')
-            state = '未接入'
-            tone = 'muted'
-            if selected:
-                if selected.get('paused'):
-                    state = ('Ⅱ 本地已暂停 · 后台运行中' if self.client == 'codex' else '◷ 暂停中') if active else 'Ⅱ 已暂停'
-                    tone = 'warning'
-                elif not selected.get('canControl'):
-                    state = '○ 只读关注'
-                elif waiting_quota:
-                    state = '◷ 等待额度刷新'
-                    tone = 'warning'
-                elif active:
-                    state = '● 运行中'
-                    tone = 'active'
-                else:
-                    state = '○ 可控制'
-                    tone = 'active'
-            badge = label(state, 8.5)
-            badge.setObjectName('taskState')
-            badge.setProperty('tone', tone)
-            row.addWidget(badge)
-            body.addLayout(row)
-            if selected:
-                tid = selected['threadId']
-                progress = selected.get('autoProgress')
-                if selected.get('paused') and active and self.client == 'codex':
-                    caption = 'Codex 已在后台运行；点击“继续任务”解除本地暂停后即可发送，不会重复启动。'
-                elif quota_wait:
-                    caption = quota_wait.get('message') or '等待额度恢复后自动继续。'
-                    if quota_wait.get('resetsAt'):
-                        caption += ' 刷新时间：' + self.local_time(quota_wait['resetsAt'])
-                    elif waiting_quota:
-                        caption += ' 接口未提供刷新时间，定期重新查询。'
-                elif selected.get('managed'):
-                    caption = ('自动推进已开启 · 任务暂停期间不会发送' if selected.get('paused') else
-                               '自动推进已开启 · 下次检查 ' + self.local_time(progress['due']) if progress and progress.get('due') else
-                               '自动推进已开启 · 满足空闲、控制权和目标条件时继续')
-                else:
-                    caption = ('任务已暂停 · 继续后可以发送新指令' if selected.get('paused') else
-                               display_text(selected.get('message') or '已接入当前任务，可以发送下一步指令。'))
-                body.addWidget(label(caption, 9, False, MUTED))
-                actions = QHBoxLayout()
-                actions.setSpacing(8)
-                buttons = {}
-                for caption, action in (('重新接入', 'attach'), ('已开启自动推进', 'manage') if selected.get('managed') else ('开启自动推进', 'manage'),
-                                        ('关闭自动推进', 'unmanage'), ('移出', 'detach'),
-                                        ('继续任务', 'resume') if selected.get('paused') else ('暂停任务', 'pause')):
-                    button = ActionButton(caption)
-                    button.setFont(ui_font(9))
-                    button.setProperty('tone', 'soft' if action in ('manage', 'unmanage', 'pause', 'resume') else 'quiet')
-                    button.clicked.connect(lambda _=False, a=action, i=tid: self.operate(a, tid=i))
-                    if action == 'manage':
-                        button.setEnabled(not selected.get('managed'))
-                        button.setVisible(not selected.get('managed'))
-                        button.setToolTip('每小时检查一次；空闲、可控制且无审批或执行错误时才继续。')
-                    elif action == 'unmanage':
-                        button.setEnabled(bool(selected.get('managed')))
-                        button.setVisible(bool(selected.get('managed')))
-                    elif action == 'resume':
-                        button.setEnabled(bool(selected.get('canControl')) and (self.client == 'codex' or not active))
-                        if self.client == 'codex' and active:
-                            button.setToolTip('当前任务已运行；仅解除本地暂停并恢复消息发送，不额外启动一轮。')
-                    buttons[action] = button
-                    actions.addWidget(button)
-                actions.addStretch()
-                self.task_action_buttons[tid] = buttons
-                body.addLayout(actions)
-            else:
-                body.addWidget(label('接入后即可发送指令、暂停执行和查看最新回复。', 9, False, MUTED))
-            self.control_cards.addWidget(card)
-        allowed = bool(selected and selected.get('canControl') and not selected.get('paused') and not waiting_quota)
-        attach_style = 'taskAction' if selected else 'attachPrimary'
-        if self.attach_button.objectName() != attach_style:
-            self.attach_button.setObjectName(attach_style)
-            self.attach_button.style().unpolish(self.attach_button)
-            self.attach_button.style().polish(self.attach_button)
-        self.attach_button.setText('重新接入任务' if selected else '接入当前任务')
+        controlled = bool(selected)
+        paused = controlled and bool(selected.get('paused'))
+        manageable = controlled and bool(selected.get('canControl'))
+        active = controlled and (selected.get('threadStatus') or {}).get('type') == 'active'
+        managed = controlled and bool(selected.get('managed'))
+        allowed = manageable and not paused and not waiting_quota
+        buttons = self.action_buttons
+        buttons['manage'].setVisible(not managed)
+        buttons['unmanage'].setVisible(managed)
+        buttons['attach'].setEnabled(bool(self.selected_thread))
+        buttons['pause'].setEnabled(controlled and not paused)
+        buttons['resume'].setEnabled(manageable and paused and (self.client == 'codex' or not active))
+        buttons['resume'].setToolTip(
+            '继续任务 · 解除本地暂停，不重复启动当前轮次' if active and self.client == 'codex' else '继续任务')
+        buttons['manage'].setEnabled(controlled and not managed)
+        buttons['unmanage'].setEnabled(managed)
+        buttons['detach'].setEnabled(controlled)
+        buttons['open_project'].setEnabled(self._project_directory is not None)
+        buttons['open_project'].setToolTip(
+            f'在 VS Code 打开项目\n{self._project_directory}' if self._project_directory else '任务未提供本机项目目录')
         if waiting_quota:
-            message_hint = '额度暂不可用，刷新后自动继续；点击“暂停任务”可取消自动恢复。'
+            message_hint = '额度暂不可用，刷新后自动继续；点击“暂泊”可取消自动恢复。'
         elif allowed:
             message_hint = '运行中也可发送，新指令会优先进入当前会话。' if self.client == 'claude' else '运行中补充指令，空闲时开始新一轮。'
         elif selected and selected.get('paused'):
             if self.client == 'codex' and (selected.get('threadStatus') or {}).get('type') == 'active' and selected.get('canControl'):
-                message_hint = 'Codex 已在后台运行；点击“继续任务”解除本地暂停后即可发送。'
+                message_hint = 'Codex 已在后台运行；点击“续航”解除本地暂停后即可发送。'
             else:
-                message_hint = '任务已暂停，请先继续。'
+                message_hint = '已暂泊，点「续航」后即可发送。'
         else:
-            message_hint = '接入任务并取得控制权后即可发送。'
+            message_hint = '点击案头任务接入后即可发送。'
         self.message_hint.setText(message_hint)
         self.send_button.setEnabled(allowed)
-        self.rename_button.setEnabled(bool(self.selected_thread))
-        self.attach_button.setEnabled(bool(self.selected_thread))
         self.check_operation_results(controls)
 
     def render_guard_quota(self, snap):
@@ -708,43 +761,93 @@ class MainWindow(QMainWindow):
                         lines.append('重置：' + self.local_time(window['resetsAt']))
         self.quota_text.setPlainText('\n'.join(lines) or '尚无额度窗口数据')
 
-    def render_approvals(self, approvals):
-        signature = json.dumps(approvals, ensure_ascii=False, sort_keys=True)
-        if signature == getattr(self, '_approval_signature', None):
+    def refresh_approvals(self):
+        now = time.time()
+        self._pending_approvals = {
+            item['token']: item for item in monitor.approvals.public()
+            if not item.get('decision') and item.get('expires', 0) > now
+        }
+        self._shown_approvals.intersection_update(self._pending_approvals)
+        count = len(self._pending_approvals)
+        self.stat_pending.setText(str(count))
+        self.review_button.setVisible(count > 0)
+        if self.approval_dialog is not None and self._review_token not in self._pending_approvals:
+            self.approval_dialog.reject()
+        self.offer_approval()
+
+    def offer_approval(self, force=False):
+        if self._quitting:
             return
-        self._approval_signature = signature
-        while self.approval_layout.count():
-            item = self.approval_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-        section_title = label('待确认操作', 10, True)
-        section_title.setObjectName('sectionTitle')
-        self.approval_layout.addWidget(section_title)
-        for approval in approvals:
-            card = Card()
-            body = QVBoxLayout(card)
-            body.addWidget(label('需要确认一项操作', 9.5, True))
-            details = approval.get('details') or {}
-            # Keep concrete command / permission details complete for consent.
-            visible = {key: value for key, value in details.items() if key not in ('threadId', 'turnId', 'itemId', 'client')}
-            summary = details.get('command') or json.dumps(details.get('permissions') or details.get('changes') or visible, ensure_ascii=False, indent=2)
-            detail = QTextBrowser()
-            configure_text(detail, 9, 3)
-            detail.setPlainText(str(summary))
-            detail.setMinimumHeight(100)
-            detail.setMaximumHeight(180)
-            body.addWidget(detail)
-            buttons = QHBoxLayout()
-            for text, decision in (('允许一次', True), ('拒绝', False)):
-                button = ActionButton(text)
-                button.clicked.connect(lambda _=False, token=approval['token'], allow=decision: self.decide(token, allow))
-                buttons.addWidget(button)
-            body.addLayout(buttons)
-            self.approval_layout.addWidget(card)
-        if not approvals:
-            self.approval_layout.addWidget(label('✓ 暂无待确认操作', 9, False, MUTED))
-            self.approval_layout.addWidget(label('需要你确认时，会在这里展示操作详情。', 8.5, False, MUTED))
-        self.approval_layout.addStretch()
+        if self.approval_dialog is not None:
+            if force:
+                self.approval_dialog.show()
+                self.approval_dialog.raise_()
+                self.approval_dialog.activateWindow()
+            return
+        pending = (item for token, item in self._pending_approvals.items()
+                   if force or token not in self._shown_approvals)
+        item = next(pending, None)
+        if item is None:
+            return
+        token = item['token']
+        params = item.get('details') or {}
+        method = item.get('method', '')
+        title = '允许运行命令？' if 'commandExecution' in method else (
+            '允许修改文件？' if 'fileChange' in method else '允许此权限请求？')
+        dialog = QDialog(self)
+        dialog.setObjectName('approvalDialog')
+        dialog.setWindowTitle(title)
+        dialog.setWindowIcon(self.windowIcon())
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.resize(510, 294)
+        body = QVBoxLayout(dialog)
+        body.setContentsMargins(20, 16, 20, 16)
+        heading = QHBoxLayout()
+        mark = QLabel()
+        mark.setPixmap(self.windowIcon().pixmap(32, 32))
+        heading.addWidget(mark)
+        heading.addWidget(label(title, 14, True), 1)
+        body.addLayout(heading)
+        client = item.get('client', 'codex')
+        snapshot = monitor.client_snapshot(monitor.snapshot(), client)
+        names = dict(self.all_tasks(snapshot, client))
+        task_name = names.get(params.get('threadId'), '未提供')
+        info = label(
+            f'客户端　{"Claude Code" if client == "claude" else "Codex"}\n'
+            f'任务　{task_name}\n执行设备　本机\n工作目录　{params.get("cwd") or "未提供"}',
+            9, color=MUTED)
+        info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        body.addWidget(info)
+        concrete = {key: value for key, value in params.items() if key not in ('threadId', 'turnId', 'itemId', 'client', 'cwd')}
+        text = QTextBrowser()
+        text.setObjectName('approvalDetails')
+        configure_text(text, 9, 7)
+        if set(concrete) == {'command'} and isinstance(concrete['command'], str):
+            text.setPlainText(concrete['command'])
+            text.setMaximumHeight(82)
+        else:
+            text.setPlainText(json.dumps(concrete, ensure_ascii=False, indent=2) if concrete else '未收到可核对的操作详情。')
+        body.addWidget(text, 1)
+        actions = QHBoxLayout()
+        actions.addStretch()
+        for title, allow in (('拒绝', False), ('允许一次', True)):
+            button = ActionButton(title)
+            button.setAutoDefault(False)
+            if allow:
+                button.setObjectName('approvalAllow')
+                button.setEnabled(any(params.get(key) for key in ('command', 'changes', 'permissions', 'networkApprovalContext')))
+            button.clicked.connect(lambda _=False, value=allow: self.decide(token, value))
+            actions.addWidget(button)
+        body.addLayout(actions)
+        self._shown_approvals.add(token)
+        self._review_token = token
+        self.approval_dialog = dialog
+        dialog.finished.connect(self.approval_closed)
+        dialog.show()
+
+    def approval_closed(self, _result):
+        self.approval_dialog = None
+        self._review_token = None
 
     def decide(self, token, allowed):
         try:
@@ -786,7 +889,7 @@ class MainWindow(QMainWindow):
             self._error_events[key] = errors
             for encoded in sorted(errors):
                 bubbles.append(warning_html(display_text(json.loads(encoded)['status']['error'])))
-            set_reading_html(self.conversation, ''.join(bubbles) or '<p style="color:#61738c;">等待第一条消息，在下方写下下一步。</p>')
+            set_reading_html(self.conversation, ''.join(bubbles) or '<p style="color:#61738c;">灯下尚无来信。写下第一句吧。</p>')
             scroll.setValue(scroll.maximum() if at_bottom else min(old_value, scroll.maximum()))
         except (OSError, ValueError, RuntimeError) as error:
             self.conversation.setPlainText('暂时无法读取对话：' + str(error))

@@ -8,13 +8,15 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from PySide6.QtCore import QPoint, QTimer, Qt
-from PySide6.QtGui import QFontDatabase, QRawFont, QTextCursor
+from PySide6.QtCore import QEvent, QPoint, QPointF, QTimer, Qt
+from PySide6.QtGui import QEnterEvent, QFontDatabase, QImage, QRawFont, QTextCursor
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QDialog, QInputDialog, QLabel, QMessageBox, QPushButton
+from PySide6.QtWidgets import QApplication, QDialog, QLabel, QMessageBox, QPushButton
 
 import monitor
-from desktop_qt import MainWindow, OceanCover
+from automation import Approvals
+from desktop_glass import FrostedPanel, OceanBackdrop
+from desktop_qt import MainWindow
 from desktop_theme import configure_text, message_html, set_reading_html, ui_font
 
 CODEX = '00000000-0000-4000-8000-000000000001'
@@ -29,6 +31,16 @@ class NoWorkers:
 class Shared:
     def detach(self):
         pass
+
+
+class FakeApprovalClient:
+    client_type = 'claude'
+
+    def __init__(self):
+        self.sent = []
+
+    def send(self, reply):
+        self.sent.append(reply)
 
 
 class FakeControl:
@@ -57,14 +69,17 @@ def main():
     claude = FakeControl(CLAUDE, 'Claude 运行测试', False)
     original_state = monitor.snapshot()
     window = None
+    approvals = Approvals()
+    approvals_rpc = FakeApprovalClient()
     app = QApplication.instance() or QApplication(sys.argv[:1])
     data = {'messages': [{'role': 'user', 'text': '先查看进度，再继续下一步。'},
                          {'role': 'assistant', 'text': '当前任务正在执行，可以继续发送新指令。'}], 'events': []}
-    monitor.update(connection='connected', threads=[{'id': CODEX, 'title': '中文界面测试', 'status': {'type': 'active'}}],
+    project_directory = str(Path(__file__).resolve().parents[1])
+    monitor.update(connection='connected', threads=[{'id': CODEX, 'title': '中文界面测试', 'status': {'type': 'active'}, 'cwd': project_directory}],
                    controls=codex.snapshot(), claude={'connection': 'connected', 'threads': [
                        {'id': CLAUDE, 'title': 'Claude 运行测试', 'status': {'type': 'active'}}], 'controls': claude.snapshot()})
     try:
-        with patch.object(monitor, 'controller', codex), patch.object(monitor, 'claude_controller', claude), \
+        with patch.object(monitor, 'approvals', approvals), patch.object(monitor, 'controller', codex), patch.object(monitor, 'claude_controller', claude), \
              patch.object(monitor, 'conversation_for', side_effect=lambda *_: copy.deepcopy(data)), \
              patch.object(monitor, 'start_background_service', side_effect=lambda stop: (stop, NoWorkers())):
             window = MainWindow(Shared())
@@ -73,8 +88,33 @@ def main():
             window.timer.stop()  # Explicit refreshes make assertions deterministic.
             QTest.qWait(120)
             assert window.windowTitle() == '澜汐'
-            cover = window.findChild(OceanCover)
-            assert cover is not None and not cover.image.isNull(), 'Ocean cover must load'
+            ocean = window.centralWidget()
+            assert isinstance(ocean, OceanBackdrop) and not ocean.current[0].isNull()
+            assert len(ocean.wallpapers) == 3 and ocean.rotation.interval() == 30 * 60_000
+            assert abs(window.client_switch.geometry().center().x() - ocean.rect().center().x()) <= 1
+            normal = ocean.grab().toImage()
+            original = ocean.current
+            ocean.current = (original[0], QImage())
+            unblurred = ocean.grab().toImage()
+            ocean.current = original
+            for card in (window.task_panel, window.conversation_card):
+                assert isinstance(card, FrostedPanel)
+                pos = card.mapTo(ocean, QPoint(card.width() // 2, card.height() * 2 // 3))
+                pos *= normal.devicePixelRatio()
+                assert normal.pixel(pos) != unblurred.pixel(pos), 'Frosted panel must sample the blurred wallpaper'
+            assert window.conversation_header.opacity.opacity() == 0.0
+            original_top = window.conversation.y()
+            window.action_buttons['attach'].setFocus()
+            QTest.qWait(190)
+            assert window.conversation_header.opacity.opacity() == 1.0
+            assert window.conversation.y() == original_top
+            window.message_edit.setFocus()
+            QTest.qWait(190)
+            assert window.conversation_header.opacity.opacity() == 0.0
+            window.task_search.setText('不存在的任务')
+            assert window.task_choice.item(0).isHidden() and window.task_empty.isVisible()
+            window.task_search.clear()
+            assert not window.task_choice.item(0).isHidden()
             assert not hasattr(window, 'operation_log'), 'History must not be in the visible UI'
             # Reproduce the cold-start sequence, not only a preloaded snapshot:
             # placeholder -> DB ready with old failures -> more old pages arrive.
@@ -101,71 +141,91 @@ def main():
                     cold_window.close()
                     cold_window.deleteLater()
                     app.processEvents()
-            assert window.task_choice.currentText() == '中文界面测试'
-            assert not window.task_action_buttons[CODEX]['manage'].isEnabled()
-            assert window.task_action_buttons[CODEX]['unmanage'].isEnabled()
-            assert window.task_action_buttons[CODEX]['pause'].isEnabled()
+            assert window.task_title() == '中文界面测试'
+            other = '22222222-2222-4222-8222-222222222222'
+            primary = {'id': CODEX, 'title': '中文界面测试', 'status': {'type': 'active'}, 'cwd': project_directory}
+            monitor.update(threads=[primary, {'id': other, 'title': '另一项任务'}])
+            window.refresh()
+            window.message_edit.setPlainText('单个任务的草稿')
+            second_row = window.task_choice.visualItemRect(window.task_choice.item(1)).center()
+            QTest.mouseClick(window.task_choice.viewport(), Qt.MouseButton.LeftButton, pos=second_row)
+            assert window.selected_thread == other and codex.calls[-1][:2] == (other, 'focus')
+            assert window.message_edit.toPlainText() == ''
+            first_row = window.task_choice.visualItemRect(window.task_choice.item(0)).center()
+            QTest.mouseClick(window.task_choice.viewport(), Qt.MouseButton.LeftButton, pos=first_row)
+            assert codex.calls[-1][:2] == (CODEX, 'focus')
+            assert window.message_edit.toPlainText() == '单个任务的草稿'
+            window.message_edit.clear()
+            editor = Path('C:/Program Files/Microsoft VS Code/Code.exe')
+            with patch('desktop_qt.vscode_executable', return_value=editor), patch('desktop_qt.subprocess.Popen') as launch:
+                QTest.mouseClick(window.action_buttons['open_project'], Qt.MouseButton.LeftButton)
+                launch.assert_called_once_with([str(editor), project_directory])
+            assert not window.action_buttons['manage'].isEnabled()
+            assert window.action_buttons['unmanage'].isEnabled()
+            assert window.action_buttons['pause'].isEnabled()
             # A running Codex turn can coexist with an older local pause after
             # reattach. Continue must stay clickable; actual routing is covered
             # with a persistent controller in test_codex_desktop.py.
             codex.data['tasks'][0]['paused'] = True
             window.refresh()
             assert not window.send_button.isEnabled()
-            assert window.task_action_buttons[CODEX]['resume'].isEnabled()
-            QTest.mouseClick(window.task_action_buttons[CODEX]['resume'], Qt.MouseButton.LeftButton)
+            assert window.action_buttons['resume'].isEnabled()
+            QTest.mouseClick(window.action_buttons['resume'], Qt.MouseButton.LeftButton)
             assert codex.calls[-1][:2] == (CODEX, 'resume')
             codex.data['tasks'][0]['paused'] = False
             window.refresh()
             assert window.send_button.isEnabled()
-            button = window.task_action_buttons[CODEX]['pause']
-            button.animate_to(12)
-            QTest.qWait(180)
-            assert button.effect.blurRadius() > 10, 'The hover animation must actually run'
-            assert button.animation.duration() == 160
             if app.platformName() == 'windows':
                 assert QFontDatabase.families(), 'Native Windows fonts must be available'
-                brand = next(w for w in window.findChildren(QLabel) if w.objectName() == 'brand')
-                assert brand.text() == '澜汐'
-                assert QRawFont.fromFont(brand.font()).supportsCharacter(ord('澜')), 'Chinese glyphs are missing'
+                assert QRawFont.fromFont(ui_font()).supportsCharacter(ord('澜')), 'Chinese glyphs are missing'
+                icon = window.windowIcon().pixmap(128, 128).toImage()
+                assert not icon.isNull() and icon.pixelColor(0, 0).alpha() == 0
             window.message_edit.setPlainText('Codex 草稿')
             window.grab().save(str(args.output / 'codex-desktop.png'))
             QTest.mouseClick(window.client_buttons['claude'], Qt.MouseButton.LeftButton)
             assert window.client == 'claude' and window.selected_thread == CLAUDE
             assert window.message_edit.toPlainText() == ''
             assert window.send_button.isEnabled(), 'An active controlled Claude session must accept input'
-            assert window.task_action_buttons[CLAUDE]['manage'].isEnabled(), 'Disabled only after explicit enable, not for the whole Claude client'
-            QTest.mouseClick(window.task_action_buttons[CLAUDE]['manage'], Qt.MouseButton.LeftButton)
+            assert window.action_buttons['manage'].isEnabled(), 'Disabled only after explicit enable, not for the whole Claude client'
+            QTest.mouseClick(window.action_buttons['manage'], Qt.MouseButton.LeftButton)
             assert claude.calls[-1][1] == 'manage'
             claude.data['tasks'][0]['managed'] = True
             claude.data['tasks'][0]['autoProgress'] = {'state': 'scheduled', 'due': 2000000000}
             window.refresh()
-            assert not window.task_action_buttons[CLAUDE]['manage'].isEnabled()
-            assert window.task_action_buttons[CLAUDE]['manage'].text() == '已开启自动推进'
-            assert window.task_action_buttons[CLAUDE]['unmanage'].isEnabled()
-            QTest.mouseClick(window.task_action_buttons[CLAUDE]['unmanage'], Qt.MouseButton.LeftButton)
+            assert not window.action_buttons['manage'].isEnabled()
+            assert window.action_buttons['manage'].text() == '扬帆'
+            assert window.action_buttons['unmanage'].isEnabled()
+            QTest.mouseClick(window.action_buttons['unmanage'], Qt.MouseButton.LeftButton)
             assert claude.calls[-1][1] == 'unmanage'
             claude.data['tasks'][0]['managed'] = False
             window.refresh()
-            assert window.task_action_buttons[CLAUDE]['manage'].isEnabled()
-            assert window.task_action_buttons[CLAUDE]['pause'].isEnabled()
+            assert window.action_buttons['manage'].isEnabled()
+            assert window.action_buttons['pause'].isEnabled()
             window.message_edit.setPlainText('请优先处理这个新指令')
             QTest.mouseClick(window.send_button, Qt.MouseButton.LeftButton)
             assert claude.calls[-1][:3] == (CLAUDE, 'message', '请优先处理这个新指令')
             message_id = claude.calls[-1][3]
-            QTest.mouseClick(window.task_action_buttons[CLAUDE]['pause'], Qt.MouseButton.LeftButton)
+            QTest.mouseClick(window.action_buttons['pause'], Qt.MouseButton.LeftButton)
             assert claude.calls[-1][1] == 'pause'
-            # Verify the actual QInputDialog and target, not just a mock getText().
-            def accept_name():
-                dialog = app.activeModalWidget()
-                assert isinstance(dialog, QInputDialog)
-                dialog.setTextValue('我自己的任务名')
-                dialog.accept()
-            QTimer.singleShot(40, accept_name)
-            QTest.mouseClick(window.rename_button, Qt.MouseButton.LeftButton)
+            QTest.mouseDClick(window.conversation_heading, Qt.MouseButton.LeftButton)
+            assert window.title_stack.currentWidget() == window.title_editor
+            assert window.title_editor.selectedText() == 'Claude 运行测试'
+            before = len(claude.calls)
+            window.title_editor.setText('这笔不落款')
+            QTest.keyClick(window.title_editor, Qt.Key.Key_Escape)
+            assert window.title_stack.currentWidget() == window.conversation_heading
+            assert len(claude.calls) == before
+            QTest.mouseDClick(window.conversation_heading, Qt.MouseButton.LeftButton)
+            window.title_editor.setText('我自己的任务名')
+            window.refresh()
+            assert window.title_editor.text() == '我自己的任务名'
+            QTest.qWait(260)
+            window.grab().save(str(args.output / 'inline-rename-desktop.png'))
+            QTest.keyClick(window.title_editor, Qt.Key.Key_Return)
             assert claude.calls[-1][:3] == (CLAUDE, 'rename', '我自己的任务名')
             claude.data['names'][CLAUDE] = '我自己的任务名'
             window.refresh()
-            assert window.task_choice.currentText() == '我自己的任务名'
+            assert window.task_title() == '我自己的任务名'
             # A newer draft must never be overwritten by failure of an earlier send.
             window.message_edit.setPlainText('新的未发送草稿')
             op = next(o for o in claude.data['operations'] if o['id'] == message_id)
@@ -186,10 +246,10 @@ def main():
             task['paused'] = True
             window.refresh()
             assert not window.send_button.isEnabled()
-            assert not window.task_action_buttons[CLAUDE]['resume'].isEnabled()
+            assert not window.action_buttons['resume'].isEnabled()
             task['threadStatus'] = {'type': 'idle'}
             window.refresh()
-            assert window.task_action_buttons[CLAUDE]['resume'].isEnabled()
+            assert window.action_buttons['resume'].isEnabled()
             # New execution errors show a real popup; historical errors do not repeat.
             data['events'] = [{'method': 'error', 'time': 100, 'status': {'error': 'Synthetic execution error ' + CLAUDE}}]
             window.refresh_conversation()
@@ -205,7 +265,7 @@ def main():
             assert window.message_edit.toPlainText() == 'Codex 草稿'
             QTest.mouseClick(window.client_buttons['claude'], Qt.MouseButton.LeftButton)
             assert window.message_edit.toPlainText() == 'Claude 草稿'
-            assert window.task_choice.currentText() == '我自己的任务名'
+            assert window.task_title() == '我自己的任务名'
             assert not any(p.isVisible() for p in window.findChildren(QMessageBox))
             labels = '\n'.join(w.text() for w in window.findChildren(QLabel))
             assert CODEX not in labels and CLAUDE not in labels
@@ -266,9 +326,50 @@ def main():
             QTest.mouseClick(window.client_buttons['codex'], Qt.MouseButton.LeftButton)
             window.control_message.setText('任务正在运行，你可以随时补充指令')
             window.refresh()
-            QTest.qWait(60)
+            QTest.qWait(270)
             window.conversation.verticalScrollBar().setValue(0)
             window.grab().save(str(args.output / 'codex-desktop.png'))
+            window.task_search.setFocus()
+            header = window.conversation_header
+            point = QPoint(10, 10)
+            app.sendEvent(header, QEnterEvent(QPointF(point), QPointF(header.mapTo(window, point)),
+                                              QPointF(header.mapToGlobal(point))))
+            QTest.qWait(200)
+            assert window.conversation_header.opacity.opacity() == 1.0
+            window.grab().save(str(args.output / 'hover-desktop.png'))
+            app.sendEvent(header, QEvent(QEvent.Type.Leave))
+            QTest.qWait(200)
+            assert window.conversation_header.opacity.opacity() == 0.0
+            # A request from the inactive client must still open the correct native dialog.
+            token = approvals.add(approvals_rpc, {
+                'id': 37, 'method': 'item/commandExecution/requestApproval',
+                'params': {'threadId': CLAUDE, 'cwd': 'D:/Projects/Demo', 'command': 'npm run test'},
+            })
+            window.refresh()
+            QTest.qWait(70)
+            dialog = window.approval_dialog
+            assert dialog and dialog.isVisible() and window._review_token == token
+            assert any('D:/Projects/Demo' in node.text() for node in dialog.findChildren(QLabel))
+            dialog.grab().save(str(args.output / 'approval-desktop.png'))
+            dialog.reject()
+            window.refresh()
+            assert window.approval_dialog is None and not approvals_rpc.sent
+            QTest.mouseClick(window.review_button, Qt.MouseButton.LeftButton)
+            QTest.qWait(30)
+            assert window.approval_dialog is not None
+            allow = window.approval_dialog.findChild(QPushButton, 'approvalAllow')
+            QTest.mouseClick(allow, Qt.MouseButton.LeftButton)
+            assert approvals_rpc.sent == [{'id': 37, 'result': {'decision': 'accept'}}]
+            assert window.approval_dialog is None and window.stat_pending.text() == '0'
+            for expected_index, name in ((1, 'big-sur'), (2, 'catalina')):
+                ocean.rotation.timeout.emit()
+                QTest.qWait(700)
+                assert ocean.index == expected_index and not ocean.current[1].isNull()
+                assert ocean.previous is None and ocean.fade == 1.0
+                window.grab().save(str(args.output / f'{name}-desktop.png'))
+            ocean.rotation.timeout.emit()
+            QTest.qWait(700)
+            assert ocean.index == 0
             # A quota wait is separate from a manual pause and has a real reset
             # timestamp. The current task makes that distinction visible.
             codex.data['tasks'][0]['threadStatus'] = {'type': 'idle'}
@@ -285,25 +386,34 @@ def main():
             assert not window.send_button.isEnabled()
             assert '刷新后自动继续' in window.message_hint.text()
             assert '下次检查' in window.guard_text.toPlainText()
-            assert any(w.text() == '◷ 等待额度刷新' for w in window.findChildren(QLabel))
-            assert window.task_action_buttons[CODEX]['pause'].isEnabled()
+            assert window.action_buttons['pause'].isEnabled()
             window.grab().save(str(args.output / 'quota-wait-desktop.png'))
             codex.data['tasks'][0]['paused'] = True
             window.refresh()
             QTest.qWait(20)
-            assert any(w.text() == 'Ⅱ 已暂停' for w in window.findChildren(QLabel))
-            assert window.message_hint.text() == '任务已暂停，请先继续。'
-            assert window.task_action_buttons[CODEX]['resume'].isEnabled()
+            assert window.task_choice.currentItem().text().endswith('暂泊')
+            assert window.message_hint.text() == '已暂泊，点「续航」后即可发送。'
+            assert window.action_buttons['resume'].isEnabled()
             codex.data['tasks'][0]['paused'] = False
             monitor.update(quotaWaits={})
             window.refresh()
             assert window.send_button.isEnabled()
             window.close()
             assert not window.isVisible() and not window.stop.is_set(), 'Closing should keep workers in the tray'
+            approvals.add(approvals_rpc, {
+                'id': 38, 'method': 'item/commandExecution/requestApproval', 'params': {'command': 'npm run test'},
+            })
+            window.refresh()
+            QTest.qWait(45)
+            assert window.approval_dialog is not None and window.approval_dialog.isVisible()
+            assert not window.isVisible()
+            reject = next(button for button in window.approval_dialog.findChildren(QPushButton) if button.text() == '拒绝')
+            QTest.mouseClick(reject, Qt.MouseButton.LeftButton)
+            assert approvals_rpc.sent[-1] == {'id': 38, 'result': {'decision': 'decline'}}
             window.show_window()
             QTest.qWait(30)
             assert window.isVisible(), 'The tray action must reopen the workspace'
-            print('Qt smoke passed: dual-client controls, drafts, rename, failures, animation, Chinese fonts, keyboard send, compact layout, wrapped messages and tray reopen.')
+            print('Qt smoke passed: glass, rotation, hover/focus, approval, dual-client controls, drafts, rename, failure dialogs, Chinese glyphs, layout and tray.')
     finally:
         if window is not None:
             window._quitting = True

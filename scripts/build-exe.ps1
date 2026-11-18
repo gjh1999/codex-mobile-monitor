@@ -15,6 +15,8 @@ if (-not (Test-Path $python)) { throw "找不到虚拟环境 Python：$python" }
   --add-data "$(Join-Path $project 'windows_notify.ps1');." `
   --add-data "$(Join-Path $project 'app.ico');." `
   --add-data "$(Join-Path $project 'docs\assets\os-x-mavericks-wave.jpg');docs/assets" `
+  --add-data "$(Join-Path $project 'docs\assets\macos-big-sur-day.jpg');docs/assets" `
+  --add-data "$(Join-Path $project 'docs\assets\macos-catalina-night.jpg');docs/assets" `
   --exclude-module tkinter --exclude-module _tkinter `
   --hidden-import dingtalk_commands --hidden-import desktop_win32 --hidden-import desktop_qt `
   --distpath $dist --workpath $work --specpath $specDir `

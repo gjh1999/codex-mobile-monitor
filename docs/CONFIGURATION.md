@@ -25,6 +25,7 @@
 | `claudeAutoAttachThreads` | `[]` | 启动时写入 Claude 接入列表的会话 ID |
 | `autoApprovalRules` | `[]` | Codex 精确命令自动审批规则 |
 | `streamIdentities` | `[]` | 钉钉 Stream 私聊身份白名单；空列表拒绝全部命令 |
+| `desktopWallpaperMinutes` | `30` | 每隔多少分钟轮换桌面壁纸。填写 1–1440 的整数，填 0 固定使用 Mavericks 海浪。重启生效 |
 
 服务循环会重新读取任务配置与审批规则；自动接入 seed、Stream 路由身份在启动时建立。为统一应用更改，修改后重启对应实例。已移出的任务意图保存在控制数据库，seed 不会覆盖已有的移出状态。
 

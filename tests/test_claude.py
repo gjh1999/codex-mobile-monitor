@@ -321,11 +321,11 @@ class Tests(unittest.TestCase):
                 window.show()
                 window.switch_client('claude')
                 QTest.qWait(30)
-                QTest.mouseClick(window.task_action_buttons[TID]['pause'], Qt.MouseButton.LeftButton)
+                QTest.mouseClick(window.action_buttons['pause'], Qt.MouseButton.LeftButton)
                 self.control.tick(self.rpc)
                 window.refresh()
                 self.assertFalse(window.send_button.isEnabled())
-                self.assertFalse(window.task_action_buttons[TID]['resume'].isEnabled())
+                self.assertFalse(window.action_buttons['resume'].isEnabled())
                 session.dispatch({'type': 'result', 'is_error': True,
                                   'errors': ['[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null'],
                                   'user_message_uuid': sent['uuid']})
@@ -336,7 +336,7 @@ class Tests(unittest.TestCase):
                 self.assertFalse(any(dialog.isVisible() for dialog in window.findChildren(QMessageBox)))
                 self.assertNotIn('执行未完成', window.conversation.toPlainText())
                 self.assertNotIn('ede_diagnostic', window.conversation.toPlainText())
-                self.assertTrue(window.task_action_buttons[TID]['resume'].isEnabled())
+                self.assertTrue(window.action_buttons['resume'].isEnabled())
                 self.assertTrue(self.control.snapshot()['tasks'][0]['paused'])
                 self.assertEqual(len([e for e in session.process.sent if e['type'] == 'user']), 1)
         finally:

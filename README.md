@@ -1,10 +1,10 @@
 ﻿# 澜汐 · Codex / Claude Code 桌面工作台
 
-Windows 原生桌面软件，用于集中查看和控制本机 Codex / Claude Code 任务。蓝白工作台提供任务接入、对话、指令发送、暂停与继续、单次审批、自动推进和 Windows 提醒；两端使用独立后台和状态文件。钉钉通知与 Stream 指令是可选通道。
+Windows 原生桌面软件，用于集中查看和控制本机 Codex / Claude Code 任务。澜汐在整窗轮换壁纸上以两块半透明毛玻璃展示任务和对话，提供任务接入、指令发送、暂停与继续、单次审批和自动推进。两端使用独立后台和状态文件。钉钉通知与 Stream 指令是可选通道。
 
 ## 快速开始
 
-在 Windows 上双击 `release/Lanxi.exe` 打开澜汐原生窗口。关闭窗口后程序留在系统托盘，从托盘选择“退出程序”即可停止后台。独立 Web 工作台的运行与 iPhone 局域网调试见 [Web 工作台说明](docs/WEB.md)。同一目录每次运行一个后台。
+在 Windows 上双击桌面包打开澜汐原生窗口。默认构建名为 `release/Lanxi.exe`，并列发布的毛玻璃版为 `release/Lanxi-Glass.exe`。关闭窗口后程序留在系统托盘，从托盘选择“退出程序”即可停止后台。独立 Web 工作台的运行与 iPhone 局域网调试见 [Web 工作台说明](docs/WEB.md)。
 
 在 PowerShell 中从项目根目录启动：
 
@@ -35,6 +35,7 @@ codex-mobile-monitor/
 ├── README.md                   # 项目入口
 ├── desktop_app.py              # 桌面启动入口
 ├── desktop_qt.py               # 完整 Qt 双客户端工作台与托盘
+├── desktop_glass.py            # 壁纸轮换、毛玻璃层和客户端滑块
 ├── desktop_theme.py            # 蓝白主题、字体和消息排版
 ├── desktop_win32.py            # Win32 回退界面
 ├── monitor.py                  # 进程内双客户端后台与状态编排

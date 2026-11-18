@@ -43,7 +43,7 @@ class TaskControl:
     def submit(self, thread, action, text='', request_id=None):
         if action == 'create_test' and not thread:
             thread = '00000000-0000-0000-0000-000000000000'
-        actions = {'create_test', 'attach', 'detach', 'manage', 'unmanage', 'pause', 'resume', 'message', 'rename'}
+        actions = {'create_test', 'attach', 'detach', 'focus', 'manage', 'unmanage', 'pause', 'resume', 'message', 'rename'}
         if not re.fullmatch(r'[0-9a-fA-F-]{36}', str(thread)) or action not in actions:
             raise ValueError('无效任务或操作。')
         if not isinstance(text, str) or len(text) > 10000 or (action == 'message' and not text.strip()):
@@ -68,6 +68,8 @@ class TaskControl:
                 self.db.execute('UPDATE targets SET paused=1 WHERE id=?', (thread,))
             if action in ('pause', 'detach'):
                 self.db.execute("UPDATE operations SET status='cancelled',result='任务已暂停或移出，未发送这条指令。' WHERE thread=? AND action IN ('message','resume') AND status='queued'", (thread,))
+            if action == 'focus':
+                self.db.execute("UPDATE operations SET status='cancelled',result='已选择更新的任务。' WHERE action='focus' AND status='queued'")
             self.db.execute("INSERT INTO operations VALUES(?,?,?,?,'queued','等待后台处理',?)", (key, thread, action, text, time.time()))
             self.db.commit()
             rpc = self.connection
@@ -100,7 +102,7 @@ class TaskControl:
                 raise ValueError('后台返回任务标识不一致。')
             rpc.owned_threads.add(tid)
             return dict(threadId=tid, mode='control', status='attached', message='已接入控制，可暂停或发送消息。', canControl=True,
-                        threadStatus=thread.get('status'), title=thread.get('name') or thread.get('title'),
+                        threadStatus=thread.get('status'), title=thread.get('name') or thread.get('title'), cwd=thread.get('cwd'),
                         goalStatus=self._goal(rpc, tid).get('status'), retryAt=time.time() + 3600)
         except RPCError as error:
             detail = error.detail or ''
@@ -108,7 +110,7 @@ class TaskControl:
                 rpc.owned_threads.discard(tid)
                 thread = rpc.call('thread/read', {'threadId': tid, 'includeTurns': False}).get('thread', {})
                 client = 'Claude Code' if getattr(rpc, 'client_type', 'codex') == 'claude' else 'Codex'
-                return dict(threadId=tid, mode='observe', status='observing', title=thread.get('name') or thread.get('title'),
+                return dict(threadId=tid, mode='observe', status='observing', title=thread.get('name') or thread.get('title'), cwd=thread.get('cwd'),
                             message='原' + client + '窗口仍在占用会话，只读关注中；请先退出原会话再接入控制。', canControl=False,
                             threadStatus=thread.get('status'), goalStatus=self._goal(rpc, tid).get('status'), retryAt=time.time() + 60)
             return dict(threadId=tid, mode='none', status='failed', message='接入失败：' + detail[:180], canControl=False, retryAt=time.time() + 300)
@@ -124,11 +126,47 @@ class TaskControl:
             stopped_after = self.db.execute("SELECT 1 FROM operations WHERE thread=? AND action IN ('pause','detach') AND rowid>(SELECT rowid FROM operations WHERE id=?) LIMIT 1", (tid, operation)).fetchone()
             return bool(row and row[0] and not stopped_after and (action == 'resume' or not row[1]))
 
+    def _focus(self, rpc, tid, operation):
+        with self.lock:
+            current = self.runtime.get(tid)
+        owned = tid in rpc.owned_threads
+        target = current if owned and current and current.get('canControl') else self._load(rpc, tid)
+        if not target.get('canControl'):
+            raise ValueError(target.get('message') or '任务暂时无法接入。')
+        with self.lock:
+            newer = self.db.execute(
+                "SELECT 1 FROM operations WHERE action='focus' AND status='queued' "
+                "AND rowid>(SELECT rowid FROM operations WHERE id=?) LIMIT 1", (operation,),
+            ).fetchone()
+            if newer:
+                if not owned:
+                    rpc.owned_threads.discard(tid)
+                return '已选择更新的任务。'
+            with self.db:
+                others = self.db.execute('SELECT id FROM targets WHERE enabled=1 AND id!=?', (tid,)).fetchall()
+                self.db.execute(
+                    "UPDATE operations SET status='cancelled',result='已切换任务，未发送这条指令。' "
+                    "WHERE status='queued' AND action IN ('message','resume') "
+                    "AND thread IN (SELECT id FROM targets WHERE enabled=1 AND id!=?)", (tid,),
+                )
+                self.db.execute('UPDATE targets SET enabled=0 WHERE enabled=1 AND id!=?', (tid,))
+                self.db.execute(
+                    'INSERT INTO targets(id,enabled,paused,managed) VALUES(?,1,0,0) '
+                    'ON CONFLICT(id) DO UPDATE SET enabled=1', (tid,),
+                )
+            for (previous,) in others:
+                self.runtime.pop(previous, None)
+                rpc.owned_threads.discard(previous)
+            self.runtime[tid] = target
+        return '已接入当前任务，其他任务已断开。' if others else '已接入当前任务。'
+
     def _perform(self, rpc, tid, action, text, operation):
         is_claude = getattr(rpc, 'client_type', 'codex') == 'claude'
         if action == 'rename':
             self._execute('INSERT INTO task_names VALUES(?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name', (tid, text))
             return '任务名称已更新。'
+        if action == 'focus':
+            return self._focus(rpc, tid, operation)
         if action == 'create_test':
             thread = rpc.call('thread/start', {'cwd': str(Path(__file__).resolve().parent), 'approvalPolicy': 'on-request', 'sandbox': 'workspace-write',
                              'developerInstructions': '这是独立功能测试任务。只响应用户发送的简单测试消息；不操作医学研究文件，不主动执行命令或修改文件。'}).get('thread', {})
@@ -138,7 +176,7 @@ class TaskControl:
             self._execute('INSERT INTO targets(id,enabled,paused,managed) VALUES(?,1,0,?)', (created, int(not is_claude)))
             rpc.owned_threads.add(created)
             with self.lock:
-                self.runtime[created] = dict(threadId=created, mode='control', status='attached', canControl=True, title='桌面功能测试', goalStatus=None,
+                self.runtime[created] = dict(threadId=created, mode='control', status='attached', canControl=True, title='桌面功能测试', goalStatus=None, cwd=thread.get('cwd'),
                                              message='测试任务已就绪，等待你发送第一条指令。', retryAt=time.time() + 3600)
             try:
                 rpc.call('thread/name/set', {'threadId': created, 'name': '桌面功能测试'})

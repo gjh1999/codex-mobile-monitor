@@ -82,7 +82,7 @@ def collect(rpc,cfg,scheduler):
  try:
   data=rpc.call('thread/list',{'limit':20})
   names=((snapshot().get('controls') or {}).get('names') or {})
-  update(threads=[{'id':t['id'],'title':names.get(t['id']) or t.get('name') or t.get('title') or history_labels.get(t['id'],{}).get('title') or '未命名历史任务','source':history_labels.get(t['id'],{}).get('source'),'cwd':history_labels.get(t['id'],{}).get('cwd'),'status':t.get('status',{'type':'unknown'}),'updatedAt':t.get('updatedAt')} for t in data.get('data',[])])
+  update(threads=[{'id':t['id'],'title':names.get(t['id']) or t.get('name') or t.get('title') or history_labels.get(t['id'],{}).get('title') or '未命名历史任务','source':history_labels.get(t['id'],{}).get('source'),'cwd':t.get('cwd') or history_labels.get(t['id'],{}).get('cwd'),'status':t.get('status',{'type':'unknown'}),'updatedAt':t.get('updatedAt')} for t in data.get('data',[])])
  except Exception:update(threads=[],threadStatus='unavailable')
  update(updated=int(time.time()),connection='disconnected' if rpc.closed else 'connected')
 class Notifications:

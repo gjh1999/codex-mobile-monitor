@@ -3,6 +3,7 @@ from pathlib import Path
 from task_control import TaskControl
 from rpc_client import RPCError
 TARGET='01a1cad9-8028-7771-bf25-2115a5c73e1f'
+OTHER='01a1cad9-8028-7771-bf25-2115a5c73e20'
 
 
 class Mock:
@@ -10,7 +11,7 @@ class Mock:
  def call(self,method,params):
   self.calls.append((method,params))
   if method=='thread/resume' and self.writer:raise RPCError(detail='already has an active writer')
-  if method in ['thread/resume','thread/read']:return {'thread':{'id':TARGET,'status':{'type':'active' if self.active else 'idle'}}}
+  if method in ['thread/resume','thread/read']:return {'thread':{'id':params.get('threadId', TARGET),'status':{'type':'active' if self.active else 'idle'}}}
   if method=='thread/goal/get':return {'goal':{'status':self.goal}}
   if method=='thread/start':return {'thread':{'id':'00000000-0000-0000-0000-000000000123','status':{'type':'idle'}}}
   if method=='thread/turns/list':return {'data':[{'id':'turn-1','status':'inProgress'}] if self.active else []}
@@ -34,6 +35,26 @@ class Tests(unittest.TestCase):
   c.submit(TARGET,'message','do work','send1');c.tick(r)
   self.assertEqual(c.snapshot()['operations'][0]['status'],'failed')
   self.assertNotIn('turn/start',[m for m,p in r.calls])
+ def test_focus_replaces_only_after_success_and_preserves_stop_intent(self):
+  c=self.make();r=Mock();c.seed([TARGET]);c.tick(r)
+  r.writer=True
+  c.submit(OTHER,'focus',request_id='locked');c.tick(r)
+  self.assertEqual(r.owned_threads,{TARGET})
+  self.assertEqual(c.snapshot()['operations'][0]['status'],'failed')
+  r.writer=False
+  c.submit(TARGET,'focus',request_id='earlier')
+  c.submit(OTHER,'focus',request_id='latest')
+  c.submit(TARGET,'message','keep the old draft',request_id='old-message')
+  c.tick(r)
+  snapshot=c.snapshot()
+  self.assertEqual(r.owned_threads,{OTHER})
+  self.assertEqual([(t['threadId'],t['managed']) for t in snapshot['tasks']],[(OTHER,False)])
+  self.assertEqual({o['id']:o['status'] for o in snapshot['operations'] if o['id']!='locked'},
+                   {'earlier':'cancelled','latest':'succeeded','old-message':'cancelled'})
+  self.assertFalse(any(method in ('turn/start','turn/steer','turn/interrupt') for method,_ in r.calls))
+  c.submit(TARGET,'focus',request_id='back');c.tick(r)
+  self.assertEqual(r.owned_threads,{TARGET})
+  self.assertTrue(c.snapshot()['tasks'][0]['managed'])
  def test_pausing_interrupts_exact_active_turn_and_prevents_messages(self):
   c=self.make();r=Mock();r.active=True;c.seed([TARGET]);c.tick(r)
   c.submit(TARGET,'pause',request_id='pause1');c.tick(r)

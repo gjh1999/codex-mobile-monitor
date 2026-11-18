@@ -22,7 +22,9 @@
 
 ## EXE 与数据
 
-默认构建生成 `release/Lanxi.exe`。毛玻璃版的并列包为 `release/Lanxi-Glass.exe`，同目录使用相同配置和状态。旧版仍在运行时，先从托盘退出旧版再打开新版。单文件内含 Python、Qt 和壁纸；运行任务需本机已安装并登录对应的 Codex / Claude CLI。
+本轮毛玻璃版交付文件为 `release/Lanxi-Glass-R5.exe`。它采用已确认的 R4 界面，只带入项目文件夹名称和任务状态文字。此后以 R4 为桌面视觉基线，逐项验证用户要求修改的部分。默认构建名为 `release/Lanxi.exe`。
+
+同目录的桌面包使用相同配置和状态。上一版仍在运行时，先从托盘退出再打开新版。单文件内含 Python、Qt 和壁纸。运行任务需本机已安装并登录对应的 Codex / Claude CLI。
 
 壁纸每 30 分钟离线轮换，默认依次为 Mavericks 海浪、Big Sur 白昼和 Catalina 夜景。系统关闭动画效果时，切换直接生效。可用 `desktopWallpaperMinutes` 调整间隔。中文标题和正文使用 Windows 本机字体。[macOS 原配壁纸档案](https://512pixels.net/projects/default-mac-wallpapers-in-5k/)
 

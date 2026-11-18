@@ -2,6 +2,12 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-18 以 R4 为基线重建 R5
+
+- 在 `build-exe/verification/lanxi-r4-baseline/r5-source/mobile-monitor` 解包 R4 源码 `287a3f6`。只覆盖 `9f4ff0d` 的 `desktop_qt.py` 和配套桌面验收脚本。第一轮发现 Git 归档受 CRLF 设置影响，第二轮关闭归档的 CRLF 转换，逐字节核对桌面入口、毛玻璃、配色、后台模块、图标和构建脚本均来自 R4。重建使用已提交的快照。
+- Windows 11 x64、Python 3.14.7、PySide6 6.12.0。设置 `QT_QPA_PLATFORM=windows` 后，从该独立源码目录运行 `python tests/smoke_desktop.py --output ../../r5-windows`。同尺寸 1180×760 的 R4 与 R5 实机截图相差 3018 个像素，全部位于左侧任务标题与状态或右侧当前标题区域。其余区域相差 0 像素。运行 `python -m unittest discover -s tests -t . -p 'test_*.py' -q`，118 项通过，1 项跳过，10.976 秒。
+- 用 PyInstaller 6.22.3 从独立源码目录运行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-exe.ps1 -AppName Lanxi-Glass-R5`。交付文件 `release/Lanxi-Glass-R5.exe` 为 54,088,903 字节，同构建文件哈希一致，包内已核对 Qt Windows 插件、原生桌面模块及三张壁纸。隔离启动返回 0 时，发现 R4 仍占用单实例锁，未进行第二实例独立启动验收。
+
 ## 2026-11-18 跨设备后端第一阶段：Git 与原生 CLI 跨盘续接
 
 - 目的为验证方案的第一个技术依赖：目标工作区能同时保留未推送提交、暂存版、未暂存版、选定新增文件和指定的已完成轮次，并在新路径续写原线程。基线 `9f4ff0d` 的桌面回归为 119 项、通过 118 项、跳过 1 项，尚无交接入口。实施期间 17:00 例行备份产生 `ef577f8`，该提交保存的是开发中的版本。

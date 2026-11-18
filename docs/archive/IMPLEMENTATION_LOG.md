@@ -38,6 +38,12 @@
 - `tests/smoke_desktop.py --output build-exe/verification/task-switch-desktop-smoke-02` 通过。全套 `.\.venv\Scripts\python.exe -m unittest discover -s tests -t . -p 'test_*.py' -v` 运行 147 项，146 项通过、1 项可选 Stream SDK 跳过，用时 37.993 秒，见 `build-exe/verification/task-switch-regression.txt`。
 - 运行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-exe.ps1 -AppName Lanxi-Glass-R8`，PyInstaller 完成构建约 40.89 秒。包位于 `release/Lanxi-Glass-R8.exe`，61,417,833 字节，同目录 R7 为 54,104,555 字节。归档核对包含新版桌面模块、交接后台和 Qt Windows 插件。切换测试执行的是源码窗口，新 EXE 的实机启动和操作耗时未测。
 
+## 2026-11-18 拾得片羽与待理诸事
+
+- 以 `1bd5157` 的 R9 界面和确认过的两张概念图为基线。左栏保留两个固定入口，切换时同步更新列表和右栏组名。沿用 SQLite 表结构。新记录只写正文，编辑旧记录时在同一编辑区读回原题名和正文。待办的完成操作只更新状态，排序和时间戳保持稳定。
+- Windows 11 x64、Python 3.14.7、PySide6 6.12.0。在 `build-exe/verification/lanxi-notebook-groups/worktree` 设置 `QT_QPA_PLATFORM=windows`，执行 `python tests/smoke_desktop.py --output ../windows-first`，约 9.16 秒通过。用临时 SQLite 记录覆盖旧随记、旧归档、旧待办的读取和恢复，核对双栏位置、各组新建、单句保存、切换工作区保存、点击勾选和空格取消。1180×760 实机图为 `windows-first/notebook-desktop.png` 和 `windows-first/todo-desktop.png`。未测真实用户笔记库。
+- 设置 `QT_QPA_PLATFORM=offscreen` 后运行 `python -m unittest discover -s tests -t . -p 'test_*.py' -q`，164 项中 163 项通过、1 项跳过，用时 72.583 秒。使用 PyInstaller 6.22.3 执行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-exe.ps1 -AppName Lanxi-Glass-R10`，构建约 45.66 秒。交付文件 `release/Lanxi-Glass-R10.exe` 为 61,430,155 字节，复制前后 SHA-256 一致，包内核对了笔记、诗词、毛玻璃及 Windows Qt 插件。R9 正在本机运行，R10 的独立 EXE 窗口未测，实机界面验收使用源码窗口。
+
 ## 2026-11-18 吉光片羽双栏毛玻璃与整点换诗
 
 - 以 `b3b8dbf` 的 Codex 页为界面基线，用虚构任务、随记和待办对照。吉光片羽复用两块毛玻璃、列表高亮、标题字重和按钮，自动保存延迟为 450 毫秒。初版截图的筛选选中态区分较弱，复验版降低未选按钮底色并加粗当前分类。两块面板与 Codex 页的位置和尺寸逐项相同。

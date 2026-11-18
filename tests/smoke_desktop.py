@@ -1,9 +1,11 @@
 """Click real production Qt widgets against synthetic state (no model requests)."""
 import argparse
 import copy
+import sqlite3
 import sys
 import tempfile
 import time
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -110,61 +112,75 @@ def check_client_switch(window, output):
 
 def check_notebook(window, output):
     with tempfile.TemporaryDirectory() as directory, patch.object(monitor, 'ROOT', Path(directory)):
+        database = Path(directory) / 'lanxi-notebook.sqlite3'
+        store = NotebookStore(database)
+        with closing(sqlite3.connect(database)) as db, db:
+            db.executemany('INSERT INTO notebook(kind, title, body, filed) VALUES(?, ?, ?, ?)', [
+                ('note', '旧的随记', '从前写下的正文。', 0),
+                ('note', '旧的归档', '留在旧笺里的文字。', 1),
+                ('todo', '把昨日的预览收进档案', '', 1),
+                ('todo', '把同一项目的几段对话归拢', '', 0),
+            ])
         switch = window.client_switch
+        left = Qt.MouseButton.LeftButton
         previous_client = window.client
         previous_task = window.selected_thread
         original_draft = window.message_edit.toPlainText()
         panels = (window.task_panel, window.conversation_card)
         positions = [(panel.mapTo(window, QPoint()), panel.size()) for panel in panels]
-        QTest.mouseClick(switch.buttons['notebook'], Qt.MouseButton.LeftButton)
+        QTest.mouseClick(switch.buttons['notebook'], left)
         workspace = window.notebook
         assert workspace is not None and workspace.isVisible()
         assert not window.task_workspace.isVisible() and window.client == previous_client
         QTest.qWait(420)
         assert switch.position == switch.offsets['notebook']
-        note = workspace.notes
-        for panel, (position, size) in zip((note.list_panel, note.editor_panel), positions):
+        for panel, (position, size) in zip((workspace.list_panel, workspace.editor_panel), positions):
             assert isinstance(panel, FrostedPanel)
             assert (panel.mapTo(window, QPoint()), panel.size()) == (position, size)
-        note.title.setText('海边的随记')
-        note.body.setPlainText('记录日常灵感，晚上再回看。')
+        assert workspace.heading.text() == '拾得片羽' and workspace.list.count() == 1
+        assert workspace.body.toPlainText() == '旧的随记\n\n从前写下的正文。'
+        assert workspace.list.item(0).data(Qt.ItemDataRole.CheckStateRole) is None
+        workspace.show_archive()
+        assert workspace.body.toPlainText() == '旧的归档\n\n留在旧笺里的文字。'
+        workspace.file_note()
+        assert not store.entries('note', True)
+        QTest.mouseClick(workspace.create_buttons['note'], left)
+        workspace.body.setPlainText('给下次打开留一条线索。')
         QTest.qWait(520)
-        store = NotebookStore(Path(directory) / 'lanxi-notebook.sqlite3')
-        assert store.entries('note', False)[0][1:] == ('海边的随记', '记录日常灵感，晚上再回看。')
+        assert workspace.list.currentItem().text() == '给下次打开留一条线索。'
+        assert store.entries('note')[0][1:3] == ('', '给下次打开留一条线索。')
+        assert workspace.saved_status.text() == '已收于此'
         window.grab().save(str(output / 'notebook-desktop.png'))
-        QTest.mouseClick(note.file_button, Qt.MouseButton.LeftButton)
-        assert not store.entries('note', False)
-        QTest.mouseClick(note.view_buttons[True], Qt.MouseButton.LeftButton)
-        note.list.setCurrentRow(0)
-        assert note.body.toPlainText() == '记录日常灵感，晚上再回看。'
-        QTest.mouseClick(note.file_button, Qt.MouseButton.LeftButton)
-        assert not store.entries('note', True) and store.entries('note', False)
 
-        QTest.mouseClick(note.category_buttons['todo'], Qt.MouseButton.LeftButton)
-        todo = workspace.todos
-        assert todo.isVisible() and todo.category_buttons['todo'].isChecked()
-        todo.title.setText('整理项目待办')
-        todo.body.setPlainText('归拢同一个项目的对话，留一份下次打开时的进度。')
-        QTest.mouseClick(todo.save_button, Qt.MouseButton.LeftButton)
-        QApplication.processEvents()
+        QTest.mouseClick(workspace.create_buttons['todo'], left)
+        assert workspace.category_buttons['todo'].isChecked() and workspace.heading.text() == '待理诸事'
+        workspace.body.setPlainText('让海色随窗口慢慢透进来。')
+        QTest.mouseClick(workspace.category_buttons['note'], left)
+        assert workspace.heading.text() == '拾得片羽' and workspace.body.toPlainText() == '给下次打开留一条线索。'
+        QTest.mouseClick(workspace.category_buttons['todo'], left)
+        assert workspace.body.toPlainText() == '让海色随窗口慢慢透进来。'
+        rows = [workspace.list.item(index) for index in range(workspace.list.count())]
+        assert len(rows) == 3
+        pending = rows[1]
+        assert pending.checkState() == Qt.CheckState.Unchecked and rows[2].checkState() == Qt.CheckState.Checked
+        delegate = workspace.list.itemDelegate()
+        checkbox = delegate.check_rect(workspace.list.visualItemRect(pending)).center().toPoint()
+        QTest.mouseClick(workspace.list.viewport(), left, pos=checkbox)
+        assert pending.checkState() == Qt.CheckState.Checked and workspace.list.row(pending) == 1
+        assert [row[3] for row in store.entries('todo')] == [0, 1, 1]
+        workspace.list.setCurrentRow(0)
         window.grab().save(str(output / 'todo-desktop.png'))
-        QTest.mouseClick(todo.file_button, Qt.MouseButton.LeftButton)
-        assert not store.entries('todo', False) and store.entries('todo', True)
-        QTest.mouseClick(todo.view_buttons[True], Qt.MouseButton.LeftButton)
-        todo.list.setCurrentRow(0)
-        assert todo.title.text() == '整理项目待办'
-        QTest.mouseClick(todo.file_button, Qt.MouseButton.LeftButton)
-        todo.new_entry()
-        todo.title.setText('关闭窗口时保存')
-        QTest.mouseClick(todo.category_buttons['note'], Qt.MouseButton.LeftButton)
-        assert note.isVisible() and note.category_buttons['note'].isChecked()
-        assert {row[1] for row in store.entries('todo', False)} == {'整理项目待办', '关闭窗口时保存'}
-        note.new_entry()
-        note.title.setText('离开工作区时保存')
-        QTest.mouseClick(switch.buttons[previous_client], Qt.MouseButton.LeftButton)
+        workspace.list.setCurrentItem(pending)
+        QTest.keyClick(workspace.list, Qt.Key.Key_Space)
+        assert pending.checkState() == Qt.CheckState.Unchecked and workspace.list.row(pending) == 1
+        assert [row[3] for row in store.entries('todo')] == [0, 0, 1]
+
+        QTest.mouseClick(workspace.create_buttons['note'], left)
+        workspace.body.setPlainText('离开工作区时保存。')
+        QTest.mouseClick(switch.buttons[previous_client], left)
         assert not workspace.isVisible() and window.task_workspace.isVisible()
         assert window.selected_thread == previous_task and window.message_edit.toPlainText() == original_draft
-        assert {row[1] for row in store.entries('note', False)} == {'海边的随记', '离开工作区时保存'}
+        assert store.entries('note')[0][1:3] == ('', '离开工作区时保存。')
 
 
 def main():

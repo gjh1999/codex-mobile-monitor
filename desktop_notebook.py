@@ -1,16 +1,24 @@
-"""Local notes, archives and todos for the native desktop."""
+"""The native notebook and its local SQLite storage."""
 import sqlite3
 from contextlib import closing
+from datetime import datetime, timezone
 from pathlib import Path
 
-from PySide6.QtCore import QSignalBlocker, Qt, QTimer
+from PySide6.QtCore import QEvent, QRectF, QSignalBlocker, QSize, Qt, QTimer
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPalette, QPen
 from PySide6.QtWidgets import (
-    QButtonGroup, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-    QMessageBox, QPushButton, QStackedWidget, QTextEdit, QVBoxLayout, QWidget,
+    QButtonGroup, QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
+    QMenu, QMessageBox, QPushButton, QStyle, QStyledItemDelegate, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from desktop_glass import FrostedPanel
 from desktop_theme import configure_text, ui_font
+
+GROUP_NAMES = {'note': '拾得片羽', 'todo': '待理诸事'}
+INK = '#f3faff'
+MUTED = '#a9c8d7'
+CHECK_STATE = Qt.ItemDataRole.CheckStateRole
+ENTRY_ID = Qt.ItemDataRole.UserRole
 
 
 class NotebookStore:
@@ -28,295 +36,371 @@ class NotebookStore:
                 )
             ''')
 
-    def entries(self, kind, filed):
+    def entries(self, kind, archived=False):
         with closing(sqlite3.connect(self.path)) as db:
             return db.execute(
-                'SELECT id, title, body FROM notebook WHERE kind=? AND filed=? ORDER BY updated_at DESC, id DESC',
-                (kind, int(filed)),
+                '''SELECT id, title, body, filed, updated_at FROM notebook
+                   WHERE kind=? AND (kind='todo' OR filed=?)
+                   ORDER BY updated_at DESC, id DESC''',
+                (kind, int(archived)),
             ).fetchall()
 
-    def save(self, kind, entry_id, title, body):
+    def save(self, kind, entry_id, body):
         with closing(sqlite3.connect(self.path)) as db, db:
             if entry_id is None:
-                return db.execute('INSERT INTO notebook(kind, title, body) VALUES(?,?,?)', (kind, title, body)).lastrowid
+                result = db.execute("INSERT INTO notebook(kind, title, body) VALUES(?, '', ?)", (kind, body))
+                return result.lastrowid
             db.execute(
-                'UPDATE notebook SET title=?, body=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND kind=?',
-                (title, body, entry_id, kind),
+                "UPDATE notebook SET title='', body=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND kind=?",
+                (body, entry_id, kind),
             )
             return entry_id
 
     def set_filed(self, kind, entry_id, filed):
         with closing(sqlite3.connect(self.path)) as db, db:
-            db.execute(
-                'UPDATE notebook SET filed=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND kind=?',
-                (int(filed), entry_id, kind),
-            )
+            db.execute('UPDATE notebook SET filed=? WHERE id=? AND kind=?', (int(filed), entry_id, kind))
 
 
-def record_button(text, size=9, strong=False):
+class EntryDelegate(QStyledItemDelegate):
+    def sizeHint(self, option, index):
+        return QSize(option.fontMetrics.horizontalAdvance('片') * 11, max(38, option.fontMetrics.height() + 14))
+
+    def check_rect(self, rect):
+        return QRectF(rect.x() + 9, rect.center().y() - 7, 16, 16)
+
+    def paint(self, painter, option, index):
+        rect = option.rect
+        selected = option.state & QStyle.StateFlag.State_Selected
+        hovered = option.state & QStyle.StateFlag.State_MouseOver
+        focused = option.state & QStyle.StateFlag.State_HasFocus
+        check = index.data(CHECK_STATE)
+        done = check == Qt.CheckState.Checked.value
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setClipRect(rect)
+        if selected or hovered or focused:
+            painter.setPen(QPen(QColor(201, 232, 248, 145)) if focused else Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(200, 232, 248, 53 if selected else 23))
+            painter.drawRoundedRect(QRectF(rect).adjusted(.5, 1, -.5, -1), 8, 8)
+        else:
+            painter.setPen(QColor(210, 237, 250, 26))
+            painter.drawLine(rect.left() + 9, rect.bottom(), rect.right() - 9, rect.bottom())
+        if check is not None:
+            box = self.check_rect(rect)
+            painter.setPen(QPen(QColor('#a7cadc' if done else INK), 1.2))
+            painter.setBrush(QColor('#a7cadc') if done else Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(box, 3.5, 3.5)
+            if done:
+                mark = QPainterPath()
+                mark.moveTo(box.x() + 4, box.y() + 8)
+                mark.lineTo(box.x() + 7, box.y() + 11)
+                mark.lineTo(box.x() + 12, box.y() + 5)
+                pen = QPen(QColor('#17445e'), 1.7)
+                pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+                pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+                painter.setPen(pen)
+                painter.drawPath(mark)
+        text_rect = rect.adjusted(34 if check is not None else 10, 0, -10, 0)
+        painter.setFont(option.font)
+        painter.setPen(QColor(MUTED if done else INK))
+        text = option.fontMetrics.elidedText(index.data() or '', Qt.TextElideMode.ElideRight, text_rect.width())
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, text)
+        painter.restore()
+
+    def editorEvent(self, event, model, option, index):
+        check = index.data(CHECK_STATE)
+        if check is None:
+            return False
+        if event.type() == QEvent.Type.KeyPress:
+            if event.key() != Qt.Key.Key_Space:
+                return False
+        elif event.type() in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease,
+                             QEvent.Type.MouseButtonDblClick):
+            if event.button() != Qt.MouseButton.LeftButton or not self.check_rect(option.rect).contains(event.position()):
+                return False
+            if event.type() != QEvent.Type.MouseButtonRelease:
+                return True
+        else:
+            return False
+        state = Qt.CheckState.Unchecked if check == Qt.CheckState.Checked.value else Qt.CheckState.Checked
+        return model.setData(index, state.value, CHECK_STATE)
+
+
+def notebook_button(text, name, size):
     button = QPushButton(text)
-    button.setObjectName('hoverAction')
-    button.setFont(ui_font(size, strong))
+    button.setObjectName(name)
+    button.setFont(ui_font(size))
     button.setCursor(Qt.CursorShape.PointingHandCursor)
     return button
-
-
-class NotebookPage(QWidget):
-    def __init__(self, store, kind, backdrop, select_kind):
-        super().__init__()
-        self.store, self.kind = store, kind
-        self.entry_id = None
-        self.filed = False
-        self.dirty = False
-        self.entries = {}
-        self.draft = QTimer(self)
-        self.draft.setSingleShot(True)
-        self.draft.setInterval(450)
-        self.draft.timeout.connect(self.save)
-
-        note = kind == 'note'
-        shell = QHBoxLayout(self)
-        shell.setContentsMargins(0, 0, 0, 0)
-        shell.setSpacing(7)
-
-        self.list_panel = FrostedPanel(backdrop)
-        self.list_panel.setFixedWidth(266)
-        navigation = QVBoxLayout(self.list_panel)
-        navigation.setContentsMargins(13, 12, 13, 10)
-        navigation.setSpacing(8)
-        navigation.addSpacing(15)
-        categories = QHBoxLayout()
-        categories.setSpacing(4)
-        category_group = QButtonGroup(self)
-        self.category_buttons = {}
-        for key, text in (('note', '随记'), ('todo', '待办')):
-            button = record_button(text, 12, kind == key)
-            button.setCheckable(True)
-            button.setFixedHeight(34)
-            category_group.addButton(button)
-            button.setChecked(kind == key)
-            button.clicked.connect(lambda _checked, key=key: select_kind(key))
-            self.category_buttons[key] = button
-            categories.addWidget(button)
-        categories.addStretch()
-        create = QPushButton('＋')
-        create.setFixedSize(35, 30)
-        create.setCursor(Qt.CursorShape.PointingHandCursor)
-        create.setToolTip('新记' if note else '新增待办')
-        create.setAccessibleName(create.toolTip())
-        create.clicked.connect(self.new_entry)
-        categories.addWidget(create, 0, Qt.AlignmentFlag.AlignVCenter)
-        navigation.addLayout(categories)
-
-        views = QHBoxLayout()
-        views.setSpacing(5)
-        view_group = QButtonGroup(self)
-        self.view_buttons = {}
-        for filed, text in enumerate(('未归档', '已归档') if note else ('待处理', '已完成')):
-            button = record_button(text)
-            button.setCheckable(True)
-            view_group.addButton(button)
-            button.setChecked(filed == 0)
-            button.clicked.connect(lambda _checked, filed=bool(filed): self.change_view(filed))
-            self.view_buttons[bool(filed)] = button
-            views.addWidget(button, 1)
-        navigation.addLayout(views)
-
-        self.list = QListWidget()
-        self.list.setObjectName('notebookList')
-        self.list.setAccessibleName('随记列表' if note else '待办列表')
-        self.list.setWordWrap(True)
-        self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.list.viewport().setAutoFillBackground(False)
-        self.list.currentItemChanged.connect(self.select_entry)
-        self.empty = QLabel()
-        self.empty.setFont(ui_font(9))
-        self.empty.setStyleSheet('color:#24495f;')
-        navigation.addWidget(self.empty)
-        navigation.addWidget(self.list, 1)
-        shell.addWidget(self.list_panel)
-
-        self.editor_panel = FrostedPanel(backdrop)
-        fields = QVBoxLayout(self.editor_panel)
-        fields.setContentsMargins(15, 12, 15, 12)
-        fields.setSpacing(8)
-        header = QVBoxLayout()
-        header.setSpacing(3)
-        caption = QLabel('随记' if note else '待办')
-        caption.setFont(ui_font(9))
-        caption.setStyleSheet('color:#24495f;')
-        header.addWidget(caption)
-        row = QHBoxLayout()
-        row.setSpacing(5)
-        self.title = QLineEdit()
-        self.title.setObjectName('notebookTitle')
-        self.title.setFont(ui_font(13, True))
-        self.title.setPlaceholderText('题名' if note else '要做的事')
-        self.title.setAccessibleName('标题')
-        self.title.setMaxLength(120)
-        self.title.textChanged.connect(self.edited)
-        row.addWidget(self.title, 1)
-        self.file_button = record_button('')
-        self.file_button.clicked.connect(self.move_entry)
-        row.addWidget(self.file_button)
-        header.addLayout(row)
-        fields.addLayout(header)
-
-        divider = QFrame()
-        divider.setObjectName('divider')
-        divider.setFixedHeight(1)
-        fields.addWidget(divider)
-
-        self.body = QTextEdit()
-        self.body.setObjectName('composer')
-        self.body.setAcceptRichText(False)
-        configure_text(self.body, 10, 3)
-        self.body.viewport().setAutoFillBackground(False)
-        self.body.setPlaceholderText('把掠过心头的一笔记下来…' if note else '补充做法或线索…')
-        self.body.setAccessibleName('随记正文' if note else '待办说明')
-        self.body.textChanged.connect(self.edited)
-        fields.addWidget(self.body, 1)
-        footer = QFrame()
-        footer.setObjectName('composerBox')
-        actions = QHBoxLayout(footer)
-        actions.setContentsMargins(10, 6, 8, 6)
-        self.saved_status = QLabel('本机自动保存')
-        self.saved_status.setFont(ui_font(8.5))
-        self.saved_status.setStyleSheet('color:#24495f;')
-        actions.addWidget(self.saved_status, 1)
-        self.save_button = QPushButton('保存')
-        self.save_button.setObjectName('approvalAllow')
-        self.save_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.save_button.clicked.connect(lambda: self.save())
-        actions.addWidget(self.save_button)
-        fields.addWidget(footer)
-        shell.addWidget(self.editor_panel, 1)
-        self.load_list()
-        self.set_entry(None)
-
-    def load_list(self):
-        self.entries = {entry_id: (title, body) for entry_id, title, body in self.store.entries(self.kind, self.filed)}
-        with QSignalBlocker(self.list):
-            self.list.clear()
-            for entry_id, (title, body) in self.entries.items():
-                caption = title or (body.strip().splitlines() or ['未题'])[0]
-                summary = (body.strip().splitlines() or [''])[0] if title else ''
-                if len(summary) > 25:
-                    summary = summary[:24] + '…'
-                item = QListWidgetItem(f'{caption[:80]}\n{summary}' if summary else caption[:80], self.list)
-                item.setData(Qt.ItemDataRole.UserRole, entry_id)
-                if entry_id == self.entry_id:
-                    self.list.setCurrentItem(item)
-        self.file_button.setText('恢复' if self.filed else ('归档' if self.kind == 'note' else '完成'))
-        self.file_button.setEnabled(self.entry_id is not None)
-        self.empty.setText(
-            ('暂无归档' if self.filed else '尚无随记') if self.kind == 'note' else ('暂无已完成待办' if self.filed else '暂无待办'))
-        self.empty.setVisible(not self.entries)
-
-    def set_entry(self, entry_id):
-        self.entry_id = entry_id
-        title, body = self.entries.get(entry_id, ('', ''))
-        with QSignalBlocker(self.title), QSignalBlocker(self.body):
-            self.title.setText(title)
-            self.body.setPlainText(body)
-        self.dirty = False
-        self.saved_status.setText('已保存至本机' if entry_id is not None else '本机自动保存')
-        self.file_button.setEnabled(entry_id is not None)
-        editable = not self.filed or entry_id is not None
-        self.title.setEnabled(editable)
-        self.body.setEnabled(editable)
-        self.save_button.setEnabled(editable)
-
-    def edited(self):
-        self.dirty = True
-        self.saved_status.setText('正在保存…')
-        self.draft.start()
-
-    def save(self, reload=True):
-        self.draft.stop()
-        if not self.dirty:
-            return True
-        title, body = self.title.text().strip(), self.body.toPlainText()
-        if self.entry_id is None and not (title or body.strip()):
-            self.dirty = False
-            self.saved_status.setText('本机自动保存')
-            return True
-        try:
-            self.entry_id = self.store.save(self.kind, self.entry_id, title, body)
-        except (OSError, sqlite3.Error):
-            self.saved_status.setText('保存未完成')
-            QMessageBox.warning(self, '保存未完成', '本机笔记暂时无法写入，内容仍在编辑框里。')
-            return False
-        self.dirty = False
-        self.saved_status.setText('已保存至本机')
-        if reload:
-            self.load_list()
-        return True
-
-    def select_entry(self, current, previous):
-        entry_id = current.data(Qt.ItemDataRole.UserRole) if current else None
-        changed = self.dirty
-        if self.save(reload=False):
-            self.set_entry(entry_id)
-            if changed:
-                self.load_list()
-        else:
-            with QSignalBlocker(self.list):
-                self.list.setCurrentItem(previous)
-
-    def change_view(self, filed):
-        if filed == self.filed:
-            return
-        if not self.save(reload=False):
-            self.view_buttons[self.filed].setChecked(True)
-            return
-        self.filed = filed
-        self.view_buttons[filed].setChecked(True)
-        self.set_entry(None)
-        self.load_list()
-
-    def new_entry(self):
-        if not self.save():
-            return
-        self.change_view(False)
-        self.set_entry(None)
-        with QSignalBlocker(self.list):
-            self.list.setCurrentRow(-1)
-        self.title.setFocus()
-
-    def move_entry(self):
-        if not self.save(reload=False) or self.entry_id is None:
-            return
-        try:
-            self.store.set_filed(self.kind, self.entry_id, not self.filed)
-        except (OSError, sqlite3.Error):
-            QMessageBox.warning(self, '更新未完成', '暂时无法更新这条记录。')
-            return
-        self.set_entry(None)
-        self.load_list()
 
 
 class NotebookWorkspace(QWidget):
     def __init__(self, store, backdrop):
         super().__init__()
-        self.setObjectName('notebook')
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        self.tabs = QStackedWidget()
-        self.notes = NotebookPage(store, 'note', backdrop, self.select_kind)
-        self.todos = NotebookPage(store, 'todo', backdrop, self.select_kind)
-        self.tabs.addWidget(self.notes)
-        self.tabs.addWidget(self.todos)
-        layout.addWidget(self.tabs)
+        self.store = store
+        self.kind = 'note'
+        self.archived = False
+        self.entry_id = None
+        self.dirty = False
+        self.selections = {}
+        self.records = {}
+        self.items = {}
+        self.draft = QTimer(self)
+        self.draft.setSingleShot(True)
+        self.draft.setInterval(450)
+        self.draft.timeout.connect(self.flush)
+
+        shell = QHBoxLayout(self)
+        shell.setContentsMargins(0, 0, 0, 0)
+        shell.setSpacing(7)
+        tint, edge = QColor(9, 45, 68, 172), QColor(221, 244, 255, 83)
+        self.list_panel = FrostedPanel(backdrop, tint=tint, edge=edge)
+        self.list_panel.setFixedWidth(266)
+        navigation = QVBoxLayout(self.list_panel)
+        navigation.setContentsMargins(13, 12, 13, 10)
+        navigation.setSpacing(5)
+        group = QButtonGroup(self)
+        self.category_rows = {}
+        self.category_buttons = {}
+        self.create_buttons = {}
+        for kind, name in GROUP_NAMES.items():
+            surface = QFrame()
+            surface.setObjectName('notebookGroup')
+            row = QHBoxLayout(surface)
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(0)
+            button = notebook_button(name, 'notebookCategory', 12)
+            button.setCheckable(True)
+            button.setFixedHeight(36)
+            group.addButton(button)
+            button.clicked.connect(lambda _checked, kind=kind: self.select_kind(kind))
+            row.addWidget(button, 1)
+            create = notebook_button('＋', 'notebookIcon', 14)
+            create.setFixedSize(34, 34)
+            create.setToolTip('落一笔' if kind == 'note' else '记一件待理之事')
+            create.setAccessibleName(create.toolTip())
+            create.clicked.connect(lambda _checked, kind=kind: self.new_entry(kind))
+            row.addWidget(create)
+            navigation.addWidget(surface)
+            self.category_rows[kind] = surface
+            self.category_buttons[kind] = button
+            self.create_buttons[kind] = create
+
+        divider = QFrame()
+        divider.setObjectName('notebookDivider')
+        divider.setFixedHeight(1)
+        navigation.addWidget(divider)
+        navigation.addSpacing(3)
+        self.empty = QLabel()
+        self.empty.setObjectName('notebookMuted')
+        self.empty.setFont(ui_font(9.5))
+        self.empty.setContentsMargins(9, 5, 0, 0)
+        navigation.addWidget(self.empty)
+        self.list = QListWidget()
+        self.list.setObjectName('notebookList')
+        self.list.setFont(ui_font(11))
+        self.list.setMouseTracking(True)
+        self.list.setUniformItemSizes(True)
+        self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.list.viewport().setAutoFillBackground(False)
+        self.list.setItemDelegate(EntryDelegate(self.list))
+        self.list.currentItemChanged.connect(self.select_entry)
+        self.list.itemChanged.connect(self.update_check)
+        navigation.addWidget(self.list, 1)
+        shell.addWidget(self.list_panel)
+
+        self.editor_panel = FrostedPanel(backdrop, tint=tint, edge=edge)
+        fields = QVBoxLayout(self.editor_panel)
+        fields.setContentsMargins(24, 13, 17, 16)
+        fields.setSpacing(7)
+        header = QHBoxLayout()
+        self.heading = QLabel()
+        self.heading.setObjectName('notebookHeading')
+        self.heading.setFont(ui_font(15, True))
+        header.addWidget(self.heading, 1)
+        self.more = notebook_button('⋯', 'notebookIcon', 17)
+        self.more.setFixedSize(31, 32)
+        self.more.setAccessibleName('更多操作')
+        self.more.clicked.connect(self.open_menu)
+        header.addWidget(self.more)
+        fields.addLayout(header)
+        self.stamp = QLabel()
+        self.stamp.setObjectName('notebookMuted')
+        self.stamp.setFont(ui_font(10))
+        self.stamp.setFixedHeight(self.stamp.fontMetrics().height())
+        fields.addWidget(self.stamp)
+        fields.addSpacing(3)
+        self.body = QTextEdit()
+        self.body.setObjectName('notebookBody')
+        self.body.setAcceptRichText(False)
+        configure_text(self.body, 12, 0)
+        colors = self.body.palette()
+        colors.setColor(QPalette.ColorRole.PlaceholderText, QColor(MUTED))
+        self.body.setPalette(colors)
+        self.body.viewport().setAutoFillBackground(False)
+        self.body.textChanged.connect(self.edited)
+        fields.addWidget(self.body, 1)
+        self.saved_status = QLabel()
+        self.saved_status.setObjectName('notebookMuted')
+        self.saved_status.setFont(ui_font(9.5))
+        self.saved_status.setFixedHeight(self.saved_status.fontMetrics().height())
+        fields.addWidget(self.saved_status)
+        shell.addWidget(self.editor_panel, 1)
+        self.load_group('note')
 
     def select_kind(self, kind):
-        previous = self.tabs.currentWidget()
-        if previous.kind != kind:
-            previous.category_buttons[previous.kind].setChecked(True)
-            if previous.save():
-                self.tabs.setCurrentWidget(self.notes if kind == 'note' else self.todos)
+        if kind == self.kind and not self.archived:
+            return
+        if self.flush():
+            self.load_group(kind)
+        else:
+            self.category_buttons[self.kind].setChecked(True)
+
+    def load_group(self, kind, archived=False):
+        self.kind, self.archived = kind, archived
+        self.heading.setText(GROUP_NAMES[kind])
+        self.list.setAccessibleName(GROUP_NAMES[kind])
+        self.body.setAccessibleName(GROUP_NAMES[kind] + '正文')
+        self.body.setPlaceholderText('有念，便落一笔。' if kind == 'note' else '把要做的事写在这里。')
+        for key, row in self.category_rows.items():
+            row.setProperty('current', key == kind)
+            row.style().unpolish(row)
+            row.style().polish(row)
+            button = self.category_buttons[key]
+            button.setChecked(key == kind)
+            button.setFont(ui_font(12, key == kind))
+        self.entry_id = None
+        self.load_list()
+        remembered = self.selections.get((kind, archived))
+        self.set_entry(remembered if remembered in self.records else next(iter(self.records), None))
+
+    def load_list(self):
+        rows = self.store.entries(self.kind, self.archived)
+        self.records = {row[0]: row[1:] for row in rows}
+        self.items = {}
+        scrollbar = self.list.verticalScrollBar()
+        scroll = scrollbar.value()
+        with QSignalBlocker(self.list):
+            self.list.clear()
+            for entry_id, title, body, filed, _updated_at in rows:
+                line = next((part.strip() for part in (title or body).splitlines() if part.strip()), '一笔未题')
+                item = QListWidgetItem(line, self.list)
+                item.setData(ENTRY_ID, entry_id)
+                if self.kind == 'todo':
+                    item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                    item.setCheckState(Qt.CheckState.Checked if filed else Qt.CheckState.Unchecked)
+                self.items[entry_id] = item
+            self.list.setCurrentItem(self.items.get(self.entry_id))
+        scrollbar.setValue(scroll)
+        self.empty.setText('旧笺尚空。' if self.archived else '这一页尚空。')
+        self.empty.setVisible(not rows)
+
+    def set_entry(self, entry_id):
+        self.entry_id = entry_id
+        self.selections[(self.kind, self.archived)] = entry_id
+        title, body, _filed, _updated_at = self.records.get(entry_id, ('', '', False, ''))
+        if title:
+            body = title + ('\n\n' + body if body else '')
+        with QSignalBlocker(self.body), QSignalBlocker(self.list):
+            self.body.setPlainText(body)
+            self.list.setCurrentItem(self.items.get(entry_id))
+        self.body.setReadOnly(self.archived and entry_id is None)
+        self.dirty = False
+        self.update_stamp()
+
+    def update_stamp(self):
+        record = self.records.get(self.entry_id)
+        self.more.setEnabled(self.kind == 'note' or record is not None)
+        if record is None:
+            self.stamp.clear()
+            self.saved_status.clear()
+            return
+        updated = datetime.fromisoformat(record[3]).replace(tzinfo=timezone.utc).astimezone()
+        today = datetime.now().date()
+        date = ('今夜' if updated.hour >= 18 else '今日') if updated.date() == today else updated.strftime('%m月%d日')
+        self.stamp.setText(f'{date} · {updated:%H:%M}')
+        self.saved_status.setText('已收于此')
+
+    def edited(self):
+        self.dirty = True
+        self.saved_status.setText('正在记下…')
+        self.draft.start()
 
     def flush(self):
-        notes_saved = self.notes.save()
-        todos_saved = self.todos.save()
-        return notes_saved and todos_saved
+        self.draft.stop()
+        if not self.dirty:
+            return True
+        body = self.body.toPlainText()
+        if self.entry_id is None and not body.strip():
+            self.saved_status.clear()
+            self.dirty = False
+            return True
+        try:
+            self.entry_id = self.store.save(self.kind, self.entry_id, body)
+        except (OSError, sqlite3.Error):
+            self.saved_status.setText('尚未存下')
+            QMessageBox.warning(self, '尚未存下', '暂时无法写入本机，文字还留在此处。')
+            return False
+        self.dirty = False
+        self.selections[(self.kind, self.archived)] = self.entry_id
+        self.load_list()
+        self.update_stamp()
+        return True
+
+    def select_entry(self, current, previous):
+        entry_id = current.data(ENTRY_ID) if current is not None else None
+        if self.flush():
+            self.set_entry(entry_id)
+        else:
+            with QSignalBlocker(self.list):
+                self.list.setCurrentItem(previous)
+
+    def new_entry(self, kind):
+        if not self.flush():
+            return
+        if kind != self.kind or self.archived:
+            self.load_group(kind)
+        self.set_entry(None)
+        self.body.setFocus()
+
+    def set_filed(self, entry_id, filed):
+        try:
+            self.store.set_filed(self.kind, entry_id, filed)
+        except (OSError, sqlite3.Error):
+            QMessageBox.warning(self, '尚未记下', '暂时无法更新这条记录。')
+            return False
+        title, body, _filed, updated_at = self.records[entry_id]
+        self.records[entry_id] = (title, body, filed, updated_at)
+        return True
+
+    def update_check(self, item):
+        if self.kind != 'todo':
+            return
+        entry_id = item.data(ENTRY_ID)
+        filed = item.checkState() == Qt.CheckState.Checked
+        if not self.set_filed(entry_id, filed):
+            with QSignalBlocker(self.list):
+                item.setCheckState(Qt.CheckState.Unchecked if filed else Qt.CheckState.Checked)
+
+    def file_note(self):
+        if self.flush() and self.entry_id is not None and self.set_filed(self.entry_id, not self.archived):
+            self.load_group('note', self.archived)
+
+    def show_archive(self):
+        if self.flush():
+            self.load_group('note', not self.archived)
+
+    def open_menu(self):
+        menu = QMenu(self)
+        menu.setObjectName('notebookMenu')
+        if self.kind == 'note':
+            move = menu.addAction('重拾此笺' if self.archived else '收入旧笺', self.file_note)
+            move.setEnabled(self.entry_id is not None)
+            menu.addAction('返回拾得片羽' if self.archived else '翻看旧笺', self.show_archive)
+        elif self.entry_id is not None:
+            item = self.items[self.entry_id]
+            checked = item.checkState() == Qt.CheckState.Checked
+            menu.addAction('重开此事' if checked else '勾记此事',
+                           lambda: item.setCheckState(Qt.CheckState.Unchecked if checked else Qt.CheckState.Checked))
+        if not menu.isEmpty():
+            menu.exec(self.more.mapToGlobal(self.more.rect().bottomLeft()))

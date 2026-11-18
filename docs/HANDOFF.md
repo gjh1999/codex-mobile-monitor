@@ -167,6 +167,32 @@ Windows 上可把上一步的合并结果应用到 `coordination.projects.<项�
 
 登录后读取 `GET /api/v1/handoffs`。响应的 `projects` 数组按登记项返回。状态 `restored` 带有工作区的 `head`、`thread`、`turn` 和接收包的 `sha256`。登记独立合并目录或已完成原路径切换时，`head` 为合并结果的 HEAD。`switch_pending` 表示当前切换尚在执行或等待恢复，`awaiting_restore` 表示尚未发现回执，`invalid_receipt` 表示映射或回执异常。未配置项目时数组为空。接口读取 `.git/lanxi/handoff.json` 的摘要字段。实时运行状态使用现有任务接口。
 
+## 按需预取 Git LFS 对象
+
+家庭端使用 Gitea 的内置 LFS 服务，为获准同步的项目建独立仓库，并使用经授权的 HTTPS 地址。代码仓库继续使用自己的 Git origin。配置本机环境变量 `LANXI_LFS_USER` 和 `LANXI_LFS_TOKEN`，私有仓库令牌使用满足下载权限的账号。端点填写家庭 Gitea 的完整 `仓库.git/info/lfs` 地址。 [Gitea 内置 LFS](https://docs.gitea.com/administration/git-lfs-setup/) · [Git LFS Batch 协议](https://github.com/git-lfs/git-lfs/blob/main/docs/api/batch.md)
+
+从澜汐源码目录调用。`--path` 指定提交中启用了 `filter=lfs` 的普通文件，可重复传入。`--ref` 默认 `HEAD`，执行时解析成固定提交。命令把对象放到目标仓库的默认 `.git/lfs/objects` 缓存。项目位于对应提交并启用了 Git LFS 过滤器时，可用 `git lfs checkout` 从本机缓存检出工作副本。如果环境启用了 `GIT_LFS_SKIP_SMUDGE`，显式检出时先关闭该设置。 [Git LFS 指针规范](https://github.com/git-lfs/git-lfs/blob/main/docs/spec.md) · [Git LFS 离线检出](https://github.com/git-lfs/git-lfs/blob/main/docs/man/git-lfs-checkout.adoc)
+
+```powershell
+.\.venv\Scripts\python.exe lfs_assets.py --repo 'C:\Code\Vision' --ref HEAD `
+  --path 'models/weights.bin' --endpoint 'https://gitea.example/home/vision.git/info/lfs' `
+  --user-env LANXI_LFS_USER --token-env LANXI_LFS_TOKEN
+
+.\.venv\Scripts\python.exe lfs_assets.py --repo 'C:\Code\Vision' --ref HEAD `
+  --path 'models/weights.bin' --check
+
+git -C 'C:\Code\Vision' lfs checkout -- 'models/weights.bin'
+```
+
+命令按对象去重并分批请求，单次只流式下载一个对象。中断时保留部分文件，重试带上 `Range`，并校验服务返回的偏移。服务器改回完整响应时从头写入。对象大小和 SHA-256 都匹配后才发布到标准缓存。旧缓存校验失败时保留原文件供核对。下载地址须与配置端点同源并指向该仓库的对象路径；跳转和外部对象存储直链留待后续支持。 [Git LFS 基础传输](https://github.com/git-lfs/git-lfs/blob/main/docs/api/basic-transfers.md)
+
+输出为版本 1 的 JSON，包含 `commit`、总状态与按路径索引的 `files`。所有对象校验通过时返回 `ready` 和退出码 0。缺件、断线、散列错误或协议错误时返回 `incomplete` 和退出码 1，各对象提供对应状态。配置或 Git 指针无效使用退出码 2。`--check` 只检查本机缓存。当前入口按需运行，适用独立 Git 仓库的默认缓存，LFS 状态与会话交接后台的就绪联动仍待接入。
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest -v tests.test_lfs_assets
+.\.venv\Scripts\python.exe tests/bench_lfs_assets.py --output build-exe/verification/lfs-repeat
+```
+
 ## 本机跨盘复验
 
 ```powershell

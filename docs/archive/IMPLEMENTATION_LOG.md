@@ -2,6 +2,15 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-18 Git LFS 按需预取与续传
+
+- 基线 `cf0f3d9` 的交接流程只支持普通 Git 文件。本轮增加指定提交及路径的 LFS 缓存预取和离线检查。环境为 Windows、Python 3.14.7、Git 2.56.0.windows.4 和 Git LFS 3.8.1。测试服务器仅监听回环地址，数据为确定性生成的测试对象。两个路径指向同一个对象，验证批量请求和对象去重。
+- `.\.venv\Scripts\python.exe -m unittest -v tests.test_lfs_assets` 首轮 5 项通过，3.545 秒。补验完全下载但未发布的临时对象后，6 项通过，3.445 秒。覆盖缺件、错误 SHA-256、缓存损坏、错误 Range、服务器忽略 Range、拒绝跨站或跳转、并发去重与纯本机检查。日志为 `build-exe/verification/lfs-targeted-01.txt` 和 `lfs-targeted-02.txt`。
+- `.\.venv\Scripts\python.exe tests/bench_lfs_assets.py --output build-exe/verification/lfs-64m-01` 首轮下载与续传通过。原生检出断言失败，夹具缺少本地 Git LFS 过滤器且辅助 Git 命令设置了跳过 smudge。该轮未生成 `result.json`。夹具在本地注册过滤器，随后以标准 Git LFS 命令复验。
+- 上述基准命令换用 `build-exe/verification/lfs-64m-02`。64 MiB 全量预取 0.522 秒。在 16 MiB 强制断开时用时 0.329 秒，缓存未就绪。下一次请求为 `Range: bytes=16777216-`，实际传输 48 MiB，用时 0.486 秒。该次重试比从头重试少传 16 MiB。随后离线检查 0.493 秒，关闭服务后由原生 Git LFS 检出并校验文件用时 0.648 秒。都是单次本机墙钟时间，包含命令进程启动。结果见输出目录的 `result.json`。未测远程吞吐和峰值内存。
+- 在包含并行桌面提交 `9253b24` 的源码上，运行 `.\.venv\Scripts\python.exe -m unittest discover -s tests -t . -p 'test_*.py' -v` 共 184 项，183 项通过，1 项可选 Stream SDK 跳过，153.310 秒。日志为 `build-exe/verification/lfs-regression-01.txt`。
+- 家庭 Gitea、真实 VPN 传输、iPhone 真机和 LFS 缓存与工作区交接的就绪联动待验或开发。 [Git LFS 配置及复验](../HANDOFF.md#按需预取-git-lfs-对象) · [Gitea LFS 服务](https://docs.gitea.com/administration/git-lfs-setup/)
+
 ## 2026-11-18 空闲工作区自动更新
 
 - 基线 `a096c6d` 需要手动选择合并目录和原路径切换。本轮把已签名的接收、按需合并和原路径切换接入同一个同步扫描。策略默认关闭，启用后绑定设备、线程和本机分支。环境为 Windows、Python 3.14.7、Git 2.56.0.windows.4 与 Codex CLI 0.169.1。仓库、设备和回复均为本机测试数据。

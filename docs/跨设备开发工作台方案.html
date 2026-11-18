@@ -9,13 +9,13 @@
 :root {
   color-scheme: light dark;
   --paper: #fff;
-  --surface: #f5f5f7;
-  --silver: #ecedf1;
-  --ink: #1d1d1f;
-  --muted: #5b5b61;
-  --edge: #d8d8de;
-  --accent: #0066cc;
-  --tint: #eaf4ff;
+  --surface: #f2f7fb;
+  --silver: #eaf1f6;
+  --ink: #142536;
+  --muted: #4b6173;
+  --edge: #d6e2ea;
+  --accent: #005eab;
+  --tint: #e8f3fc;
   --glass: rgb(255 255 255 / 91%);
   --gutter: clamp(20px, 4vw, 64px);
   --bar-height: 57px;
@@ -76,32 +76,50 @@ a:focus-visible, button:focus-visible, summary:focus-visible {
 }
 .print:hover { background: var(--silver); }
 .hero {
-  position: relative;
-  isolation: isolate;
   display: flex;
+  align-items: center;
   justify-content: center;
-  background: #ecf4f9;
-  color: #102d45;
-  padding: clamp(58px, 8.2vw, 122px) var(--gutter) clamp(50px, 7.6vw, 108px);
-  text-align: center;
-  overflow: hidden;
+  min-height: clamp(520px, 72vh, 720px);
+  padding: 64px var(--gutter);
+  color: #fff;
+  background-color: #083450;
+  background-image:
+    linear-gradient(90deg, rgb(3 22 42 / 93%), rgb(3 27 51 / 73%) 28%, rgb(5 35 58 / 24%) 57%, rgb(8 52 113 / 19%) 82%),
+    url("assets/os-x-mavericks-wave.jpg");
+  background-size: cover;
+  background-position: center 45%;
 }
-.hero::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  background:
-    radial-gradient(ellipse 78% 48% at 60% 108%, #9abccb 0%, #b8d4e0 48%, transparent 88%),
-    radial-gradient(ellipse 81% 93% at 21% 114%, #bcd8e9, transparent 74%),
-    radial-gradient(ellipse 62% 50% at 50% 14%, #fff 0%, transparent 100%),
-    linear-gradient(158deg, #edf1f6 8%, #f1f7fb 44%, #dceaf4 100%);
+.hero-inner { width: 100%; max-width: 1130px; }
+.hero-copy { max-width: 510px; }
+.hero .meta { color: #dcf2ff; font-size: 15px; font-weight: 620; }
+.hero h1 {
+  margin: 14px 0 19px;
+  font-family: "Songti SC", "Noto Serif CJK SC", "SimSun", serif;
+  font-size: clamp(50px, 6.9vw, 91px);
+  font-weight: 680;
+  line-height: 1.13;
+  letter-spacing: -.04em;
 }
-.hero-copy { max-width: 720px; }
-.hero .meta { color: #39586f; font-size: 14px; font-weight: 650; }
-.hero h1 { font-size: clamp(40px, 6vw, 78px); font-weight: 680; line-height: 1.13; letter-spacing: -.048em; margin: 12px 0 20px; }
-.hero p { margin: 0 auto; max-width: 36em; color: #25465d; font-size: clamp(16px, 1.75vw, 22px); line-height: 1.65; }
-.hero footer { margin-top: 27px; color: #405b6f; font-size: 13px; }
+.hero p { max-width: 25em; margin: 0; color: #e3f3fd; font-size: clamp(16px, 1.5vw, 19px); line-height: 1.7; }
+.hero-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  margin-top: 26px;
+  padding: 0 18px;
+  border-radius: 999px;
+  background: #f2faff;
+  color: #104873;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 650;
+  transition: background-color 160ms ease, transform 160ms ease;
+}
+.hero-link:hover { background: #d9f1ff; }
+.hero-link:active { transform: scale(.97); }
+.hero-link:focus-visible { outline-color: #f2faff; }
+.hero footer { margin-top: 20px; color: #d1e8f5; font-size: 13px; }
 .frame {
   display: grid;
   grid-template-columns: 200px minmax(0, 1fr);
@@ -155,17 +173,14 @@ figcaption { color: var(--ink); font-weight: 650; margin-bottom: 15px; }
 .skip { position: absolute; left: -9999px; }
 .skip:focus { left: 10px; top: 5px; background: var(--paper); z-index: 6; padding: 8px; }
 @media (prefers-color-scheme: dark) {
-  :root { --paper: #151517; --surface: #212125; --silver: #303036; --ink: #f5f5f7; --muted: #b5b5bf; --edge: #404046; --accent: #78b8ff; --tint: #212f45; --glass: rgb(21 21 23 / 91%); }
-  .hero { background: #162e46; color: #f1f6fc; }
-  .hero::before {
-    background: radial-gradient(ellipse 95% 65% at 60% 112%, #356174 0%, transparent 95%),
-                radial-gradient(ellipse 92% 93% at 19% 108%, #203d59, transparent 78%),
-                linear-gradient(160deg, #151821, #182a41 67%, #172f45);
-  }
-  .hero p, .hero .meta, .hero footer { color: #cbdeee; }
+  :root { --paper: #101a25; --surface: #182633; --silver: #23364a; --ink: #f0f7fd; --muted: #b5c8d9; --edge: #344659; --accent: #87c6ff; --tint: #1d354e; --glass: rgb(16 26 37 / 91%); }
 }
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
   .masthead { background: var(--paper); backdrop-filter: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-link { transition: none; }
+  .hero-link:active { transform: none; }
 }
 @media (max-width: 950px) {
   .frame { grid-template-columns: 170px minmax(0, 1fr); column-gap: 28px; }
@@ -179,8 +194,14 @@ figcaption { color: var(--ink); font-weight: 650; margin-bottom: 15px; }
   details > summary { min-height: 44px; }
   .nav { grid-template-columns: 1fr 1fr; padding-bottom: 6px; }
   .nav a, .print { min-height: 44px; }
-  .hero { padding-inline: max(var(--gutter), env(safe-area-inset-left)) max(var(--gutter), env(safe-area-inset-right)); }
-  .hero h1 { max-width: 9em; margin-inline: auto; }
+  .hero {
+    align-items: flex-end;
+    min-height: clamp(585px, 82svh, 730px);
+    padding: 112px max(var(--gutter), env(safe-area-inset-right)) 39px max(var(--gutter), env(safe-area-inset-left));
+    background-image: linear-gradient(180deg, rgb(8 52 113 / 19%) 12%, rgb(3 28 49 / 60%) 46%, rgb(3 22 42 / 96%) 91%), url("assets/os-x-mavericks-wave.jpg");
+    background-position: 73% center;
+  }
+  .hero h1 { font-size: clamp(44px, 11.7vw, 68px); }
   .grid { grid-template-columns: 1fr; }
   section + section { margin-top: 25px; padding-top: 29px; }
   th, td { padding: 9px 10px; font-size: 14px; }
@@ -193,8 +214,8 @@ figcaption { color: var(--ink); font-weight: 650; margin-bottom: 15px; }
   :root { color-scheme: light; --paper: #fff; --surface: #f6f6f6; --silver: #eee; --ink: #111; --muted: #333; --edge: #bbb; --accent: #14344f; --tint: #f0f4f7; }
   body { font-size: 10.5pt; }
   .frame { display: block; padding: 14px 0 0; max-width: none; }
-  .masthead, aside, .skip, .end, .hero::before { display: none; }
-  .hero { display: block; color: var(--ink); background: white; padding: 0 0 14px; border-bottom: 1pt solid #333; text-align: left; }
+  .masthead, aside, .skip, .end, .hero-link { display: none; }
+  .hero { display: block; min-height: 0; color: var(--ink); background: white; padding: 0 0 14px; border-bottom: 1pt solid #333; text-align: left; }
   .hero h1 { font-size: 29pt; max-width: none; }
   .hero p, .hero .meta, .hero footer { color: var(--ink); font-size: 10.5pt; margin-inline: 0; }
   .hero footer { margin-top: 8px; }
@@ -221,11 +242,14 @@ figcaption { color: var(--ink); font-weight: 650; margin-bottom: 15px; }
 </header>
 <main>
   <header class="hero">
-    <div class="hero-copy">
-      <div class="meta">澜汐开发方案</div>
-      <h1>一个跨设备的<br>个人开发空间</h1>
-      <p>在公司用 VS Code 开始，回家用 PyCharm 接着写。照常在终端运行 <strong>codex</strong>，继续同一个项目和原来的对话。计算由合适的设备完成，进度随时可以在 iPhone 上查看。</p>
-      <footer>2026 年 11 月 18 日 · 基线 d42de0c · 待实施与真机验收</footer>
+    <div class="hero-inner">
+      <div class="hero-copy">
+        <div class="meta">澜汐 · 跨设备开发工作台</div>
+        <h1>一处开始，<br>处处继续。</h1>
+        <p>在公司写下的代码，回家打开还是原来的项目。终端里继续上一段对话，iPhone 上也能看到工作进度。</p>
+        <a class="hero-link" href="#overview">阅读开发方案 <span aria-hidden="true">↓</span></a>
+        <footer>2026 年 11 月 18 日 · 开发方案 · 待真机验收</footer>
+      </div>
     </div>
   </header>
   <div class="frame">
@@ -263,7 +287,7 @@ figcaption { color: var(--ink); font-weight: 650; margin-bottom: 15px; }
     <li><strong>让潮汐体现在阅读和交互节奏上。</strong> 采用有留白的排版、柔和的明暗过渡和克制的交互反馈。颜色、圆角和动效由内容和交互状态决定。浅色与深色界面都要保持清晰。</li>
     <li><strong>桌面和手机保持一致的操作语义。</strong> 桌面并排展示列表和详情，iPhone 逐层进入。审批面板保留执行设备、工作目录和实际命令。交互验收覆盖键盘焦点、触控热区、减弱动态效果和 iPhone 安全区。</li>
   </ul>
-  <p class="refs">设计依据来自《澜汐｜前端设计主导思想》，实现参考 <a href="https://github.com/0xKoru/apple-hig-codex-skills/blob/main/skills/implement-apple-web-ui/SKILL.md">implement-apple-web-ui</a>。</p>
+  <p class="refs">设计依据来自《澜汐｜前端设计主导思想》。封面采用 Apple OS X Mavericks 海浪壁纸，交互参考 Emil Kowalski 的网页动效设计。 <a href="https://512pixels.net/projects/default-mac-wallpapers-in-5k/#109-mavericks">壁纸档案</a><a href="https://github.com/emilkowalski/skills/blob/main/skills/apple-design/SKILL.md">Emil Kowalski 的 Apple Design</a><a href="https://github.com/0xKoru/apple-hig-codex-skills/blob/main/skills/implement-apple-web-ui/SKILL.md">Apple Web UI 实现参考</a></p>
 </section>
 
 <section id="baseline"><h2>现有基础</h2><p>现有项目已经能在 Windows 上查看和控制本机任务。以下模块是本次开发的起点。</p>

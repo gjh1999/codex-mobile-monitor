@@ -1,10 +1,12 @@
 """Native wallpaper composition and the desktop client switch."""
 import sys
+from math import exp
 from pathlib import Path
+from time import monotonic
 
-from PySide6.QtCore import QEasingCurve, QPoint, QRectF, Qt, QTimer, QVariantAnimation
+from PySide6.QtCore import QEvent, QEasingCurve, QPoint, QPointF, QRectF, Qt, QTimer, QVariantAnimation
 from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QPushButton, QWidget
+from PySide6.QtWidgets import QApplication, QFrame, QGraphicsDropShadowEffect, QHBoxLayout, QPushButton, QStyle, QStyleOptionButton, QStylePainter, QWidget
 
 WALLPAPERS = ('os-x-mavericks-wave.jpg', 'macos-big-sur-day.jpg', 'macos-catalina-night.jpg')
 
@@ -107,68 +109,191 @@ class OceanBackdrop(QWidget):
 
 
 class FrostedPanel(QFrame):
-    def __init__(self, backdrop):
+    def __init__(self, backdrop, *, radius=16, tint=None, edge=None):
         super().__init__()
         self.backdrop = backdrop
+        self.radius = radius
+        self.tint = tint or QColor(202, 236, 250, 151)
+        self.edge = edge or QColor(231, 248, 255, 164)
 
-    def paintEvent(self, event):
-        painter = QPainter(self)
+    def paint_glass(self, painter, bounds, radius, tint, edge):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        border = QRectF(self.rect()).adjusted(.5, .5, -.5, -.5)
         glass = QPainterPath()
-        glass.addRoundedRect(border, 16, 16)
+        glass.addRoundedRect(bounds.adjusted(.5, .5, -.5, -.5), radius, radius)
         painter.save()
         painter.setClipPath(glass)
         painter.translate(-self.mapTo(self.backdrop, QPoint()))
         self.backdrop.draw_wallpaper(painter, blurred=True)
         painter.restore()
-        painter.fillPath(glass, QColor(202, 236, 250, 151))
-        painter.setPen(QPen(QColor(231, 248, 255, 164)))
+        painter.fillPath(glass, tint)
+        painter.setPen(QPen(edge))
         painter.drawPath(glass)
 
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        self.paint_glass(painter, QRectF(self.rect()), self.radius, self.tint, self.edge)
 
-class ClientSwitch(QFrame):
-    def __init__(self, select):
-        super().__init__()
+
+class ClientSegment(QPushButton):
+    """Keep both labels readable as the glass thumb passes under them."""
+    def paintEvent(self, event):
+        painter = QStylePainter(self)
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        option.text = ''
+        painter.drawControl(QStyle.ControlElement.CE_PushButton, option)
+        thumb = self.parentWidget().thumb_rect().translated(-QPointF(self.pos()))
+        thumb_clip = QPainterPath()
+        thumb_clip.addRoundedRect(thumb, thumb.height() / 2, thumb.height() / 2)
+        outside = QPainterPath()
+        outside.addRect(QRectF(self.rect()))
+        painter.save()
+        painter.setClipPath(outside.subtracted(thumb_clip))
+        painter.setPen(QColor('#f3fcff'))
+        painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.text())
+        painter.restore()
+        painter.setClipPath(thumb_clip)
+        painter.setPen(QColor('#10364d'))
+        painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.text())
+
+
+class ClientSwitch(FrostedPanel):
+    # The angular frequency sets how quickly the critically damped thumb settles.
+    SPRING_RATE = 25.0
+
+    def __init__(self, backdrop, select):
+        super().__init__(backdrop, radius=21, tint=QColor(5, 47, 65, 141), edge=QColor(210, 245, 255, 120))
         self.setObjectName('clientPill')
         self.setAccessibleName('客户端')
+        self.select_client = select
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(1)
-        self.thumb = QFrame(self)
-        self.thumb.setObjectName('clientThumb')
-        self.thumb.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        layout.setContentsMargins(14, 6, 14, 6)
+        layout.setSpacing(5)
         self.buttons = {}
-        for key, text in (('codex', 'Codex'), ('claude', 'Claude Code')):
-            button = QPushButton(text)
-            button.setFixedSize(111, 32)
+        for key, text, width in (('codex', 'Codex', 84), ('claude', 'Claude Code', 104)):
+            button = ClientSegment(text)
+            font = button.font()
+            font.setPointSizeF(11.0)
+            font.setWeight(font.Weight.Bold)
+            font.setStyleName('Bold')
+            button.setFont(font)
+            button.setFixedSize(width, 30)
             button.setObjectName('clientSwitch')
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setCheckable(True)
-            button.clicked.connect(lambda _=False, client=key: select(client))
+            button.installEventFilter(self)
+            button.clicked.connect(lambda _=False, client=key: self.select_client(client))
             layout.addWidget(button)
             self.buttons[key] = button
-        self.animation = QVariantAnimation(self)
-        self.animation.setDuration(240)
-        self.animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self.animation.valueChanged.connect(self.thumb.move)
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setColor(QColor(1, 21, 35, 92))
+        shadow.setBlurRadius(12)
+        shadow.setOffset(0, 3)
+        self.setGraphicsEffect(shadow)
         self.active = 'codex'
+        self.position = self.velocity = 0.0
+        self.target = 0.0
+        self.last_frame = 0.0
+        self.press = None
+        self.dragging = False
+        self.spring = QTimer(self)
+        self.spring.setTimerType(Qt.TimerType.PreciseTimer)
+        self.spring.setInterval(16)
+        self.spring.timeout.connect(self.advance_spring)
         self.select('codex', animate=False)
+
+    def thumb_rect(self):
+        left = self.buttons['codex'].geometry()
+        right = self.buttons['claude'].geometry()
+        progress = self.position
+        return QRectF(left.x() + (right.x() - left.x()) * progress, left.y(),
+                      left.width() + (right.width() - left.width()) * progress, left.height())
+
+    def repaint_switch(self):
+        self.update()
+        for button in self.buttons.values():
+            button.update()
 
     def select(self, client, animate=True):
         self.active = client
         for key, button in self.buttons.items():
             button.setChecked(key == client)
-        self.animation.stop()
-        button = self.buttons[client]
-        self.thumb.resize(button.size())
-        if animate and self.isVisible() and motion_enabled():
-            self.animation.setStartValue(self.thumb.pos())
-            self.animation.setEndValue(button.pos())
-            self.animation.start()
-        else:
-            self.thumb.move(button.pos())
+        self.target = float(client == 'claude')
+        if not animate or not self.isVisible() or not motion_enabled():
+            self.spring.stop()
+            self.position, self.velocity = self.target, 0.0
+            self.repaint_switch()
+        elif not self.spring.isActive() and (self.position != self.target or self.velocity):
+            self.last_frame = monotonic()
+            self.spring.start()
 
-    def showEvent(self, event):
-        self.select(self.active, animate=False)
-        super().showEvent(event)
+    def advance_spring(self):
+        now = monotonic()
+        elapsed = now - self.last_frame
+        self.last_frame = now
+        rate = self.SPRING_RATE
+        distance = self.position - self.target
+        carry = self.velocity + rate * distance
+        decay = exp(-rate * elapsed)
+        self.position = self.target + (distance + carry * elapsed) * decay
+        self.velocity = (self.velocity - rate * carry * elapsed) * decay
+        if abs(self.position - self.target) < .001 and abs(self.velocity) < .015:
+            self.spring.stop()
+            self.position, self.velocity = self.target, 0.0
+        self.repaint_switch()
+
+    def eventFilter(self, button, event):
+        kind = event.type()
+        if kind == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+            point = event.position() + QPointF(button.pos())
+            if self.thumb_rect().contains(point):
+                self.spring.stop()
+                self.velocity = 0.0
+                self.press = (point.x(), self.position, monotonic())
+                self.dragging = False
+        elif kind == QEvent.Type.MouseMove and self.press is not None:
+            x = event.position().x() + button.x()
+            anchor, start, last = self.press
+            if self.dragging or abs(x - anchor) >= QApplication.startDragDistance():
+                self.dragging = True
+                travel = self.buttons['claude'].x() - self.buttons['codex'].x()
+                now = monotonic()
+                position = max(0.0, min(1.0, start + (x - anchor) / travel))
+                self.velocity = (position - self.position) / max(now - last, .01)
+                self.position = position
+                self.press = (anchor, start, now)
+                self.repaint_switch()
+                return True
+        elif (kind == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton
+              and self.press is not None):
+            _, _, last = self.press
+            self.press = None
+            if self.dragging:
+                self.dragging = False
+                button.setDown(False)
+                # Limit projection for a two-position control near its endpoints.
+                velocity = self.velocity if monotonic() - last < .08 else 0.0
+                self.velocity = max(-5.0, min(5.0, velocity))
+                client = 'claude' if self.position + self.velocity * .055 >= .5 else 'codex'
+                self.select_client(client)
+                return True
+            self.select(self.active)
+        elif kind == QEvent.Type.UngrabMouse and self.press is not None:
+            self.press = None
+            self.dragging = False
+            button.setDown(False)
+            self.select(self.active)
+        return super().eventFilter(button, event)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        bounds = QRectF(self.rect())
+        tint = QLinearGradient(bounds.topLeft(), bounds.bottomLeft())
+        tint.setColorAt(0.0, QColor(23, 111, 130, 118))
+        tint.setColorAt(1.0, self.tint)
+        self.paint_glass(painter, bounds, self.radius, tint, self.edge)
+        thumb = self.thumb_rect()
+        highlight = QLinearGradient(thumb.topLeft(), thumb.bottomLeft())
+        highlight.setColorAt(0.0, QColor(226, 248, 255, 227))
+        highlight.setColorAt(1.0, QColor(174, 222, 243, 205))
+        self.paint_glass(painter, thumb, thumb.height() / 2, highlight, QColor(238, 252, 255, 152))

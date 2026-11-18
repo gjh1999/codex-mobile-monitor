@@ -11,9 +11,9 @@ import uuid
 from pathlib import Path
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QSharedMemory, QSignalBlocker, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QShortcut
+from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QPainter, QPainterPath, QPen, QShortcut
 from PySide6.QtWidgets import (
-    QApplication, QDialog, QFrame, QGraphicsDropShadowEffect, QGraphicsOpacityEffect, QGridLayout,
+    QApplication, QDialog, QFrame, QGraphicsDropShadowEffect, QGraphicsOpacityEffect,
     QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
     QMainWindow, QMenu, QMessageBox, QPushButton, QSizePolicy, QStackedWidget, QStyle, QSystemTrayIcon,
     QTextBrowser, QTextEdit, QVBoxLayout,
@@ -68,6 +68,22 @@ class TaskTitle(QLabel):
             event.accept()
         else:
             super().mouseDoubleClickEvent(event)
+
+
+class VerseTitle(QLabel):
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        baseline = (self.height() + self.fontMetrics().ascent() - self.fontMetrics().descent()) / 2
+        glyphs = QPainterPath()
+        glyphs.addText(1, baseline, self.font(), self.text())
+        ink = QColor('#ffffff')
+        painter.fillPath(glyphs, ink)
+        # SimSun on Windows supplies only a regular face. Thicken its fine strokes
+        # slightly after the native bold weight has been resolved.
+        pen = QPen(ink, .85)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.strokePath(glyphs, pen)
 
 
 class ActionHeader(QFrame):
@@ -215,45 +231,62 @@ class MainWindow(QMainWindow):
         root = OceanBackdrop(Path(getattr(sys, '_MEIPASS', monitor.ROOT)), minutes)
         self.setCentralWidget(root)
         page = QVBoxLayout(root)
-        page.setContentsMargins(24, 18, 24, 24)
-        page.setSpacing(17)
+        page.setContentsMargins(24, 22, 24, 24)
+        page.setSpacing(16)
 
-        self.client_switch = ClientSwitch(self.switch_client)
+        self.client_switch = ClientSwitch(root, self.switch_client)
         self.client_buttons = self.client_switch.buttons
         page.addWidget(self.client_switch, 0, Qt.AlignmentFlag.AlignHCenter)
 
-        heading = QHBoxLayout()
-        heading.setContentsMargins(12, 14, 4, 8)
+        hero = QFrame()
+        hero.setFixedHeight(133)
+        heading = QHBoxLayout(hero)
+        heading.setContentsMargins(35, 13, 9, 9)
+        heading.setSpacing(16)
         title = QVBoxLayout()
-        title.setSpacing(16)
-        verse = label('潮平两岸阔，风正一帆悬。', 31, color='#ffffff')
-        verse.setFont(QFont('SimSun', 31))
+        title.setSpacing(26)
+        verse = VerseTitle('潮平两岸阔，风正一帆悬。')
+        verse.setObjectName('heroVerse')
+        verse.setFont(QFont('SimSun', 34, QFont.Weight.Bold))
         verse.setWordWrap(False)
         title.addWidget(verse)
         title.addWidget(label('一处开始，处处继续。百日写的那一行，暮归时仍等着你。', 10, color='#effaff'))
+        title.addStretch()
         heading.addLayout(title, 1)
 
-        summary = QFrame()
-        summary.setObjectName('oceanStats')
-        counts = QGridLayout(summary)
-        counts.setContentsMargins(11, 10, 11, 10)
-        counts.setHorizontalSpacing(10)
-        counts.setVerticalSpacing(3)
-        self.stat_total, self.stat_running, self.stat_pending = (label('0', 16, True, '#f3fbff') for _ in range(3))
-        for column, (value, caption, meaning) in enumerate((
+        self.summary = FrostedPanel(root, radius=13, tint=QColor(3, 32, 55, 191), edge=QColor(153, 223, 253, 67))
+        self.summary.setFixedHeight(60)
+        self.summary.setObjectName('oceanStats')
+        counts = QHBoxLayout(self.summary)
+        counts.setContentsMargins(5, 8, 5, 8)
+        counts.setSpacing(0)
+        self.stat_total, self.stat_running, self.stat_pending = (label('0', 17, True, '#f3fbff') for _ in range(3))
+        for index, (value, caption, meaning) in enumerate((
             (self.stat_total, '案头', '任务总数'), (self.stat_running, '行舟', '运行中的任务'),
             (self.stat_pending, '待你定夺', '待审批的请求'),
         )):
-            caption_label = label(caption, 9, color='#d5edf9')
-            caption_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            if index:
+                divider = QFrame()
+                divider.setObjectName('statDivider')
+                divider.setFixedSize(1, 35)
+                counts.addWidget(divider, 0, Qt.AlignmentFlag.AlignVCenter)
+            column = QFrame()
+            column.setObjectName('statColumn')
+            column.setFixedWidth(60)
+            column_contents = QVBoxLayout(column)
+            column_contents.setContentsMargins(10, 0, 0, 0)
+            column_contents.setSpacing(2)
+            caption_label = label(caption, 9, True, '#e4f2fa')
+            caption_label.setWordWrap(False)
             caption_label.setToolTip(meaning)
             caption_label.setAccessibleName(meaning)
-            counts.addWidget(caption_label, 0, column)
-            value.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            column_contents.addWidget(caption_label)
+            value.setWordWrap(False)
             value.setAccessibleName(meaning)
-            counts.addWidget(value, 1, column)
-        heading.addWidget(summary, 0, Qt.AlignmentFlag.AlignBottom)
-        page.addLayout(heading)
+            column_contents.addWidget(value)
+            counts.addWidget(column)
+        heading.addWidget(self.summary, 0, Qt.AlignmentFlag.AlignBottom)
+        page.addWidget(hero)
 
         middle = QHBoxLayout()
         middle.setSpacing(7)
@@ -543,7 +576,7 @@ class MainWindow(QMainWindow):
 
     def switch_client(self, client):
         if client == self.client:
-            self.client_buttons[client].setChecked(True)
+            self.client_switch.select(client)
             return
         self.client_selections[self.client] = self.selected_thread
         self.change_task(client, self.client_selections[client])

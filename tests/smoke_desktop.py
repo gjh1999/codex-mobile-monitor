@@ -9,9 +9,9 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, QTimer, Qt
-from PySide6.QtGui import QEnterEvent, QFontDatabase, QImage, QRawFont, QTextCursor
+from PySide6.QtGui import QEnterEvent, QFontDatabase, QImage, QMouseEvent, QRawFont, QTextCursor
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QDialog, QLabel, QMessageBox, QPushButton
+from PySide6.QtWidgets import QApplication, QDialog, QFrame, QLabel, QMessageBox, QPushButton
 
 import monitor
 from automation import Approvals
@@ -60,6 +60,44 @@ class FakeControl:
         return request_id
 
 
+def check_client_switch(window, output):
+    switch = window.client_switch
+    codex, claude = switch.buttons.values()
+    left = Qt.MouseButton.LeftButton
+    for button in (codex, claude):
+        assert button.font().bold()
+    with patch('desktop_glass.motion_enabled', return_value=True):
+        QTest.mousePress(claude, left)
+        assert claude.isDown() and window.client == 'codex'
+        QTest.mouseRelease(claude, left)
+        QTest.qWait(65)
+        assert .05 < switch.position < .92 and switch.velocity > 0
+        midpoint, velocity = switch.position, switch.velocity
+        QTest.mouseClick(codex, left, pos=QPoint(4, codex.height() // 2))
+        assert window.client == 'codex'
+        assert switch.position == midpoint and switch.velocity == velocity, 'Reverse from current position and velocity'
+        QTest.qWait(400)
+        assert not switch.spring.isActive() and switch.position == 0.0
+
+        origin = codex.rect().center()
+        drag_to = origin + QPoint(64, 0)
+        QTest.mousePress(codex, left, pos=origin)
+        global_pos = QPointF(codex.mapToGlobal(drag_to))
+        QApplication.sendEvent(codex, QMouseEvent(QEvent.Type.MouseMove, QPointF(drag_to), global_pos,
+                                                  Qt.MouseButton.NoButton, left, Qt.KeyboardModifier.NoModifier))
+        travel = claude.x() - codex.x()
+        assert abs(switch.position * travel - 64) < .1 and window.client == 'codex'
+        switch.grab().save(str(output / 'client-switch-drag.png'))
+        QApplication.sendEvent(codex, QMouseEvent(QEvent.Type.MouseButtonRelease, QPointF(drag_to), global_pos,
+                                                  left, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier))
+        assert window.client == 'claude'
+        QTest.qWait(400)
+        assert switch.position == 1.0 and not switch.spring.isActive()
+    with patch('desktop_glass.motion_enabled', return_value=False):
+        QTest.mouseClick(codex, left)
+        assert switch.position == 0.0 and not switch.spring.isActive()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output', type=Path, required=True)
@@ -92,16 +130,27 @@ def main():
             assert isinstance(ocean, OceanBackdrop) and not ocean.current[0].isNull()
             assert len(ocean.wallpapers) == 3 and ocean.rotation.interval() == 30 * 60_000
             assert abs(window.client_switch.geometry().center().x() - ocean.rect().center().x()) <= 1
+            assert window.findChild(QLabel, 'heroVerse').font().bold()
+            columns = window.summary.findChildren(QFrame, 'statColumn')
+            assert len(columns) == 3 and len({column.width() for column in columns}) == 1
+            assert len(window.summary.findChildren(QFrame, 'statDivider')) == 2
             normal = ocean.grab().toImage()
             original = ocean.current
             ocean.current = (original[0], QImage())
+            window.client_switch.update()
             unblurred = ocean.grab().toImage()
             ocean.current = original
+            window.client_switch.update()
             for card in (window.task_panel, window.conversation_card):
                 assert isinstance(card, FrostedPanel)
                 pos = card.mapTo(ocean, QPoint(card.width() // 2, card.height() * 2 // 3))
                 pos *= normal.devicePixelRatio()
                 assert normal.pixel(pos) != unblurred.pixel(pos), 'Frosted panel must sample the blurred wallpaper'
+            switch = window.client_switch
+            pos = switch.mapTo(ocean, QPoint(switch.width() - 9, switch.height() // 2))
+            pos *= normal.devicePixelRatio()
+            assert normal.pixel(pos) != unblurred.pixel(pos), 'The switch must sample the blurred wallpaper'
+            check_client_switch(window, args.output)
             assert window.conversation_header.opacity.opacity() == 0.0
             original_top = window.conversation.y()
             window.action_buttons['attach'].setFocus()

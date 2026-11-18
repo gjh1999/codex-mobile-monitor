@@ -120,9 +120,7 @@ def warning_html(text):
 
 STYLESHEET = '''
 QMainWindow { background:#25465e; color:#24344d; }
-QFrame#oceanStats { background:rgba(8, 34, 58, 198); border:1px solid rgba(219, 245, 255, 65); border-radius:13px; }
-QFrame#clientPill { background:rgba(5, 38, 61, 207); border:1px solid rgba(220, 248, 255, 106); border-radius:21px; }
-QFrame#clientThumb { background:#c8eaf8; border-radius:16px; }
+QFrame#statDivider { background:rgba(183, 222, 245, 59); }
 QFrame#composerBox { background:rgba(225, 247, 255, 80); border:1px solid rgba(226, 248, 255, 160); border-radius:11px; }
 QFrame#divider { background:rgba(230, 249, 255, 118); border:0; max-height:1px; }
 QLabel { color:#24344d; background:transparent; }
@@ -142,8 +140,8 @@ QPushButton:hover { background:#f2f6fe; border-color:#a9c1e7; color:#28599f; }
 QPushButton:pressed { background:#e3edff; border-color:#83a7dd; }
 QPushButton:focus { border-color:#7399db; }
 QPushButton#clientSwitch { background:transparent; color:#f1faff; border:1px solid transparent; border-radius:16px; padding:0; }
-QPushButton#clientSwitch:checked { color:#103a55; }
-QPushButton#clientSwitch:hover { border-color:rgba(231, 248, 255, 113); }
+QPushButton#clientSwitch:hover { background:rgba(180, 231, 251, 21); }
+QPushButton#clientSwitch:pressed { background:rgba(143, 214, 243, 75); }
 QPushButton#clientSwitch:focus { border-color:#93dffa; }
 QPushButton#hoverAction { background:rgba(225, 247, 255, 154); color:#153b53; border-color:rgba(226, 245, 255, 138); padding:5px 8px; }
 QPushButton#hoverAction:hover, QPushButton#hoverAction:focus { background:#d4efff; border-color:#70a8cc; }

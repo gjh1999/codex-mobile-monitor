@@ -205,7 +205,7 @@ def switch_pending(root):
     return (root / '.git/lanxi-switch/active.json').is_file()
 
 
-def check_applied_history(repo, project, thread, transcript):
+def check_applied_history(repo, project, thread, transcript, turn, publish):
     private = repo / '.git/lanxi'
     marker = private / 'handoff.json'
     if not marker.is_file():
@@ -216,9 +216,11 @@ def check_applied_history(repo, project, thread, transcript):
         incoming = limited(private / 'session.jsonl')
         require(sha(incoming) == receipt['sha256'] and transcript.startswith(incoming),
                 '请先在原路径续接接收会话，再发布工作区')
+        require(not (publish and receipt.get('automatic') and turn == receipt['turn']),
+                '自动接收的快照需在本机完成新轮次后再发布')
 
 
-def capture(repo, home, project, base, thread, includes, output, previous_snapshot=None):
+def capture(repo, home, project, base, thread, includes, output, previous_snapshot=None, *, publish=False):
     repo, output = repo.resolve(), output.absolute()
     require(repo == Path(git(repo, 'rev-parse', '--show-toplevel').decode().strip()).resolve(),
             '请指定项目仓库根目录')
@@ -229,8 +231,8 @@ def capture(repo, home, project, base, thread, includes, output, previous_snapsh
     source = sessions[0]
     session_location(source.name, thread)
     transcript = limited(source)
-    check_applied_history(repo, project, thread, transcript)
     sid, turn, cwd = session_info(transcript)
+    check_applied_history(repo, project, thread, transcript, turn, publish)
     source_cwd = Path(cwd).resolve()
     require(sid == thread and source_cwd.is_dir() and source_cwd.is_relative_to(repo), '会话工作目录不属于指定项目')
     relative_cwd = source_cwd.relative_to(repo).as_posix()
@@ -302,12 +304,10 @@ def capture(repo, home, project, base, thread, includes, output, previous_snapsh
     return dict(project=project, head=head, thread=thread, turn=turn, sha256=checksum, snapshot=snapshot)
 
 
-def restore(package, checksum, project, seed, dest, expected=None):
+@contextmanager
+def verified_bundle(package, checksum, project, expected=None):
     require(DIGEST.fullmatch(checksum), '请提供封存端返回的 SHA-256')
-    seed, dest = seed.resolve(strict=True), dest.absolute()
-    require(not dest.exists() and not dest.is_symlink() and not dest.resolve().is_relative_to(seed),
-            '恢复目录必须是基线仓库以外的新目录')
-    with package.open('rb') as stream, tempfile.TemporaryDirectory(dir=dest.parent) as tmp:
+    with package.open('rb') as stream:
         require(os.fstat(stream.fileno()).st_size <= MAX_TOTAL + 2 * MAX_FILE, '交接包超过容量上限')
         require(file_hash(stream) == checksum, '交接包 SHA-256 不匹配')
         with zipfile.ZipFile(stream) as bundle:
@@ -316,12 +316,26 @@ def restore(package, checksum, project, seed, dest, expected=None):
                     <= MAX_TOTAL + MAX_FILE, '交接包目录无效或超过容量上限')
             require(bundle.getinfo('manifest.json').file_size <= MAX_FILE, '清单超过容量上限')
             m = json.loads(bundle.read('manifest.json'))
-            require(m['version'] == 1 and m['project'] == project, '项目或交接格式版本不匹配')
+            require(isinstance(m, dict) and m['version'] == 1 and m['project'] == project, '项目或交接格式版本不匹配')
             if expected:
                 require(all(m.get(key) == value for key, value in expected.items()), '交接包与发布清单不符')
+                if 'snapshot' in expected:
+                    snapshot = {key: value for key, value in m.items() if key != 'snapshot'}
+                    snapshot['objects'] = {key: value for key, value in m['objects'].items() if key != 'commits.bundle'}
+                    require(sha(json.dumps(snapshot, sort_keys=True, ensure_ascii=False).encode()) == expected['snapshot'],
+                            '交接包内容与签名快照不匹配')
+            require(set(bundle.namelist()) == {'manifest.json', *m['objects']}, '清单与对象列表不匹配')
+            yield bundle, m
+
+
+def restore(package, checksum, project, seed, dest, expected=None):
+    seed, dest = seed.resolve(strict=True), dest.absolute()
+    require(not dest.exists() and not dest.is_symlink() and not dest.resolve().is_relative_to(seed),
+            '恢复目录必须是基线仓库以外的新目录')
+    with tempfile.TemporaryDirectory(dir=dest.parent) as tmp:
+        with verified_bundle(package, checksum, project, expected) as (bundle, m):
             base, head = m['base'], m['head']
             require(GIT_ID.fullmatch(base) and GIT_ID.fullmatch(head), 'Git 版本无效')
-            require(set(bundle.namelist()) == {'manifest.json', *m['objects']}, '清单与对象列表不匹配')
 
             def get(key, limit=MAX_FILE):
                 require(bundle.getinfo(key).file_size <= limit, '对象超过容量上限')
@@ -334,28 +348,29 @@ def restore(package, checksum, project, seed, dest, expected=None):
             session_location(m['rollout'], m['thread'])
             work = Path(tmp) / 'work'
             work.mkdir()
-            git(work, 'init', '--quiet', '--template=', '--object-format=' + ('sha256' if len(base) == 64 else 'sha1'))
-            git(work, 'fetch', '--no-tags', '--', seed, base)
+            git(work, 'init', '--quiet', '--template=', '--object-format=' + ('sha256' if len(base) == 64 else 'sha1'),
+                isolated=True)
+            git(work, 'fetch', '--no-tags', '--', seed, base, isolated=True)
             if head != base:
                 commits = Path(tmp) / 'commits.bundle'
                 commits.write_bytes(get('commits.bundle', MAX_TOTAL))
-                git(work, 'bundle', 'verify', commits)
-                git(work, 'fetch', '--no-tags', '--', commits, 'HEAD')
-                require(git(work, 'rev-parse', 'FETCH_HEAD').decode().strip() == head, 'Git 对象与清单不匹配')
-            git(work, 'merge-base', '--is-ancestor', base, head)
-            git(work, 'checkout', '--detach', head)
+                git(work, 'bundle', 'verify', commits, isolated=True)
+                git(work, 'fetch', '--no-tags', '--', commits, 'HEAD', isolated=True)
+                require(git(work, 'rev-parse', 'FETCH_HEAD', isolated=True).decode().strip() == head, 'Git 对象与清单不匹配')
+            git(work, 'merge-base', '--is-ancestor', base, head, isolated=True)
+            git(work, 'checkout', '--detach', head, isolated=True)
             if m['branch'] is not None:
                 branch = m['branch']
-                require(git(work, 'check-ref-format', '--branch', branch).decode().strip() == branch,
+                require(git(work, 'check-ref-format', '--branch', branch, isolated=True).decode().strip() == branch,
                         '无效的分支名')
-                git(work, 'checkout', '-b', branch)
+                git(work, 'checkout', '-b', branch, isolated=True)
             origin = git(seed, 'remote', 'get-url', 'origin', optional=True)
             if origin:
-                git(work, 'remote', 'add', '--', 'origin', origin.decode().strip())
+                git(work, 'remote', 'add', '--', 'origin', origin.decode().strip(), isolated=True)
             patch = get('index.patch')
             if patch:
-                git(work, 'apply', '--binary', '--index', '--whitespace=nowarn', '-', data=patch)
-            require(sha(git(work, 'ls-files', '--stage', '-z')) == m['index_hash'], '目标暂存区与源端不一致')
+                git(work, 'apply', '--binary', '--index', '--whitespace=nowarn', '-', data=patch, isolated=True)
+            require(sha(git(work, 'ls-files', '--stage', '-z', isolated=True)) == m['index_hash'], '目标暂存区与源端不一致')
             dirty, extra = [], []
             # Remove tracked files first to allow a file to turn into a directory.
             entries = sorted(m['files'], key=lambda e: e['object'] is not None)
@@ -367,7 +382,7 @@ def restore(package, checksum, project, seed, dest, expected=None):
                     require(not path.exists() and e['object'] is not None, '新增路径已被占用')
                     extra.append(e['path'])
                 else:
-                    require(names(git(work, 'ls-files', '-z', '--', e['path'])) == [e['path']],
+                    require(names(git(work, 'ls-files', '-z', '--', e['path'], isolated=True)) == [e['path']],
                             '工作区文件与索引不匹配')
                     dirty.append(e['path'])
                 if e['object'] is None:
@@ -382,9 +397,9 @@ def restore(package, checksum, project, seed, dest, expected=None):
                     path.write_bytes(data)
                     if os.name != 'nt':
                         path.chmod(0o755 if e['executable'] else 0o644)
-            actual = names(git(work, *DIFF, '--name-only', '-z'))
+            actual = names(git(work, *DIFF, '--name-only', '-z', isolated=True))
             require(sorted(dirty) == sorted(actual) and sorted(extra) == sorted(names(
-                    git(work, 'ls-files', '--others', '--exclude-standard', '-z'))), '目标工作区状态与清单不匹配')
+                    git(work, 'ls-files', '--others', '--exclude-standard', '-z', isolated=True))), '目标工作区状态与清单不匹配')
             private = work / '.git' / 'lanxi'
             mapped = work if m['cwd'] == '.' else local_path(work, m['cwd'])
             require(mapped.is_dir(), '目标快照缺少会话工作目录')
@@ -429,7 +444,7 @@ def handoff_receipts(projects):
     return results
 
 
-def session_progress(home, thread, transcript):
+def session_progress(home, thread, transcript, *, distinguish_ahead=False):
     matches = find_session(home, thread, include_compressed=True)
     if not matches:
         return 'missing', None, None
@@ -439,7 +454,8 @@ def session_progress(home, thread, transcript):
     with path.open('rb') as stream:
         prefix = stream.read(len(transcript) + 1)
     if prefix.startswith(transcript):
-        return 'current', path, None
+        state = 'ahead' if distinguish_ahead and prefix != transcript else 'current'
+        return state, path, None
     if prefix and transcript.startswith(prefix):
         try:
             sid, _, _ = session_info(prefix)

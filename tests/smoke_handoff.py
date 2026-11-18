@@ -22,6 +22,9 @@ from handoff_merge import prepare_merge
 from universal_rpc import CodexRPC
 
 
+FIXTURE_HANDOFF_KEY = 'fixture-only-handoff-key-' * 3
+
+
 class Replies(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
@@ -84,6 +87,7 @@ def main():
     parser.add_argument('--merge', action='store_true', help='merge local edits before the returning round')
     parser.add_argument('--diverged', action='store_true', help='commit independently on A and B before merging')
     parser.add_argument('--apply', action='store_true', help='apply the prepared merge to the idle original path')
+    parser.add_argument('--automatic', action='store_true', help='let the receive scan choose and apply the snapshot')
     parser.add_argument('--stock-files', type=int, default=0, help='add this many 64 KiB files to the baseline')
     args = parser.parse_args()
     if args.roundtrip and not args.sync:
@@ -94,6 +98,8 @@ def main():
         parser.error('--diverged needs --merge')
     if args.apply and not args.merge:
         parser.error('--apply needs --merge')
+    if args.automatic and not args.apply:
+        parser.error('--automatic needs --apply')
     if args.stock_files < 0:
         parser.error('--stock-files must be nonnegative')
     target = args.output.resolve()
@@ -157,7 +163,8 @@ def main():
                           transport='replicated filesystem folders' if args.sync else 'manual package')
             if args.roundtrip:
                 report['return'] = test_return(exe, a, b, target, base, sid, home_a, home_b, server.server_port,
-                                               merge=args.merge, diverged=args.diverged, apply=args.apply)
+                                               merge=args.merge, diverged=args.diverged, apply=args.apply,
+                                               automatic=args.automatic)
             (target / 'result.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
             print(json.dumps(report))
     finally:
@@ -169,7 +176,7 @@ def through_exchange(a, target, base, thread, seed, home_a, home_b, sender='offi
                      sender_runtime=None):
     incoming_folder = target / 'exchange'
     script = Path(__file__).resolve().parents[1] / 'handoff_sync.py'
-    env = dict(os.environ, LANXI_FIXTURE_HANDOFF_KEY='fixture-only-handoff-key-' * 3)
+    env = dict(os.environ, LANXI_FIXTURE_HANDOFF_KEY=FIXTURE_HANDOFF_KEY)
 
     def scan(runtime, home, device, exchange, **direction):
         runtime.mkdir(exist_ok=True)
@@ -213,7 +220,7 @@ def commit_fixture(repo, filename):
     return git(repo, 'rev-parse', 'HEAD').decode().strip()
 
 
-def apply_at_original(original, merged, home, output):
+def apply_at_original(original, prepared, home, output, thread, automatic=False):
     import uvicorn
     from coordination_server import create_app
 
@@ -224,10 +231,16 @@ def apply_at_original(original, merged, home, output):
     with socket.socket() as endpoint:
         endpoint.bind(('127.0.0.1', 0))
         settings = dict(url=f'http://127.0.0.1:{endpoint.getsockname()[1]}', device=device,
-                        projects={project: {'path': str(original)}})
-        config = output / 'switch-fixture-config.json'
-        config.write_text(json.dumps(dict(coordination=settings, handoffSync={'projects': {
-            project: {'receive': {'staging': str(merged.parent.parent)}}}})), encoding='utf-8')
+                        projects={project: {'path': str(original), 'threads': [thread]}})
+        if automatic:
+            config = prepared.parents[2] / 'runtime/local-config.json'
+            data = json.loads(config.read_bytes())
+            data['handoffSync']['projects'][project]['receive']['autoApply'] = dict(peer='laptop', thread=thread, branch='main')
+        else:
+            config = output / 'switch-fixture-config.json'
+            data = {'handoffSync': {'projects': {project: {'receive': {'staging': str(prepared.parent.parent)}}}}}
+        data['coordination'] = settings
+        config.write_text(json.dumps(data), encoding='utf-8')
         worker = threading.Thread(target=lambda: server.run(sockets=[endpoint]), daemon=True)
         worker.start()
         try:
@@ -236,12 +249,30 @@ def apply_at_original(original, merged, home, output):
                 if time.monotonic() >= deadline or not worker.is_alive():
                     raise RuntimeError('coordinator failed to listen')
                 time.sleep(0.025)
-            script = Path(__file__).resolve().parents[1] / 'handoff_apply.py'
-            cmd = [sys.executable, str(script), '--config', str(config), '--project', project,
-                   '--prepared', str(merged), '--codex-home', str(home)]
-            started = time.perf_counter()
-            result = json.loads(subprocess.check_output(cmd, env=dict(os.environ, LANXI_DEVICE_TOKEN=token), timeout=60))
-            result['seconds'] = round(time.perf_counter() - started, 3)
+            script = 'handoff_sync.py' if automatic else 'handoff_apply.py'
+            cmd = [sys.executable, str(Path(__file__).resolve().parents[1] / script), '--config', str(config),
+                   '--codex-home', str(home)]
+            env = dict(os.environ, LANXI_DEVICE_TOKEN=token, LANXI_FIXTURE_HANDOFF_KEY=FIXTURE_HANDOFF_KEY)
+            if not automatic:
+                cmd.extend(('--project', project, '--prepared', str(prepared)))
+
+            def run():
+                started = time.perf_counter()
+                state = json.loads(subprocess.check_output(cmd, env=env, timeout=60))
+                elapsed = round(time.perf_counter() - started, 3)
+                if automatic:
+                    state = state['projects'][project]['autoApply']
+                return state, elapsed
+
+            result, seconds = run()
+            if automatic:
+                again, replay = run()
+                assert again == result, (result, again)
+                plans = list((original / '.git/lanxi-switch').glob('*/plan.json'))
+                assert len(plans) == 1, plans
+                plan = json.loads(plans[0].read_bytes())
+                result.update(replay_seconds=replay, backup=str(plans[0].parent), files=len(plan['changes']) - 2)
+            result['seconds'] = seconds
             assert Path(result['cwd']) == original and result['status'] == 'applied', result
             assert ControlClient(settings, token).request(project, 'control')['humans'] == []
             return result
@@ -251,7 +282,7 @@ def apply_at_original(original, merged, home, output):
 
 
 def test_return(exe, original, source_b, output, base, thread, home_a, home_b, port,
-                merge=False, diverged=False, apply=False):
+                merge=False, diverged=False, apply=False, automatic=False):
     log_a, = find_session(home_a, thread)
     previous = log_a.read_bytes()
     assert git(source_b, 'rev-parse', '--verify', 'origin/main', optional=True) is None
@@ -278,19 +309,24 @@ def test_return(exe, original, source_b, output, base, thread, home_a, home_b, p
             (original / 'from-a.bin').write_bytes(b'staged on A\x00')
             git(original, 'add', 'from-a.bin')
         merged = cwd.parent / 'merged-local'
-        result = prepare_merge(original, cwd, merged, [] if apply else ['new.txt'])
-        assert result['status'] == 'merged', result
+        if automatic:
+            switched = apply_at_original(original, cwd, home_a, output, thread, automatic=True)
+            result = switched
+            cwd = original
+        else:
+            result = prepare_merge(original, cwd, merged, [] if apply else ['new.txt'])
+            assert result['status'] == 'merged', result
+            cwd = Path(result['cwd'])
         if not apply:
             assert git(merged, 'show', ':from-a.bin') == b'staged on A\x00'
         if diverged:
-            assert result['history']['mode'] == 'merge_commit', result
-            assert git(merged, 'rev-list', '--parents', '-1', 'HEAD').decode().split() == [result['head'], local_head, incoming_head]
+            assert git(cwd, 'rev-list', '--parents', '-1', 'HEAD').decode().split() == [result['head'], local_head, incoming_head]
             for name in ('committed-a.txt', 'committed-b.txt'):
-                assert git(merged, 'show', 'HEAD:' + name) == name.encode() + b'\n'
-        cwd = Path(result['cwd'])
-        if apply:
-            switched = apply_at_original(original, merged, home_a, output)
+                assert git(cwd, 'show', 'HEAD:' + name) == name.encode() + b'\n'
+        if apply and not automatic:
+            switched = apply_at_original(original, merged, home_a, output, thread)
             cwd = original
+        if apply:
             assert (original / 'device-local.txt').read_bytes() == b'local-only fixture\n'
             assert (Path(switched['backup']) / 'backup/code.bin').read_bytes() == b'base\x00'
     env = dict(os.environ, CODEX_HOME=str(home_a), NO_PROXY='localhost,127.0.0.1')

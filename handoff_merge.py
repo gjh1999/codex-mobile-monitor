@@ -8,13 +8,21 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from handoff import (DIFF, GIT_ID, MAX_FILE, MAX_TOTAL, HandoffError, checked_index, git, git_process,
-                     limited, local_path, names, require, resume_context, session_info, sha, switch_pending)
+                     limited, local_path, names, require, resume_context, session_info, sha, switch_pending, work_file)
 
 
 class MergeConflict(ValueError):
     def __init__(self, layer, paths, messages):
         super().__init__(layer)
         self.report = dict(version=1, status='conflict', layer=layer, paths=paths, messages=messages)
+
+
+class SnapshotChanged(HandoffError):
+    pass
+
+
+class WorkspaceDirty(HandoffError):
+    pass
 
 
 def separate(a, b):
@@ -206,7 +214,18 @@ def check_checkout_paths(repo, target_repo=None):
             '合并结果依赖 Git 内容过滤器')
 
 
-def prepare_merge(local, incoming, dest, includes=(), incoming_includes=()):
+def verify_snapshot(root, state, manifest):
+    files = {entry['path']: entry for entry in manifest['files']}
+    if sha(state.index) != manifest['index_hash'] or {row[0] for row in state.changes} != files.keys():
+        raise SnapshotChanged('预备工作区的暂存区或文件清单已变化')
+    for name, entry in files.items():
+        raw, executable = work_file(root, name)
+        expected = manifest['objects'].get(entry['object'])
+        if (sha(raw) if raw is not None else None) != expected or (os.name != 'nt' and executable != entry['executable']):
+            raise SnapshotChanged('预备工作区内容已偏离签名包')
+
+
+def prepare_merge(local, incoming, dest, includes=(), incoming_includes=(), *, verified=None):
     local, incoming = worktree_root(local), worktree_root(incoming)
     dest = dest.absolute()
     require(all(separate(a, b) for a, b in ((local, incoming), (local, dest.resolve()), (incoming, dest.resolve()))),
@@ -225,6 +244,10 @@ def prepare_merge(local, incoming, dest, includes=(), incoming_includes=()):
             '交接历史与回执不匹配')
     registered = receipt.get('included', [])
     require(isinstance(registered, list) and all(isinstance(path, str) for path in registered), '交接新文件回执无效')
+    if verified and (any(receipt[key] != verified[key] for key in ('project', 'head', 'thread', 'turn', 'cwd', 'rollout'))
+                     or context.checksum != verified['objects']['session.jsonl']
+                     or set(registered) != {row['path'] for row in verified['files'] if row['new']}):
+        raise SnapshotChanged('预备工作区回执与签名包不符')
     remote_paths = sorted(set(registered) | set(incoming_includes))
     history = dict(localHead=local_head, incomingHead=incoming_head)
     unavailable = dict(version=1, status='history_unavailable', history=history)
@@ -258,7 +281,11 @@ def prepare_merge(local, incoming, dest, includes=(), incoming_includes=()):
             here = capture_index(local, work, includes, write_objects=True)
             there = capture_index(incoming, work, remote_paths, write_objects=True)
             require((here.head, there.head) == (local_head, incoming_head), '输入提交在读取期间发生变化')
+            if verified:
+                verify_snapshot(incoming, there, verified)
             local_index, local_work = trees(work, here)
+            if verified and (local_index != local_tree or local_work != local_tree):
+                raise WorkspaceDirty('原工作区在自动预备期间有本机修改')
             remote_index, remote_work = trees(work, there)
             local_staged = merge_tree(work, local_tree, base, local_index, 'local_index')
             incoming_staged = merge_tree(work, incoming_tree, base, remote_index, 'incoming_index')
@@ -294,6 +321,8 @@ def prepare_merge(local, incoming, dest, includes=(), incoming_includes=()):
                 and capture_index(incoming, work, remote_paths, write_objects=False) == there
                 and not (switch_pending(local) or switch_pending(incoming)),
                 '输入工作区在合并期间发生变化')
+        if verified:
+            verify_snapshot(incoming, there, verified)
         alternates.unlink()
         git(work, 'fsck', '--connectivity-only', '--no-dangling', head, index, working, isolated=True)
         relative = context.cwd.relative_to(incoming)

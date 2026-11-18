@@ -2,6 +2,15 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-18 空闲工作区自动更新
+
+- 基线 `a096c6d` 需要手动选择合并目录和原路径切换。本轮把已签名的接收、按需合并和原路径切换接入同一个同步扫描。策略默认关闭，启用后绑定设备、线程和本机分支。环境为 Windows、Python 3.14.7、Git 2.56.0.windows.4 与 Codex CLI 0.169.1。仓库、设备和回复均为本机测试数据。
+- `.\.venv\Scripts\python.exe -m unittest -v tests.test_handoff_auto tests.test_handoff` 首轮 18 项通过，55.631 秒。覆盖重复扫描和状态文件缺失后继续去重、IDE 占用、本机修改、分支不匹配、预备文件被修改、本机会话领先、切换前收到新版、签名错误和等待恢复。核对同一版本后续扫描的自动应用路径没有 Git 合并或协调查询，也核对完成新本机轮次前阻止自动回传。输出为 `build-exe/verification/handoff-auto-targeted-01.txt`。
+- 执行 `.\.venv\Scripts\python.exe tests/smoke_handoff.py --sync --roundtrip --merge --diverged --apply --automatic --stock-files 768 --output build-exe/verification/handoff-auto-native-48m-01`。共享基线为 768 个 64 KiB 文件，共 48 MiB。已预备后触发的首轮自动扫描用时 4.963 秒，包含签名校验、分叉合并、原路径切换及进程启动，更新 4 个工作区文件。下一轮扫描为 0.217 秒，复用原路径回执。上一版的手动切换为 1.606 秒和 1.996 秒，另有独立合并步骤，阶段口径不同。结果见输出目录 `result.json`，C、D 盘符模拟往返，协调及回复服务使用回环地址。未测峰值内存及跨机传输吞吐。
+- `.\.venv\Scripts\python.exe -m unittest discover -s tests -t . -p 'test_*.py' -v` 全量运行 178 项，177 项通过，1 项可选 Stream SDK 跳过，151.239 秒。日志为 `build-exe/verification/handoff-auto-regression-01.txt`。使用相同参数在 `handoff-auto-native-48m-02` 复验，首次自动应用为 5.292 秒，重复扫描为 0.265 秒，真实 CLI 续写同一线程并再次封存。
+- 在 Qt offscreen 下运行 `.\.venv\Scripts\python.exe tests/bench_task_switch.py --output build-exe/verification/task-switch-after-auto`，35 条长消息、首次读取模拟等待 140 毫秒。六次切换的事件循环等待中位数为 1.62 毫秒，历史显示中位数为 13.47 毫秒。上一版同口径为 1.65 毫秒和 9.14 毫秒。结果为输出目录 `result.json`，测试与实际合并分别运行。
+- 工作区已存在本地修改时继续保留预备快照。同版本持续应用失败或预备目录被修改后，60 秒内复用上次结果，保留可重试的现场。中断的事务通过 `--recover` 处理。正式启用前需要真实 Syncthing、两台物理设备及两种 IDE 联调，并统计实际额外操作数。 [空闲时自动应用](../HANDOFF.md#空闲时自动应用到原路径)
+
 ## 2026-11-18 Windows 原路径切换与中断恢复
 
 - 基线 `1bd5157` 支持在独立目录打开合并结果。本轮为已登记的独立 Git 仓库增加原路径应用和恢复。试验使用 Windows、Python 3.14.7、Git 2.56.0.windows.4 与 Codex CLI 0.169.1，项目、配置、设备身份和模型回复均为测试环境生成。

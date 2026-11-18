@@ -56,6 +56,13 @@
 - `tests/smoke_desktop.py --output build-exe/verification/task-switch-desktop-smoke-02` 通过。全套 `.\.venv\Scripts\python.exe -m unittest discover -s tests -t . -p 'test_*.py' -v` 运行 147 项，146 项通过、1 项可选 Stream SDK 跳过，用时 37.993 秒，见 `build-exe/verification/task-switch-regression.txt`。
 - 运行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-exe.ps1 -AppName Lanxi-Glass-R8`，PyInstaller 完成构建约 40.89 秒。包位于 `release/Lanxi-Glass-R8.exe`，61,417,833 字节，同目录 R7 为 54,104,555 字节。归档核对包含新版桌面模块、交接后台和 Qt Windows 插件。切换测试执行的是源码窗口，新 EXE 的实机启动和操作耗时未测。
 
+## 2026-11-18 对话气泡圆角与底色
+
+- 以 R11 的对话区为基线，保留正文排版、左右对齐和内边距。普通消息使用 11 像素圆角和更透的浅蓝底。助理及用户气泡的背景 alpha 分别为 132 和 172，色值为 `#EBF9FF` 和 `#DAF0FD`。第一版实机图中，助理气泡背景比原位置向右偏 10 像素。最终根据文本单元格的布局和内边距定位。
+- Windows 11 x64、Python 3.14.7、PySide6 6.12.0。用虚构的双客户端短消息、多段长文本、代码和审批请求，在 `build-exe/verification/lanxi-soft-bubbles/r11-release` 设置 `QT_QPA_PLATFORM=windows`，执行 `python tests/smoke_desktop.py --output ../windows-release`。验证两种气泡的圆角处透出毛玻璃，圆角内绘制背景，1020×640 长消息换行和滚动正常。最终图位于 `windows-release`，首轮图留在 `windows-first`。
+- 在 `cf0f3d9` 的集成工作树设置 `QT_QPA_PLATFORM=offscreen`，执行 `python -m unittest discover -s tests -t . -p 'test_*.py' -q`，178 项中 177 项通过、1 项跳过，用时 193.026 秒，结果在 `regression.txt`。桌面、会话和项目分组专项共 33 项全部通过，5.413 秒。
+- 最终交付包沿用 R11 的构建基线，仅增加本轮气泡源码。使用 PyInstaller 6.22.3 执行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-exe.ps1 -AppName Lanxi-Glass-R12`，约 59.83 秒。包为 61,434,009 字节，复制前后 SHA-256 一致。运行 `python build-exe/verify-lanxi-launch.py Lanxi-Glass-R12.exe`，在 `lanxi-folder-package-tx00spc_` 中于 1.84 秒验证独立原生窗口和 SQLite。未测真实模型会话。
+
 ## 2026-11-18 列表选中外框与展开箭头
 
 - 以 R10 的任务树和吉光片羽界面为基线。去掉任务、项目组和片羽条目的焦点外框，以及片羽分组入口的悬停和按下反馈。任务树的展开箭头独立于行底色绘制。第一次复测发现选中时底色仍延伸到箭头区，第二次复测发现原生图元在独立绘制时没有显示。最终将行背景裁到条目区域，直接绘制等尺寸三角形。

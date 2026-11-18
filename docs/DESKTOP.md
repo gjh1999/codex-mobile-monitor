@@ -22,7 +22,7 @@
 
 ## EXE 与数据
 
-本轮毛玻璃版交付文件为 `release/Lanxi-Glass-R11.exe`。默认构建名为 `release/Lanxi.exe`。
+本轮毛玻璃版交付文件为 `release/Lanxi-Glass-R12.exe`。默认构建名为 `release/Lanxi.exe`。
 
 首页从 25 联唐诗里每小时轮换一句，并同步显示作者与篇名。重开窗口沿用当前小时的诗句，电脑唤醒后直接显示当时的一句。诗句可离线轮换，副标题沿用开发方案封面原文。选诗参考 [Wscats/poetry-skills](https://github.com/Wscats/poetry-skills) 使用的 [chinese-poetry《唐诗三百首》](https://github.com/chinese-poetry/chinese-poetry/blob/master/全唐诗/唐诗三百首.json)，并参考 [常建《题破山寺后禅院》](https://zh.wikisource.org/wiki/破山寺後禪院) 与 [钱起《省试湘灵鼓瑟》](https://ctext.org/text.pl?if=gb&node=153790) 的原文。
 

@@ -13,7 +13,7 @@ from collections import Counter, OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QSharedMemory, QSignalBlocker, Qt, QTimer, Signal
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QRectF, QSharedMemory, QSignalBlocker, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QPainter, QPainterPath, QPen, QShortcut, QTextDocument
 from PySide6.QtWidgets import (
     QApplication, QDialog, QFrame, QGraphicsDropShadowEffect, QGraphicsOpacityEffect,
@@ -50,10 +50,12 @@ def load_conversation(key, previous, font, option, width, gui_thread, stop):
     if data == previous or stop.is_set():
         return None
     bubbles = []
+    roles = []
     for message in data.get('messages') or []:
         assistant = message.get('role') == 'assistant'
         role = ('Claude Code' if client == 'claude' else 'Codex') if assistant else '你'
         bubbles.append(message_html(role, message.get('text', ''), assistant))
+        roles.append(assistant)
     errors = {json.dumps(event, sort_keys=True, ensure_ascii=False) for event in data.get('events') or []
               if isinstance(event.get('status'), dict) and event['status'].get('error')}
     for encoded in sorted(errors):
@@ -68,6 +70,9 @@ def load_conversation(key, previous, font, option, width, gui_thread, stop):
     document.setDefaultStyleSheet('p { margin-top:3px; margin-bottom:8px; }')
     document.setUndoRedoEnabled(False)
     document.setHtml(''.join(bubbles) or '<p style="color:#61738c;">灯下尚无来信。写下第一句吧。</p>')
+    # Only the leading tables are messages. Warnings follow them and code
+    # tables are children of the corresponding message.
+    document.message_frames = tuple(zip(document.rootFrame().childFrames(), roles))
     format_reading_document(document)
     document.setTextWidth(width)
     document.setLayoutEnabled(True)
@@ -161,6 +166,34 @@ class ProjectTree(QTreeWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.fillPath(arrow, QColor('#466a7e'))
         painter.restore()
+
+
+class ConversationBrowser(QTextBrowser):
+    def paintEvent(self, event):
+        document = self.document()
+        messages = getattr(document, 'message_frames', ())
+        if messages:
+            x, y = self.horizontalScrollBar().value(), self.verticalScrollBar().value()
+            exposed = QRectF(event.rect()).translated(x, y)
+            layout = document.documentLayout()
+            with QPainter(self.viewport()) as painter:
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                painter.translate(-x, -y)
+                painter.setPen(Qt.PenStyle.NoPen)
+                for frame, assistant in messages:
+                    cell = frame.cellAt(0, 0 if assistant else 1)
+                    padding = cell.format().toTableCellFormat()
+                    text = layout.blockBoundingRect(cell.firstCursorPosition().block())
+                    box = QRectF(text.left() - padding.leftPadding(), text.top() - padding.topPadding(),
+                                 text.width() + padding.leftPadding() + padding.rightPadding(),
+                                 layout.frameBoundingRect(frame).height())
+                    if box.top() >= exposed.bottom():
+                        break
+                    if not box.intersects(exposed):
+                        continue
+                    painter.setBrush(QColor(235, 249, 255, 132) if assistant else QColor(218, 240, 253, 172))
+                    painter.drawRoundedRect(box, 11, 11)
+        super().paintEvent(event)
 
 
 class ActionHeader(QFrame):
@@ -494,7 +527,7 @@ class MainWindow(QMainWindow):
         divider.setFixedHeight(1)
         conversation_layout.addWidget(divider)
 
-        self.conversation = QTextBrowser()
+        self.conversation = ConversationBrowser()
         self.conversation.setObjectName('conversation')
         configure_text(self.conversation, 10, 3)
         self.conversation.setMinimumHeight(130)

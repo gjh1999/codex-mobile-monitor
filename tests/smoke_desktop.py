@@ -522,7 +522,7 @@ def main():
             data['events'] = []
             window.resize(1020, 640)
             window.refresh()
-            QTest.qWait(80)
+            assert wait_until(lambda: '中文消息与代码' in window.conversation.toPlainText())
             send_corner = window.send_button.mapTo(window.centralWidget(), window.send_button.rect().bottomRight())
             assert window.centralWidget().rect().contains(send_corner), 'Send must stay inside the small window'
             assert window.conversation.height() >= 130
@@ -536,7 +536,7 @@ def main():
             window.resize(1180, 760)
             data['messages'] = [
                 {'role': 'user', 'text': '检查当前进度，继续下一步，并保留处理结果。'},
-                {'role': 'assistant', 'text': '已整理当前进度，接下来会：\n\n1. 核对任务状态与待办事项\n2. 推进下一项可执行工作\n3. 保存结果并汇报变化\n\n你可以随时补充方向，或暂停当前任务。'}]
+                {'role': 'assistant', 'text': '已整理当前进度，接下来会核对任务状态，再推进下一项工作。\n\n有新的结果，我会记在这里。'}]
             task['paused'] = False
             task['threadStatus'] = {'type': 'active'}
             claude.data['operations'].clear()
@@ -549,8 +549,26 @@ def main():
             QTest.mouseClick(window.client_buttons['codex'], Qt.MouseButton.LeftButton)
             window.control_message.setText('任务正在运行，你可以随时补充指令')
             window.refresh()
+            assert wait_until(lambda: '已整理当前进度，接下来会' in window.conversation.toPlainText())
             QTest.qWait(270)
             window.conversation.verticalScrollBar().setValue(0)
+            document = window.conversation.document()
+            frames = document.message_frames
+            assert [assistant for _, assistant in frames] == [False, True]
+            viewport = window.conversation.viewport()
+            painted = viewport.grab().toImage()
+            document.message_frames = ()
+            bare = viewport.grab().toImage()
+            document.message_frames = frames
+            for table, assistant in frames:
+                cell = table.cellAt(0, 0 if assistant else 1)
+                text = document.documentLayout().blockBoundingRect(cell.firstCursorPosition().block())
+                top_left = QPoint(round(text.left()) - 10, round(text.top()) - 10)
+                dpr = painted.devicePixelRatio()
+                corner = top_left * dpr
+                center = (top_left + QPoint(30, 2)) * dpr
+                assert painted.pixel(corner) == bare.pixel(corner), 'The corner must show the glass behind it'
+                assert painted.pixel(center) != bare.pixel(center), 'The bubble fill must be visible past the radius'
             window.grab().save(str(args.output / 'codex-desktop.png'))
             window.task_search.setFocus()
             header = window.conversation_header

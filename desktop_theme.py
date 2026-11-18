@@ -105,9 +105,8 @@ def message_html(role, text, assistant):
         else:
             blocks.extend('<p style="color:#24344d;font-size:10pt;">' + _inline(paragraph) + '</p>'
                           for paragraph in part.strip().split('\n\n') if paragraph)
-    surface = 'rgba(235,249,255,0.62)' if assistant else 'rgba(214,240,255,0.84)'
     spacer = '<td width="7%"></td>'
-    bubble = (f'<td width="93%" style="padding:10px;background-color:{surface};">'
+    bubble = ('<td width="93%" style="padding:10px;">'
               '<p style="margin-top:0;margin-bottom:7px;font-size:9pt;color:#61738c;">'
               f'<b>{escape(role)}</b></p>{"".join(blocks)}</td>')
     return ('<table width="100%" cellspacing="0" cellpadding="0"><tr>' +

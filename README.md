@@ -24,7 +24,7 @@ Windows 原生桌面软件，用于集中查看和控制本机 Codex / Claude Co
 | 启动、安装依赖、打包、测试、登录启动 | [运行与维护](docs/RUNBOOK.md) |
 | 配置键、默认值、环境变量和数据位置 | [配置说明](docs/CONFIGURATION.md) |
 | 了解模块职责和后台处理流程 | [架构与文件说明](docs/ARCHITECTURE.md) |
-| 用同步目录自动封存和预备 Git 工作区与原 Codex 线程 | [代码与会话交接](docs/HANDOFF.md) |
+| 用同步目录预备 Git 工作区并往返续接原 Codex 线程 | [代码与会话交接](docs/HANDOFF.md) |
 | 登记开发机、协调后台写入权，在桌面进程中启用 Web | [跨设备项目控制](docs/PROJECT_CONTROL.md) |
 | 使用桌面窗口、托盘及 EXE | [桌面使用说明](docs/DESKTOP.md) |
 | 切换客户端、理解控制与自动推进边界 | [双客户端使用说明](docs/MULTI_CLIENT.md) |

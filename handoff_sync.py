@@ -10,7 +10,7 @@ import zipfile
 from pathlib import Path
 
 from handoff import (DIGEST, GIT_ID, HandoffError, capture, file_hash, git, limited, local_path,
-                     matching_session, names, require, restore, sha)
+                     find_session, names, require, restore, resume_context, session_info, session_progress, sha)
 from service_lock import ServiceLock
 
 
@@ -77,8 +77,31 @@ def chain_conflict(old, offer):
                     or (offer['revision'] == old['revision'] and offer['sha256'] != old['sha256']))
 
 
-def publish(exchange, project, device, key, settings, home, prior):
-    repo = absolute(settings['repo'])
+def publishing_repo(repo, home, project, thread, receiver):
+    if not receiver:
+        return repo
+    candidates = find_session(home, thread)
+    if len(candidates) != 1:
+        return repo  # capture reports the missing or ambiguous native history.
+    _, _, workspace = session_info(limited(candidates[0]))
+    workspace = Path(workspace).resolve()
+    staging = local_path(absolute(receiver['staging']), project)
+    if workspace.is_relative_to(repo) or not workspace.is_relative_to(staging) or workspace == staging:
+        return repo
+    candidate = local_path(staging, workspace.relative_to(staging).parts[0])
+    receipt = resume_context(candidate)
+    require(receipt is not None and receipt.project == project and receipt.thread == thread,
+            '最近的工作目录缺少对应项目的恢复回执')
+    # Require the receipt at this staged repository's root. A nested worktree
+    # or an unrelated checkout cannot become an automatic publication source.
+    require(receipt.private == candidate / '.git' / 'lanxi', '恢复回执目录不一致')
+    return candidate
+
+
+def publish(exchange, project, device, key, settings, home, prior, receiver=None):
+    thread = settings['thread']
+    registered = absolute(settings['repo'])
+    repo = publishing_repo(registered, home, project, thread, receiver)
     separate(exchange, repo)
     root = local_path(exchange, project)
     root.mkdir(exist_ok=True)
@@ -94,7 +117,8 @@ def publish(exchange, project, device, key, settings, home, prior):
         if package_path.is_file():
             previous = current['snapshot']
     base = settings['base']
-    thread = settings['thread']
+    if repo != registered:
+        base = git(registered, 'rev-parse', '--verify', '--end-of-options', base + '^{commit}').decode().strip()
     allowed = settings.get('include', [])
     require(isinstance(allowed, list), 'include 需要文件列表')
     for filename in allowed:
@@ -131,11 +155,11 @@ def inspect_stage(dest, project, offer, home):
     cwd = dest if marker['cwd'] == '.' else local_path(dest, marker['cwd'])
     require(cwd.is_dir(), '预备目录缺少会话工作目录')
     try:
-        matching_session(home, offer['thread'], transcript)
+        progress, _, _ = session_progress(home, offer['thread'], transcript)
     except HandoffError:
         status = 'session_conflict'
     else:
-        status = 'ready'
+        status = 'advance_on_resume' if progress == 'advance' else 'ready'
     return {'status': status, 'cwd': str(cwd), 'lastStaged': {**offer_status(offer), 'cwd': str(cwd)}}
 
 
@@ -209,7 +233,8 @@ def sync_once(runtime, config, home, environment=None):
         if 'publish' in settings:
             prior = old.get('publish', {}).get('lastPublished')
             try:
-                row['publish'] = publish(exchange, project, device, key, settings['publish'], home, prior)
+                row['publish'] = publish(exchange, project, device, key, settings['publish'], home, prior,
+                                         settings.get('receive'))
             except FAILURES:
                 row['publish'] = {'status': 'capture_blocked', 'lastPublished': prior}
         if 'receive' in settings:

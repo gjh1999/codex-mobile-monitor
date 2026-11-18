@@ -8,9 +8,10 @@ import unittest
 import uuid
 import zipfile
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import handoff
+from coordination_client import ControlDenied, terminal
 from handoff_sync import encode, sync_once
 from handoff import capture, git, HandoffError, prepare_resume, restore
 
@@ -176,6 +177,78 @@ class HandoffTests(unittest.TestCase):
         self.assertEqual(local_log.read_bytes(), b'existing divergent history')
         with self.assertRaises(HandoffError):
             prepare_resume(Path(result['cwd']), self.home_b)
+
+    @unittest.skipUnless(os.name == 'nt', 'native rollout locking is verified on Windows')
+    def test_failed_publication_preserves_independent_backup_and_can_retry(self):
+        previous = self.log.read_bytes()
+        next_turn = str(uuid.uuid4())
+        events = [{'type': 'event_msg', 'payload': {'type': event, 'turn_id': next_turn}}
+                  for event in ('task_started', 'task_complete')]
+        transcript = previous + b''.join(json.dumps(event).encode() + b'\n' for event in events)
+        self.log.write_bytes(transcript)
+        self.unpack(self.pack())
+        local = self.home_b / self.log.relative_to(self.home_a)
+        local.parent.mkdir(parents=True)
+        local.write_bytes(previous)
+
+        self.assertEqual(handoff.session_progress(self.home_b, self.thread, transcript)[0], 'advance')
+        with self.assertRaises(HandoffError):
+            prepare_resume(self.dest, self.home_b)
+        with patch('handoff.subprocess.run', return_value=Mock(stdout='codex-cli 0.170.0', returncode=0)):
+            with self.assertRaisesRegex(HandoffError, '版本'):
+                handoff.advance_session(self.home_b, self.thread, local, previous, transcript, 'codex.exe')
+        version = Mock(stdout='codex-cli 0.169.1', returncode=0)
+        with patch('handoff.subprocess.run', return_value=version):
+            with patch.object(Path, 'replace', side_effect=PermissionError('fixture reader holds file')):
+                with self.assertRaises(PermissionError):
+                    handoff.advance_session(self.home_b, self.thread, local, previous, transcript, 'codex.exe')
+        self.assertEqual(local.read_bytes(), previous)
+        backup, = (self.home_b / 'lanxi-handoff-backups' / self.thread).glob('*.jsonl')
+        local.write_bytes(previous + b'changed separately')
+        self.assertEqual(backup.read_bytes(), previous)
+        local.write_bytes(previous)
+        with patch('handoff.subprocess.run', return_value=version):
+            handoff.advance_session(self.home_b, self.thread, local, previous, transcript, 'codex.exe')
+        self.assertEqual(local.read_bytes(), transcript)
+        self.assertEqual(backup.read_bytes(), previous)
+        compressed = local.with_suffix('.jsonl.zst')
+        compressed.write_bytes(b'companion fixture')
+        with self.assertRaisesRegex(HandoffError, '压缩'):
+            handoff.session_progress(self.home_b, self.thread, transcript)
+
+    def test_staged_terminal_uses_registered_thread_to_claim_project(self):
+        self.unpack(self.pack())
+        client = Mock(paths={self.seed: 'alpha'}, threads={})
+        client.project_at.return_value = None
+        client.event.return_value = {'writer': None}
+        with self.assertRaises(ControlDenied) as error:
+            terminal(client, self.dest, ['codex.exe'], resume=True)
+        self.assertIn('登记', error.exception.detail)
+        client.event.assert_not_called()
+
+        client.threads = {self.thread: 'alpha'}
+        receipt = handoff.resume_context(self.dest)
+        with patch.dict(os.environ, {'CODEX_HOME': str(self.home_b)}), \
+                patch('handoff.resume_context', return_value=receipt), \
+                patch('coordination_client.subprocess.Popen', return_value=Mock(poll=lambda: 0, returncode=0)) as spawn:
+            self.assertEqual(terminal(client, self.dest, ['codex.exe'], resume=True), 0)
+        self.assertEqual([call.args[-1] for call in client.event.call_args_list], ['open', 'close'])
+        self.assertEqual(client.event.call_args.args[0], 'alpha')
+        spawn.assert_called_once_with(['codex.exe', 'resume', '--cd', str(self.dest), self.thread], cwd=self.dest)
+        self.assertEqual(len(handoff.find_session(self.home_b, self.thread)), 1)
+
+    def test_publisher_rejects_unregistered_checkout_in_staging_area(self):
+        self.sync_fixture()
+        unrelated = self.stage / 'alpha' / 'unrelated'
+        unrelated.parent.mkdir()
+        git(self.root, 'clone', '--quiet', self.a, unrelated)
+        original = json.dumps(str(self.a)).encode()
+        self.log.write_bytes(self.log.read_bytes().replace(original, json.dumps(str(unrelated)).encode()))
+        self.publisher['projects']['alpha']['receive'] = {
+            'staging': str(self.stage), 'seed': str(self.seed), 'peers': ['laptop'],
+        }
+        self.assertEqual(self.publish_auto()['status'], 'capture_blocked')
+        self.assertFalse((self.exchange_a / 'alpha/office.json').exists())
 
     def test_two_workspaces_and_session_homes(self):
         before = git(self.a, 'status', '--porcelain=v1', '-z')

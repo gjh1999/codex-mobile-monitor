@@ -2,6 +2,14 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-18 跨盘往返续接与原生写入锁
+
+- 基线 `b3b8dbf` 已支持自动发布和接收目录，但返回源端时，早期同线程历史会被判为冲突。本轮验证完整字节前缀的原生 JSONL 快进与重复发布。环境为 Windows、Python 3.14.7、Git 2.56.0.windows.4 和 Codex CLI 0.169.1。输入为虚构的独立仓库、互不共享状态的两个 Codex 目录和本地固定回复服务。
+- 用 `.\.venv\Scripts\python.exe tests/smoke_handoff.py --sync --roundtrip --output build-exe/verification/handoff-roundtrip-01` 执行首轮，7.54 秒通过，第二轮 `handoff-roundtrip-02` 为 7.42 秒。第一次快进被真实 app-server 的活动写入锁拒绝。进程退出后，旧历史被独立备份，再原子替换并续写同一线程。模拟发布失败和本机日志独立变动的单测核对了备份字节，也覆盖压缩同名记录、未验证 CLI 版本和未登记的预备目录。
+- 用相同命令更换输出为 `build-exe/verification/handoff-roundtrip-paired-01` 验证最终配置。真实 CLI 按 C→D→C 完成三个轮次，最终回复由回环服务在看到 B 的回复后返回。B 的暂存和未暂存两版分别回到 A 的新预备目录，A 的原工作文件保留。B 第二次发布复用第一次接收时的配置，从已登记仓库解析 `origin/main`，自动跟随本次已恢复目录。结果在 `result.json`，原历史及续写后历史各保留一份测试副本。本轮与回归并行，未另计端到端墙钟时间。
+- 专项 `python -m unittest -v tests.test_handoff tests.test_coordination` 首轮运行 17 项全部通过，22.461 秒。运行 `python -m unittest discover -s tests -t . -p 'test_*.py' -v` 的两次全量回归分别为 149 项、39.534 秒，以及最后的 150 项、45.620 秒。末次 149 项通过、1 项可选 Stream SDK 跳过，输出为 `build-exe/verification/handoff-roundtrip-paired-regression.txt`。
+- 当前快进支持 Windows 上已验证的未压缩原生格式。物理双机、实际 Syncthing、交互 IDE 以及现用工作树合并仍待验，网络时延和用户额外操作数未测量。 [代码与会话交接](../HANDOFF.md) · [Codex 0.169.1 写入锁源码](https://github.com/openai/codex/blob/rust-v0.169.1/codex-rs/rollout/src/writer_lock.rs)
+
 ## 2026-11-18 桌面任务切换延迟
 
 - 复现于 Windows、Python 3.14.7、PySide6 6.12.0，基线为 `1a3617d`。用三份虚构任务和每份 35 条长消息，给读取增加 140 毫秒固定等待。执行 `tests/bench_task_switch.py --output build-exe/verification/task-switch-final`，使用 `QT_QPA_PLATFORM=offscreen`。基线用相同脚本和独立归档源码，输出于 `task-switch-baseline-final`。

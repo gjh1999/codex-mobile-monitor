@@ -14,7 +14,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog, QInputDialog, QLabel, QMessageBox, QPushButton
 
 import monitor
-from desktop_qt import MainWindow
+from desktop_qt import MainWindow, OceanCover
 from desktop_theme import configure_text, message_html, set_reading_html, ui_font
 
 CODEX = '00000000-0000-4000-8000-000000000001'
@@ -72,6 +72,9 @@ def main():
             window.show()
             window.timer.stop()  # Explicit refreshes make assertions deterministic.
             QTest.qWait(120)
+            assert window.windowTitle() == '澜汐'
+            cover = window.findChild(OceanCover)
+            assert cover is not None and not cover.image.isNull(), 'Ocean cover must load'
             assert not hasattr(window, 'operation_log'), 'History must not be in the visible UI'
             # Reproduce the cold-start sequence, not only a preloaded snapshot:
             # placeholder -> DB ready with old failures -> more old pages arrive.
@@ -121,8 +124,9 @@ def main():
             assert button.animation.duration() == 160
             if app.platformName() == 'windows':
                 assert QFontDatabase.families(), 'Native Windows fonts must be available'
-                brand = next(w for w in window.findChildren(QLabel) if w.text() == '任务小站')
-                assert QRawFont.fromFont(brand.font()).supportsCharacter(ord('任')), 'Chinese glyphs are missing'
+                brand = next(w for w in window.findChildren(QLabel) if w.objectName() == 'brand')
+                assert brand.text() == '澜汐'
+                assert QRawFont.fromFont(brand.font()).supportsCharacter(ord('澜')), 'Chinese glyphs are missing'
             window.message_edit.setPlainText('Codex 草稿')
             window.grab().save(str(args.output / 'codex-desktop.png'))
             QTest.mouseClick(window.client_buttons['claude'], Qt.MouseButton.LeftButton)

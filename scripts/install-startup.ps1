@@ -3,7 +3,8 @@ $ErrorActionPreference='Stop'
 $taskName='CodexMobileMonitor'
 if ($Remove) { Unregister-ScheduledTask -TaskName $taskName -Confirm:$false; exit }
 $projectPath=Split-Path -Parent $PSScriptRoot
-$exePath=Join-Path $projectPath 'release\CodexMobileMonitor-0.7.3.exe'
+$exePath=Join-Path $projectPath 'release\Lanxi.exe'
+if (-not (Test-Path -LiteralPath $exePath)) { $exePath=Join-Path $projectPath 'release\CodexMobileMonitor-0.7.3.exe' }
 if (-not (Test-Path -LiteralPath $exePath)) { $exePath=Join-Path $projectPath 'release\CodexMobileMonitor-0.7.2.exe' }
 if (-not (Test-Path -LiteralPath $exePath)) { $exePath=Join-Path $projectPath 'release\CodexMobileMonitor-0.7.1.exe' }
 if (-not (Test-Path -LiteralPath $exePath)) { $exePath=Join-Path $projectPath 'release\CodexMobileMonitor-0.7-final.exe' }

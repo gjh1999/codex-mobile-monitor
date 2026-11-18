@@ -6,7 +6,7 @@
 
 正式入口为根目录 `desktop_app.py`。源码运行优先选择 Qt，缺少 Qt 时回退到 Tk，再回退到 Win32；Qt 提供完整的 Codex / Claude Code 双客户端界面。Tk / Win32 是功能较少的兼容界面。
 
-Qt 使用蓝白“任务小站”工作台：左侧切换客户端、选择和接入任务；顶部只展示当前任务与操作；中间为可滚动对话和固定输入区；右侧集中展示审批、连接、自动推进和额度。整页无需上下滚动，窗口按屏幕可用大小打开，详情栏可独立滚动。
+澜汐使用蓝色海浪封面和原生 Qt 控件。左侧切换客户端、选择和接入任务。中间为可滚动对话和固定输入区。右侧集中展示审批、连接、自动推进和额度。窗口按屏幕可用大小打开，详情栏可独立滚动。
 
 中文使用系统无衬线字体的明确常规与粗体字重，标题、说明和消息分层显示。按钮区只显示当前可用的自动推进开关；失败通过弹窗提醒。输入区支持 `Ctrl+Enter` 发送、`Enter` 换行。
 
@@ -16,11 +16,11 @@ Qt 使用蓝白“任务小站”工作台：左侧切换客户端、选择和�
 
 ## EXE 与数据
 
-当前桌面包为 `release/CodexMobileMonitor-0.7.3.exe`，应用状态仍保存在 `release/`。EXE 包含 Python 和界面依赖，对应的 Codex / Claude CLI 仍须在本机安装，并使用 CLI 自己的登录和模型配置。
+当前桌面包为 `release/Lanxi.exe`。单文件内含 Python、Qt 和壁纸。双击直接打开原生窗口，运行任务需本机已安装并登录对应的 Codex / Claude CLI。
 
 EXE 的 `local-config.json`、任务数据库、回复记录和草稿位于 EXE 同目录。源码运行则使用项目根目录，二者不会自动同步状态。`local-config.json` 是可选配置；数据清单见 [配置说明](CONFIGURATION.md)。
 
-正式使用前应检查源码与 EXE 使用的数据根目录。构建脚本默认生成独立的版本文件名，保留现有发布程序和配置。完整步骤见 [运行与维护](RUNBOOK.md)。
+正式使用前应检查源码与 EXE 使用的数据根目录。构建预览版时可指定不同文件名。完整步骤见 [运行与维护](RUNBOOK.md)。
 
 ## 任务操作
 
@@ -40,6 +40,6 @@ Claude 的“自动推进”由本监控定时器实现：默认关闭，手动�
 
 ## 登录启动与验收
 
-`scripts/install-startup.ps1` 优先将 `release/CodexMobileMonitor-0.7.3.exe` 注册为当前用户登录入口；不存在时依次兼容查找 `release/CodexMobileMonitor-0.7.2.exe`、`release/CodexMobileMonitor-0.7.1.exe`、`release/CodexMobileMonitor-0.7-final.exe`、`release/CodexMobileMonitor.exe`，再回退到 `.venv/Scripts/pythonw.exe desktop_app.py`。修改脚本不会自动更新系统计划任务，已有任务应核对实际入口，并按运行文档手动更新。
+`scripts/install-startup.ps1` 优先将 `release/Lanxi.exe` 注册为当前用户登录入口，其次兼容旧桌面 EXE，最后使用源码方式启动。已有计划任务可按运行文档更新。
 
 Qt smoke 使用虚构会话核验界面按钮和显示。真实模型收发、工具审批往返、系统通知实际展示、重新登录和故障恢复需要在本机另行验收，不能从打包成功或 smoke 通过推断。

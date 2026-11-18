@@ -7,8 +7,8 @@ import time
 import uuid
 from pathlib import Path
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QSharedMemory, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QIcon
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QRectF, QSharedMemory, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QIcon, QImage, QLinearGradient, QPainter, QPainterPath
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFrame, QGraphicsDropShadowEffect, QGridLayout,
     QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow,
@@ -20,6 +20,7 @@ import monitor
 from desktop_theme import STYLESHEET, configure_text, message_html, set_reading_html, ui_font, warning_html
 
 MUTED = '#61738c'
+WINDOW_TITLE = '澜汐'
 UUID_PATTERN = re.compile(r'\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b')
 
 
@@ -42,6 +43,41 @@ class Card(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName('taskCard')
+
+
+class OceanCover(QWidget):
+    def __init__(self):
+        super().__init__()
+        bundle = Path(getattr(sys, '_MEIPASS', monitor.ROOT))
+        self.image = QImage(str(bundle / 'docs' / 'assets' / 'os-x-mavericks-wave.jpg'))
+        self.setMinimumHeight(92)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(19, 11, 19, 11)
+        layout.setSpacing(4)
+        verse = label('潮平两岸阔，风正一帆悬。', 20, False, '#ffffff')
+        verse.setFont(QFont('SimSun', 20))
+        layout.addWidget(verse)
+        layout.addWidget(label('白日写到的那一行，暮归时仍等着你。', 9, False, '#e4f3ff'))
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHints(QPainter.RenderHint.Antialiasing | QPainter.RenderHint.SmoothPixmapTransform)
+        bounds = QRectF(self.rect())
+        clip = QPainterPath()
+        clip.addRoundedRect(bounds, 14, 14)
+        painter.setClipPath(clip)
+        painter.fillRect(bounds, QColor('#0c3350'))
+        if not self.image.isNull() and not bounds.isEmpty():
+            scale = max(bounds.width() / self.image.width(), bounds.height() / self.image.height())
+            width, height = bounds.width() / scale, bounds.height() / scale
+            source = QRectF((self.image.width() - width) * .55, (self.image.height() - height) * .55, width, height)
+            painter.drawImage(bounds, self.image, source)
+        shade = QLinearGradient(bounds.topLeft(), bounds.topRight())
+        shade.setColorAt(0, QColor(4, 24, 45, 233))
+        shade.setColorAt(.53, QColor(5, 33, 57, 181))
+        shade.setColorAt(1, QColor(12, 65, 118, 24))
+        painter.fillRect(bounds, shade)
+        painter.end()
 
 
 class ActionButton(QPushButton):
@@ -115,7 +151,7 @@ class MainWindow(QMainWindow):
         self._control_signature = None
         self._conversation_signature = None
         self.task_action_buttons = {}
-        self.setWindowTitle('Codex / Claude Code 任务运行监控')
+        self.setWindowTitle(WINDOW_TITLE)
         icon_path = Path(getattr(sys, '_MEIPASS', monitor.ROOT)) / 'app.ico'
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
@@ -148,17 +184,17 @@ class MainWindow(QMainWindow):
         side.setContentsMargins(16, 22, 16, 18)
         side.setSpacing(10)
         brand_row = QHBoxLayout()
-        mark = label('任', 15, True)
+        mark = label('澜', 15, True)
         mark.setObjectName('brandMark')
         mark.setFixedSize(40, 40)
         mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
         brand_row.addWidget(mark)
         brand_copy = QVBoxLayout()
         brand_copy.setSpacing(2)
-        brand = label('任务小站', 16, True)
+        brand = label('澜汐', 16, True)
         brand.setObjectName('brand')
         brand_copy.addWidget(brand)
-        brand_copy.addWidget(label('专注当前，继续向前', 8.5, False, MUTED))
+        brand_copy.addWidget(label('一处开始，处处继续。', 8.5, False, MUTED))
         brand_row.addLayout(brand_copy)
         brand_row.addStretch()
         side.addLayout(brand_row)
@@ -237,6 +273,7 @@ class MainWindow(QMainWindow):
         refresh.clicked.connect(self.refresh)
         heading.addWidget(refresh)
         page.addLayout(heading)
+        page.addWidget(OceanCover())
 
         focus = QFrame()
         focus.setObjectName('focus')
@@ -347,9 +384,9 @@ class MainWindow(QMainWindow):
     def build_tray(self):
         self.tray = QSystemTrayIcon(self)
         self.tray.setIcon(self.windowIcon() if not self.windowIcon().isNull() else self.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon))
-        self.tray.setToolTip('Codex / Claude Code 任务运行监控')
+        self.tray.setToolTip(WINDOW_TITLE)
         menu = QMenu(self)
-        menu.addAction('打开监控窗口', self.show_window)
+        menu.addAction('打开澜汐', self.show_window)
         menu.addSeparator()
         menu.addAction('退出程序', self.quit_app)
         self.tray.setContextMenu(menu)
@@ -722,7 +759,7 @@ class MainWindow(QMainWindow):
 
     def refresh_conversation(self):
         if not self.selected_thread:
-            self.conversation.setPlainText('选择一个任务，最近对话会显示在这里。')
+            self.conversation.setPlainText('未尽的话，可以接着说。选择一个任务查看对话。')
             return
         try:
             data = monitor.conversation_for(self.selected_thread, self.client)
@@ -779,7 +816,7 @@ def main():
     if not shared.create(1):
         import ctypes
         user32 = ctypes.windll.user32
-        for title in ('Codex / Claude Code 任务运行监控', 'Codex 任务运行监控', 'Codex 本机守护'):
+        for title in (WINDOW_TITLE, 'Codex / Claude Code 任务运行监控', 'Codex 任务运行监控', 'Codex 本机守护'):
             hwnd = user32.FindWindowW(None, title)
             if hwnd:
                 user32.ShowWindow(hwnd, 9)

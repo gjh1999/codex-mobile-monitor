@@ -44,7 +44,7 @@ if (-not (Test-Path './local-config.json')) {
 & './.venv/Scripts/python.exe' './desktop_app.py'
 ```
 
-当前打包版直接打开 `release/CodexMobileMonitor-0.7.3.exe`。完整工作台依赖 Qt，关闭窗口会缩到托盘；从托盘选择“退出程序”停止后台。Tk / Win32 是功能较少的回退界面。
+双击 `release/Lanxi.exe` 打开原生桌面工作台。关闭窗口会缩到托盘，从托盘选择“退出程序”停止后台。源码环境缺少 Qt 时可以使用功能较少的 Tk 或 Win32 回退界面。
 
 桌面进程通过内部模块 `monitor.py` 启动两个客户端的后台工作线程。该模块不提供独立启动服务。`desktop_qt_v2.py` 是保留的兼容转发，日常使用 `desktop_app.py`。
 
@@ -57,10 +57,10 @@ if (-not (Test-Path './local-config.json')) {
 & './scripts/build-exe.ps1'
 ```
 
-默认输出为 `release/CodexMobileMonitor-0.7.3.exe`；临时构建数据及新生成的 `.spec` 位于 `build-exe/`。需要保留现有程序时使用新的文件名构建：
+默认输出为 `release/Lanxi.exe`。临时构建数据及 `.spec` 位于 `build-exe/`。可用其他文件名构建预览包。
 
 ```powershell
-& './scripts/build-exe.ps1' -AppName CodexMobileMonitor-0.7.3-preview2
+& './scripts/build-exe.ps1' -AppName Lanxi-preview
 ```
 
 0.7.3 的后台版本标识为 `0.7.3-desktop-only`，修复先隐藏窗口到托盘、再选择退出时 Qt 主循环残留的问题。退出时显式结束应用循环，清理后台与托盘，并在主循环结束后释放单实例锁。保留 0.7.2 的 Codex 继续按钮修复，以及 0.7.1 的暂停误报与额度恢复功能。新版使用独立文件名交付，旧 EXE 未被覆盖。
@@ -79,7 +79,7 @@ Get-ScheduledTask -TaskName CodexMobileMonitor | Select-Object TaskName, State, 
 & './scripts/install-startup.ps1' -Remove
 ```
 
-脚本优先选 `release/CodexMobileMonitor-0.7.3.exe`；不存在时依次兼容查找 `release/CodexMobileMonitor-0.7.2.exe`、`release/CodexMobileMonitor-0.7.1.exe`、`release/CodexMobileMonitor-0.7-final.exe`、`release/CodexMobileMonitor.exe`，最后回退到 `.venv/Scripts/pythonw.exe desktop_app.py`。使用普通用户权限，登录触发，配置失败重启和忽略重复实例。修改脚本不会自动重新注册已有计划任务。
+脚本优先选 `release/Lanxi.exe`，其次查找旧版 CodexMobileMonitor 桌面程序，最后回退到 `.venv/Scripts/pythonw.exe desktop_app.py`。使用普通用户权限，登录触发，配置失败重启和忽略重复实例。已有计划任务需重新运行脚本才会采用新入口。
 
 从旧版本迁移后，检查已有计划任务的实际 `Actions`；入口不是当前桌面程序时，重新执行安装脚本更新它。注册成功不等于重新登录和故障重启已经实测。设置环境变量后应重启对应进程，使其继承新值。
 

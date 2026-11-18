@@ -1,4 +1,4 @@
-param([string]$AppName = 'CodexMobileMonitor-0.7.3')
+param([string]$AppName = 'Lanxi')
 $ErrorActionPreference = 'Stop'
 $project = Split-Path -Parent $PSScriptRoot
 $python = Join-Path $project '.venv\Scripts\python.exe'
@@ -14,6 +14,7 @@ if (-not (Test-Path $python)) { throw "找不到虚拟环境 Python：$python" }
   --icon "$(Join-Path $project 'app.ico')" `
   --add-data "$(Join-Path $project 'windows_notify.ps1');." `
   --add-data "$(Join-Path $project 'app.ico');." `
+  --add-data "$(Join-Path $project 'docs\assets\os-x-mavericks-wave.jpg');docs/assets" `
   --exclude-module tkinter --exclude-module _tkinter `
   --hidden-import dingtalk_commands --hidden-import desktop_win32 --hidden-import desktop_qt `
   --distpath $dist --workpath $work --specpath $specDir `

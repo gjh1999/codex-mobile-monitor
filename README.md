@@ -1,10 +1,10 @@
-﻿# 任务小站 · Codex / Claude Code 桌面监控
+﻿# 澜汐 · Codex / Claude Code 桌面工作台
 
 Windows 原生桌面软件，用于集中查看和控制本机 Codex / Claude Code 任务。蓝白工作台提供任务接入、对话、指令发送、暂停与继续、单次审批、自动推进和 Windows 提醒；两端使用独立后台和状态文件。钉钉通知与 Stream 指令是可选通道。
 
 ## 快速开始
 
-**澜汐 Web 工作台**沿用现有 Python 后端，提供桌面并排视图和 iPhone 单页导航。Web 与 Qt 两种入口每次选一个运行。安装、运行及 iPhone 局域网调试见 [澜汐 Web 工作台](docs/WEB.md)。
+在 Windows 上双击 `release/Lanxi.exe` 打开澜汐原生窗口。关闭窗口后程序留在系统托盘，从托盘选择“退出程序”即可停止后台。独立 Web 工作台的运行与 iPhone 局域网调试见 [Web 工作台说明](docs/WEB.md)。同一目录每次运行一个后台。
 
 在 PowerShell 中从项目根目录启动：
 
@@ -13,9 +13,7 @@ Set-Location 'C:/Users/gjh/PycharmProjects/To_Do_List/codex-mobile-monitor'
 & './.venv/Scripts/python.exe' './desktop_app.py'
 ```
 
-打包版使用 `release/CodexMobileMonitor-0.7.3.exe`。完整 Qt 界面优先显示；源码环境缺少 Qt 时回退到功能较少的 Tk 或 Win32 界面。关闭窗口后程序留在系统托盘；选择“退出程序”才会停止后台。
-
-`desktop_app.py` 是正式启动入口，`monitor.py` 是桌面进程内部的后台模块。正式发布程序名为 `CodexMobileMonitor-0.7.3.exe`，数据继续保存在 `release/`，现有发布目录无需搬迁。首次安装依赖、构建 EXE、登录启动和故障检查见 [运行与维护](docs/RUNBOOK.md)。
+`desktop_app.py` 是原生桌面入口，`monitor.py` 在同一进程管理后台。配置和运行数据保存在 EXE 同目录。构建、登录启动与故障检查见 [运行与维护](docs/RUNBOOK.md)。
 
 ## 文档导航
 

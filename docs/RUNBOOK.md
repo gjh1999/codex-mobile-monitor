@@ -2,11 +2,7 @@
 
 [文档索引](README.md) · [配置说明](CONFIGURATION.md)
 
-以下命令使用 PowerShell，均从项目根目录执行：
-
-```powershell
-Set-Location 'C:/Users/gjh/PycharmProjects/To_Do_List/codex-mobile-monitor'
-```
+以下命令使用 PowerShell，均从 `mobile-monitor` 项目根目录执行。
 
 ## 环境准备
 

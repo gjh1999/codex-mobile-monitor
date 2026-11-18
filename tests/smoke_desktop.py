@@ -205,21 +205,29 @@ def main():
                     cold_window.close()
                     cold_window.deleteLater()
                     app.processEvents()
-            assert window.task_title() == '中文界面测试'
+            assert window.task_title() == Path(project_directory).name
             other = '22222222-2222-4222-8222-222222222222'
             primary = {'id': CODEX, 'title': '中文界面测试', 'status': {'type': 'active'}, 'cwd': project_directory}
-            monitor.update(threads=[primary, {'id': other, 'title': '另一项任务'}])
+            monitor.update(threads=[primary, {'id': other, 'title': '上次会话摘要', 'cwd': 'D:\\Archive\\示例项目\\'}])
             window.refresh()
+            assert window.conversation_heading.text() == Path(project_directory).name
+            assert window.task_choice.item(1).text() == '示例项目\n待执舟'
             window.message_edit.setPlainText('单个任务的草稿')
             second_row = window.task_choice.visualItemRect(window.task_choice.item(1)).center()
             QTest.mouseClick(window.task_choice.viewport(), Qt.MouseButton.LeftButton, pos=second_row)
             assert window.selected_thread == other and codex.calls[-1][:2] == (other, 'focus')
             assert window.message_edit.toPlainText() == ''
+            window.refresh()
+            assert window.task_choice.currentItem().text().endswith('执舟中')
             first_row = window.task_choice.visualItemRect(window.task_choice.item(0)).center()
             QTest.mouseClick(window.task_choice.viewport(), Qt.MouseButton.LeftButton, pos=first_row)
             assert codex.calls[-1][:2] == (CODEX, 'focus')
             assert window.message_edit.toPlainText() == '单个任务的草稿'
             window.message_edit.clear()
+            for operation in codex.data['operations']:
+                if operation['action'] == 'focus':
+                    operation.update(status='succeeded', message='已执舟')
+            window.refresh()
             editor = Path('C:/Program Files/Microsoft VS Code/Code.exe')
             with patch('desktop_qt.vscode_executable', return_value=editor), patch('desktop_qt.subprocess.Popen') as launch:
                 QTest.mouseClick(window.action_buttons['open_project'], Qt.MouseButton.LeftButton)
@@ -438,7 +446,7 @@ def main():
             # timestamp. The current task makes that distinction visible.
             codex.data['tasks'][0]['threadStatus'] = {'type': 'idle'}
             reset_time = int(time.time()) + 1800
-            monitor.update(threads=[{'id': CODEX, 'title': '中文界面测试', 'status': {'type': 'idle'}}],
+            monitor.update(threads=[{'id': CODEX, 'title': '中文界面测试', 'status': {'type': 'idle'}, 'cwd': project_directory}],
                            quotaStatus='official_api', quota={'ordinaryUsageAllowed': False, 'default': {
                                'primary': {'usedPercent': 100, 'resetsAt': reset_time},
                                'secondary': {'usedPercent': 62, 'resetsAt': reset_time + 3600}}, 'models': {}},
@@ -455,7 +463,7 @@ def main():
             codex.data['tasks'][0]['paused'] = True
             window.refresh()
             QTest.qWait(20)
-            assert window.task_choice.currentItem().text().endswith('暂泊')
+            assert window.task_choice.currentItem().text().endswith('已暂泊 · 待续航')
             assert window.message_hint.text() == '已暂泊，点「续航」后即可发送。'
             assert window.action_buttons['resume'].isEnabled()
             codex.data['tasks'][0]['paused'] = False

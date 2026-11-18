@@ -2,6 +2,13 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-18 项目文件夹名称与连接状态
+
+- 以标题对齐版为基线。左侧列表、右侧标题和审批窗口共用项目名，优先保留用户手动设置的显示名，默认取工作目录的末级文件夹。用 Windows 目录末尾带反斜杠的记录验证提取，用无目录的历史会话验证标题回退。用完整路径可区分同名任务。
+- 列表显示「待执舟」「执舟中」「已执舟」与「已暂泊 · 待续航」，对应现有任务操作。Windows 11 x64、Python 3.14.7、PySide6 6.12.0。设置 `QT_QPA_PLATFORM=windows` 后执行 `python tests/smoke_desktop.py --output build-exe/verification/lanxi-folder-names`，通过并核对实机截图。执行 `python -m unittest discover -s tests -t . -p 'test_*.py' -q`，119 项中 118 项通过、1 项跳过，10.926 秒。
+- 用 PyInstaller 6.22.3 执行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-exe.ps1`，更新 `release/Lanxi.exe`，54,088,554 字节，前一版 R4 为 54,086,051 字节。第一次隔离验证因 Windows 环境变量转为普通字典后键名大小写不匹配，在启动前退出。改用 `SYSTEMROOT` 后，`python build-exe/verify-lanxi-launch.py` 在 `build-exe/verification/lanxi-folder-package-2hfndfvz` 内于 1.01 秒发现同路径的原生窗口和 SQLite 控制库。隔离验证未连接真实 CLI。
+- GitHub 仓库改为 `gjh1999/mobile-monitor`。REST API 核对改名前后仓库 ID 均为 1461100100，新地址读取到同一初始分支，已同步本地 `origin` 与全局 Git 备份登记。[GitHub 仓库](https://github.com/gjh1999/mobile-monitor)
+
 ## 2026-11-18 案头与对谈标题对齐
 
 - 以扁平玻璃版为基线。左侧「案头诸事」由 12 pt 粗体改为与右侧当前任务标题共用 13 pt 粗体。两侧使用相同的上边距、标题行高和垂直对齐。「一处开始」由 12 pt 常规改为 12 pt 半粗。

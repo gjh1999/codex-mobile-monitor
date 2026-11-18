@@ -8,7 +8,7 @@ import sys
 import threading
 import time
 import uuid
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QSharedMemory, QSignalBlocker, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QPainter, QPainterPath, QPen, QShortcut
@@ -26,12 +26,17 @@ from desktop_theme import STYLESHEET, configure_text, message_html, set_reading_
 MUTED = '#24495f'
 WINDOW_TITLE = '澜汐'
 TASK_TITLE_ROLE = Qt.ItemDataRole.UserRole + 1
+TASK_DIRECTORY_ROLE = Qt.ItemDataRole.UserRole + 2
 UUID_PATTERN = re.compile(r'\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b')
 
 
 def display_text(value):
     """Identifiers remain in data, not in task captions or operation notices."""
     return UUID_PATTERN.sub('此任务', str(value or ''))
+
+
+def folder_name(directory):
+    return PureWindowsPath(directory).name if isinstance(directory, str) and directory else ''
 
 
 def label(text, size=13, bold=False, color=None):
@@ -540,33 +545,41 @@ class MainWindow(QMainWindow):
         matches = 0
         for row in range(self.task_choice.count()):
             item = self.task_choice.item(row)
-            visible = query in item.data(TASK_TITLE_ROLE).casefold()
+            visible = query in item.data(TASK_TITLE_ROLE).casefold() or query in (item.data(TASK_DIRECTORY_ROLE) or '').casefold()
             item.setHidden(not visible)
             matches += int(visible)
         self.task_empty.setText('案头未见这一件，换个词再寻。' if query else '案头暂空，待写新篇。')
         self.task_empty.setVisible(matches == 0)
 
-    def render_tasks(self, titles, threads, controls):
+    def render_tasks(self, projects, threads, controls):
         thread_status = {task.get('id'): (task.get('status') or {}).get('type') for task in threads}
-        active_controls = {task.get('threadId'): task for task in controls}
+        active_controls = {task.get('threadId'): task for task in controls.get('tasks') or []}
+        attaching = {op.get('threadId') for op in controls.get('operations') or []
+                     if op.get('action') in ('attach', 'focus') and op.get('status') in ('queued', 'running')}
         rows = []
-        for tid, title in titles:
+        for tid, (title, directory) in projects.items():
             control = active_controls.get(tid) or {}
             status = (control.get('threadStatus') or {}).get('type') or thread_status.get(tid)
-            caption = '暂泊' if control.get('paused') else {
-                'active': '行舟中', 'idle': '闲泊', 'systemError': '执行异常',
-            }.get(status, '待接入')
-            rows.append((tid, title, caption))
+            if tid in attaching or control.get('status') == 'connecting':
+                caption = '执舟中'
+            elif not control.get('canControl'):
+                caption = '待执舟 · 只读' if control.get('mode') == 'observe' else '待执舟'
+            elif control.get('paused'):
+                caption = '暂泊中' if self.client == 'claude' and status == 'active' else '已暂泊 · 待续航'
+            else:
+                caption = {'active': '行舟中', 'systemError': '执行异常'}.get(status, '已执舟')
+            rows.append((tid, title, caption, directory))
         if rows != self._task_signature:
             previous_scroll = self.task_choice.verticalScrollBar().value()
             self._task_signature = rows
             with QSignalBlocker(self.task_choice):
                 self.task_choice.clear()
-                for tid, title, caption in rows:
+                for tid, title, caption, directory in rows:
                     item = QListWidgetItem(f'{title}\n{caption}', self.task_choice)
                     item.setData(Qt.ItemDataRole.UserRole, tid)
                     item.setData(TASK_TITLE_ROLE, title)
-                    item.setToolTip(f'{title}\n{caption}')
+                    item.setData(TASK_DIRECTORY_ROLE, directory)
+                    item.setToolTip('\n'.join(filter(None, (title, caption, directory))))
                 self.filter_tasks()
             self.task_choice.verticalScrollBar().setValue(previous_scroll)
         index = next((i for i, row in enumerate(rows) if row[0] == self.selected_thread), 0 if rows else -1)
@@ -581,15 +594,21 @@ class MainWindow(QMainWindow):
         controls = snap.get('controls') or {}
         names = controls.get('names') or {}
         labels = (getattr(monitor, 'history_labels', {}) or {}) if client == 'codex' else {}
-        result = {}
-        for task in snap.get('threads') or []:
-            tid = task.get('id')
-            result[tid] = names.get(tid) or task.get('title') or task.get('name') or labels.get(tid, {}).get('title') or '未命名任务'
-        for task in controls.get('tasks') or []:
-            tid = task.get('threadId')
-            if tid not in result or tid in names:
-                result[tid] = names.get(tid) or task.get('title') or '未命名任务'
-        return [(tid, display_text(title)) for tid, title in result.items() if tid]
+        threads = {task['id']: task for task in snap.get('threads') or [] if task.get('id')}
+        registered = {task['threadId']: task for task in controls.get('tasks') or [] if task.get('threadId')}
+        projects = {}
+        for tid in dict.fromkeys((*threads, *registered)):
+            thread = threads.get(tid, {})
+            control = registered.get(tid, {})
+            history = labels.get(tid, {})
+            directory = next((value for value in (thread.get('cwd'), control.get('cwd'), history.get('cwd'))
+                              if isinstance(value, str) and value), '')
+            title = names.get(tid) or folder_name(directory)
+            if not title:
+                title = display_text(thread.get('title') or thread.get('name') or control.get('title')
+                                     or history.get('title') or '未命名任务')
+            projects[tid] = title, directory
+        return projects
 
     def switch_client(self, client):
         if client == self.client:
@@ -611,27 +630,26 @@ class MainWindow(QMainWindow):
             self.live.style().unpolish(self.live)
             self.live.style().polish(self.live)
         threads = snap.get('threads') or []
-        controls = (snap.get('controls') or {}).get('tasks') or []
-        titles = self.all_tasks(snap)
+        controls = snap.get('controls') or {}
+        projects = self.all_tasks(snap)
         running = {task.get('id') for task in threads if (task.get('status') or {}).get('type') == 'active'}
-        for task in controls:
+        for task in controls.get('tasks') or []:
             tid = task.get('threadId')
             if task.get('paused'):
                 running.discard(tid)
             elif (task.get('threadStatus') or {}).get('type') == 'active':
                 running.add(tid)
-        self.stat_total.setText(str(len(titles)))
+        self.stat_total.setText(str(len(projects)))
         self.stat_running.setText(str(len(running)))
-        self.render_tasks(titles, threads, controls)
+        self.render_tasks(projects, threads, controls)
         if self._rename_target is not None and self._rename_target != (self.client, self.selected_thread):
             self.cancel_rename()
         task_title = self.task_title() or '未尽的话，可以接着说。'
         self.conversation_heading.setText(task_title)
         self.conversation_heading.setToolTip(f'{task_title}\n双击标题或按 F2 改名' if self.selected_thread else '')
         self.conversation_heading.setAccessibleDescription('双击标题或按 F2 改名' if self.selected_thread else '')
-        directory = next((entry['cwd'] for entries, key in ((threads, 'id'), (controls, 'threadId'))
-                          for entry in entries if entry.get(key) == self.selected_thread and entry.get('cwd')), None)
-        self._project_directory = Path(directory) if isinstance(directory, str) and Path(directory).is_absolute() else None
+        _, directory = projects.get(self.selected_thread, ('', ''))
+        self._project_directory = Path(directory) if directory and Path(directory).is_absolute() else None
         self.render_controls(snap)
         self.render_guard_quota(snap)
         self.refresh_conversation()
@@ -711,7 +729,7 @@ class MainWindow(QMainWindow):
             if action == 'message':
                 self.message_edit.clear()
             self.control_message.setText({
-                'pause': '正在请求暂停当前执行…', 'rename': '正在保存任务名称…', 'focus': '正在接入选中的任务…',
+                'pause': '正在暂泊…', 'rename': '正在保存任务名称…', 'focus': '正在执舟…',
             }.get(action, '已提交，等待确认'))
         except Exception as error:
             self._popup('操作失败', str(error))
@@ -777,7 +795,7 @@ class MainWindow(QMainWindow):
             else:
                 message_hint = '已暂泊，点「续航」后即可发送。'
         else:
-            message_hint = '点击案头任务接入后即可发送。'
+            message_hint = '选择案头任务执舟后即可发送。'
         self.message_hint.setText(message_hint)
         self.send_button.setEnabled(allowed)
         self.check_operation_results(controls)
@@ -860,8 +878,8 @@ class MainWindow(QMainWindow):
         body.addLayout(heading)
         client = item.get('client', 'codex')
         snapshot = monitor.client_snapshot(monitor.snapshot(), client)
-        names = dict(self.all_tasks(snapshot, client))
-        task_name = names.get(params.get('threadId'), '未提供')
+        projects = self.all_tasks(snapshot, client)
+        task_name, _ = projects.get(params.get('threadId'), (folder_name(params.get('cwd')) or '未提供', ''))
         info = label(
             f'客户端　{"Claude Code" if client == "claude" else "Codex"}\n'
             f'任务　{task_name}\n执行设备　本机\n工作目录　{params.get("cwd") or "未提供"}',

@@ -12,6 +12,7 @@ from attachments import Attachments
 from task_control import TaskControl
 from history_labels import load_labels
 from coordination_client import device_client
+from ide_activity import close_queue, flush_closes
 def _runtime_root():
  # A frozen app must keep its databases/configuration beside the EXE.  PyInstaller's
  # temporary extraction directory is disposable and cannot be used for state.
@@ -123,7 +124,11 @@ def poll(stop):
        drained.append(rpc)
      client=device_client(cfg)
      rpc=RPC(approvals,journal=journal,coordination=client) if client else RPC(approvals,journal=journal)
-    if getattr(rpc,'project_writes',None) and rpc.reconcile_writes():continue
+    writes=getattr(rpc,'project_writes',None)
+    if writes:
+     try:flush_closes(close_queue(ROOT),writes.client)
+     except (OSError,sqlite3.Error):pass
+     if rpc.reconcile_writes():continue
     controller.tick(rpc)
     controls=controller.snapshot();update(controls=controls,attachments=controls['tasks'])
     managed_jobs,managed_status=managed.sync(rpc,cfg.get('managedTasks',[]))

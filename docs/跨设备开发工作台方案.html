@@ -429,6 +429,7 @@ figcaption { color: var(--ink); font-weight: 650; margin-bottom: 15px; }
 </section>
 
 <section id="delivery"><h2>开发计划与验收</h2><p>按可独立验证的里程碑交付。优先解决真实终端续接和控制权交接，再增加后台计算与夜间自动化。每阶段保存测试环境、输入、实测结果、失败记录与回滚点。</p>
+<p><a href="DELIVERY_STATUS.md">查看七个里程碑的当前进度</a></p>
 <div class="tbl"><table><thead><tr><th>里程碑</th><th>交付物与通过条件</th></tr></thead><tbody>
 <tr><th>一 · 真实 CLI 续接</th><td>双机、不同盘符和两种 IDE。A 留下已暂存、未暂存及新增文件，B 在终端输入 codex 后继续原线程。核对文件与暂存标记、线程 ID、新一轮实际目录；统计额外手动操作数，正常路径目标为 0。</td></tr>
 <tr><th>二 · 统一后台与控制权</th><td>Qt、Web 和托盘共用本机后台，接入 IDE 项目生命周期及带版本的活动事件接口。用三机、多窗口、外部 CLI、IDE 崩溃、断网和重启验证人工优先、自动接回及冲突保全；检查没有重复指令或陈旧审批。</td></tr>

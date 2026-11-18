@@ -2,6 +2,15 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-18 VS Code 与 PyCharm 活动上报
+
+- 目标为将第二里程碑的活动接口接到编辑器，并区分正常退出、断网与意外退出。基线 `b00130d` 可用 CLI 报到和查询协调状态，未提供编辑器插件。环境为 Windows、Python 3.14.7、Node.js 26.13.1、VS Code 1.146.0 与 PyCharm 2026.3（PY-263.7307.206，JBR javac 25.0.4.1）。输入为临时项目、一台虚构设备及回环协调服务。
+- 首轮 Python 专项共 17 项，1 项在临时目录清理时失败。测试自身的 SQLite 查询未关闭连接，Windows 返回文件占用。确认连接关闭后，扩展到 18 项全部通过，2.338 秒。专项覆盖正常关闭后只释放当前窗口、异常输入 EOF 保留占用、心跳不推进项目控制版本、开窗回执丢失且断网时将关闭事件落盘补发。回环实测用两个独立的 Python 上报进程分别模拟 VS Code 和 PyCharm。
+- 用 `node --test tests/test_vscode_activity.cjs` 验证 VS Code 适配器在启动、多根工作区变更和停用时生成相应的 reporter 生命周期。通过 1 项，Node 报告总耗时约 57 ms，输入为模拟 VS Code API。
+- 执行 `.\.venv\Scripts\python.exe scripts/build-ide-adapters.py --pycharm 'C:/Program Files/JetBrains/PyCharm 2026.3' --output build-exe/verification/ide-adapters-02`。两次构建分别用时约 1.27 和 1.45 秒，保留 `ide-adapters-01` 和 `ide-adapters-02`。最后一次 VS Code VSIX 为 2,246 字节，通过 VS Code CLI 安装到该目录下隔离的用户和扩展配置。PyCharm ZIP 为 2,629 字节，使用本机平台库编译并校验 JAR、类文件与清单。编译器提示 `projectOpened` 已弃用，适配器当前限定构建 263。安装输出还有既有 Crashpad 权限提示，CLI 退出码为 0。
+- 全量回归使用 `.\.venv\Scripts\python.exe -m unittest discover -s tests -t . -p 'test_*.py' -v`，143 项中 142 项通过，1 项可选 Stream SDK 跳过，31.014 秒。输出位于 `build-exe/verification/ide-adapters-regression.txt`。
+- 现场待验收包括真实 IDE 窗口生命周期、普通工作区首次打开间隙、真实网络分区和三台物理机。没有测量网络时延或编辑器性能影响。更新后的七阶段口径见 [跨设备方案交付进度](../DELIVERY_STATUS.md)。
+
 ## 2026-11-18 项目会话分组与吉光片羽
 
 - 在 R4 界面基线上增设案头项目树，同一 Git 根目录下的会话入同组，其他项目按实际工作目录归组。组内以现有会话标题及本地 Codex 用户消息命名，手动标题优先。同名项目显示父路径。只计算本机历史命名覆盖，4 段记录为 `codexDesk` 的 Codex 会话均能取得已有标题或首条话题。

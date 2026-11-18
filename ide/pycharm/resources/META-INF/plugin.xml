@@ -1,0 +1,15 @@
+<idea-plugin>
+    <id>lanxi.activity</id>
+    <name>Lanxi Project Activity</name>
+    <version>0.1.0</version>
+    <vendor>Lanxi</vendor>
+    <description>Reports the local project lifecycle to the configured Lanxi coordinator.</description>
+    <idea-version since-build="263" until-build="263.*"/>
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.python</depends>
+    <applicationListeners>
+        <listener topic="com.intellij.openapi.project.ProjectManagerListener"
+                  class="lanxi.activity.LanxiProjectListener"
+                  activeInHeadlessMode="false"/>
+    </applicationListeners>
+</idea-plugin>

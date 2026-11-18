@@ -37,6 +37,20 @@
 
 两端的目录可以不同，项目标识保持一致。原生记录已使用本机路径的线程按目录识别。对照 [代码与会话交接](HANDOFF.md) 恢复的线程应登记 ID，使后台能够用恢复回执中的目标路径重新接入。后台接入前需要本机已有对应原生记录。
 
+## IDE 自动上报
+
+从澜汐源码根目录构建本机安装包，使用新的输出目录。PyCharm 的构建参数指向实际安装路径，本次支持构建 263。
+
+```powershell
+.\.venv\Scripts\python.exe scripts/build-ide-adapters.py `
+  --pycharm 'C:\Program Files\JetBrains\PyCharm 2026.3' `
+  --output build-exe/verification/lanxi-ide-adapters
+```
+
+VS Code 从 `lanxi-activity.vsix` 安装扩展，PyCharm 在插件设置中从磁盘安装 `lanxi-activity-pycharm.zip`。在启动两个 IDE 的环境中设置 `LANXI_INSTALL_DIR` 为包含源码、`.venv` 和 `local-config.json` 的目录，并继承同一台设备的 `LANXI_DEVICE_TOKEN`。全量重启 IDE 使新环境变量生效。
+
+VS Code 在启动完成及工作区根目录变化时更新当前窗口各本地工作区的活动。PyCharm 从项目打开和关闭事件上报。上报器只处理有登记映射的项目。正常关闭会保存关闭事件，断网后由共用同一配置目录的本机后台或下次打开的上报器重发。进程意外终止会保留协调端的人工占用，等操作者核对。 [VS Code 扩展生命周期](https://code.visualstudio.com/api/references/activation-events) · [JetBrains 项目生命周期](https://plugins.jetbrains.com/docs/intellij/project.html)
+
 ## 人工活动与失败恢复
 
 - 加载 `scripts/lanxi-terminal.ps1` 后，在登记目录执行裸命令 `codex`。适配器先上报人工占用，等后台退出原生连接后再启动 CLI。同一项目同时允许一个登记的 CLI 会话和多个 IDE 窗口。CLI 正常退出时会关闭活动记录。
@@ -44,7 +58,7 @@
 - 失联 30 秒的窗口显示为 `stale`，仍保留人工占用。确认窗口及其终端实际退出后，从同一设备以更高序号上报 `close`。后台发送结果未知时保留写入记录。协调机可用 `--database <路径> --inspect <项目>` 查询。确认旧后台及相关执行已经退出后，再使用 `--release-confirmed <项目> <版本> <设备> <线程>` 解除对应记录。
 - 设备上报在中心事务中撤销后续自动写入许可。已取得发送许可的请求由旧连接继续核对，终端会等待后台退出。若同一后台连接还持有其他活动任务，也会一并等待。挂起的审批可拒绝，或由操作者暂停旧轮次。
 
-本版协调范围为澜汐的 Codex 后台和使用适配器的裸 `codex`。编辑器自动上报扩展、未经过适配器的原生调用、Claude Code 与三台物理机联调仍待接入或验证。
+本版协调范围覆盖澜汐的 Codex 后台、使用适配器的裸 `codex` 和两个 IDE 上报器。真实 IDE 宿主、未经过适配器的原生调用、Claude Code 与三台物理机联调仍待接入或验证。
 
 ## 桌面与 Web 共用后台
 
@@ -53,7 +67,8 @@
 ## 复验
 
 ```powershell
-.\.venv\Scripts\python.exe -m unittest -v tests.test_coordination tests.test_web
+.\.venv\Scripts\python.exe -m unittest -v tests.test_ide_activity tests.test_coordination tests.test_web
+node --test tests/test_vscode_activity.cjs
 .\.venv\Scripts\python.exe tests/smoke_handoff.py --output build-exe/verification/coordination-input
 .\.venv\Scripts\python.exe tests/smoke_coordination.py --fixture build-exe/verification/coordination-input --output build-exe/verification/coordination-local
 ```

@@ -1,0 +1,11 @@
+{
+  "name": "lanxi-activity",
+  "displayName": "澜汐项目活动",
+  "publisher": "lanxi-local",
+  "version": "0.1.0",
+  "engines": { "vscode": "^1.101.0" },
+  "extensionKind": ["ui"],
+  "main": "./extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "capabilities": { "untrustedWorkspaces": { "supported": true } }
+}

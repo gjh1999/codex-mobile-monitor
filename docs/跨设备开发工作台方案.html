@@ -295,10 +295,11 @@ figcaption { color: var(--ink); font-weight: 650; margin-bottom: 15px; }
   <p>按钮、状态、权限和错误提示直接说明动作与结果。文件尚未同步时，可写「家里台式机暂未连接，改动已保存在本机。」审批按钮用「允许一次」和「拒绝」，并展示命令、目录与设备。</p>
   <h3>视觉与动效</h3>
   <ul>
-    <li><strong>界面视觉参考 <code>implement-apple-web-ui</code>。</strong> 使用系统字体、清楚的文字层级、连续的留白、柔和的海蓝过渡和浅深两套语义色。半透明材质主要用于导航与工具栏，正文与操作状态保持清晰对比。</li>
-    <li><strong>交互动效参考 Emil Kowalski 的 <code>apple-design</code>。</strong> 按下控件立即反馈，支持手势的面板跟随手指，展开或收起途中可以反向操作。动效用于说明位置、状态或操作结果，并响应系统的减弱动态效果设置。</li>
+    <li><strong>视觉和动效统一参考 Emil Kowalski 的 <code>apple-design</code>。</strong> 视觉遵循克制、层级清楚、空间关系一致的原则。用系统字体和留白组织内容，以深浅海蓝和细微的材质变化区分层次。半透明材质主要用于导航与工具栏，正文和操作状态保持清晰对比。</li>
+    <li><strong>动作延续界面的空间关系。</strong> 按下控件立即反馈，支持手势的面板跟随手指，展开或收起途中可以反向操作。动效用于说明位置、状态或操作结果，并响应系统的减弱动态效果设置。</li>
+    <li><strong><code>implement-apple-web-ui</code> 补充网页实现细节。</strong> 用于响应式布局、语义颜色、触控区域、键盘焦点和 iPhone 安全区的实现与检查。</li>
   </ul>
-  <p class="refs">设计依据来自《澜汐｜前端设计主导思想》。封面采用 Apple OS X Mavericks 海浪壁纸。 <a href="https://512pixels.net/projects/default-mac-wallpapers-in-5k/#109-mavericks">壁纸档案</a><a href="https://github.com/0xKoru/apple-hig-codex-skills/blob/main/skills/implement-apple-web-ui/SKILL.md">Apple Web UI 实现参考</a><a href="https://github.com/emilkowalski/skills/blob/main/skills/apple-design/SKILL.md">Emil Kowalski 的 Apple Design</a></p>
+  <p class="refs">设计依据来自《澜汐｜前端设计主导思想》。封面采用 Apple OS X Mavericks 海浪壁纸。 <a href="https://github.com/emilkowalski/skills/blob/main/skills/apple-design/SKILL.md">Emil Kowalski 的 Apple Design</a><a href="https://github.com/0xKoru/apple-hig-codex-skills/blob/main/skills/implement-apple-web-ui/SKILL.md">Apple Web UI 实现参考</a><a href="https://512pixels.net/projects/default-mac-wallpapers-in-5k/#109-mavericks">壁纸档案</a></p>
 </section>
 
 <section id="baseline"><h2>现有基础</h2><p>现有项目已经能在 Windows 上查看和控制本机任务。以下模块是本次开发的起点。</p>
@@ -411,7 +412,7 @@ figcaption { color: var(--ink); font-weight: 650; margin-bottom: 15px; }
 <tr><th>四 · 硬件自动调度</th><td>公司机发起 GPU 作业，核对家庭设备执行、终端结果与文件校验。笔记本测试本地资源充足、显存不足、家里忙碌和中途掉线。比较本地运行与远程端到端耗时，检查同一作业只交付一次。</td></tr>
 <tr><th>五 · 分类、额度与夜间</th><td>验证三类任务的结束条件、额度去重、超额暂停和到点重查。夜间沙箱内构建通过，越界操作留待审批，用户半夜打开 IDE 后自动审批立即停发，次日可核对全部动作。</td></tr>
 <tr><th>六 · 日报与项目记忆</th><td>用公司台式机、私人笔记本和家里台式机产生至少两个项目的记录，验证 token 去重、人工与后台时长、补传更新、iPhone 查看及项目间档案隔离。逐条核对日报结论和原始会话或实验记录。</td></tr>
-<tr><th>七 · 存储与发布</th><td>验证容量阈值、冷迁移、双副本和唯一来源离线。统一安装器复用已有工具，支持客户端或家庭中心角色、登录启动、升级与回滚。用原有 Python 回归、Qt smoke 和 Web 测试覆盖已有功能。按前端设计章节检查首页、日报、审批和异常提示的用词，并在桌面和 iPhone 验证交互反馈及减弱动态效果。</td></tr>
+<tr><th>七 · 存储与发布</th><td>验证容量阈值、冷迁移、双副本和唯一来源离线。统一安装器复用已有工具，支持客户端或家庭中心角色、登录启动、升级与回滚。用原有 Python 回归、Qt smoke 和 Web 测试覆盖已有功能。按前端设计章节检查首页、日报、审批和异常提示的用词，并在桌面和 iPhone 验证视觉层级、交互反馈及减弱动态效果。</td></tr>
 </tbody></table></div><p><strong>首轮联调要记录的现场数据</strong>包括三机实际 CLI 和终端版本、家庭 GPU 与网络带宽、典型大文件体积、公司机可同步项目、VPN 路由、常用 GPU 命令和睡眠时段。用这些数据确定兼容矩阵、性能预算及排期。</p>
 <p class="refs">需求来源　《跨设备代码与 Codex 记忆同步软件需求文档》及会话补充的设备、IDE、CLI、iPhone、VPN、GPU、人工优先、夜间沙箱、每日工作报告、项目归档与扩展接口要求。</p></section>
       <p class="end"><a href="#top">返回文档顶部 ↑</a></p>

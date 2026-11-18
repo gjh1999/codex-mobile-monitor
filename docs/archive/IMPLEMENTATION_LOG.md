@@ -2,6 +2,12 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-18 案头与对谈标题对齐
+
+- 以扁平玻璃版为基线。左侧「案头诸事」由 12 pt 粗体改为与右侧当前任务标题共用 13 pt 粗体。两侧使用相同的上边距、标题行高和垂直对齐。「一处开始」由 12 pt 常规改为 12 pt 半粗。
+- 第一次 Windows 验收发现，左侧在右边输入框继承样式前读取了行高。改为两栏完成装配后取值。离屏复测 1020×640、1180×760、1460×1076，标题行同为 y=256、行高均为 34 个逻辑像素。设置 `QT_QPA_PLATFORM=windows` 后运行 `python tests/smoke_desktop.py --output build-exe/verification/lanxi-title-alignment-final`，验证相同字体、相同位置并检查实机截图。
+- Windows 11 x64、Python 3.14.7、PySide6 6.12.0。执行 `python -m unittest discover -s tests -t . -p 'test_*.py' -q`，119 项中 118 项通过、1 项跳过，12.055 秒。用 PyInstaller 6.22.3 运行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-exe.ps1 -AppName Lanxi-Glass-R4`，并列包为 `release/Lanxi-Glass-R4.exe`，54,086,051 字节，前一版为 54,086,517 字节。已核对归档中的桌面模块、Windows 插件和三张壁纸，验收期间上一版仍在运行。
+
 ## 2026-11-18 扁平玻璃滑块与字号调整
 
 - 以顶部玻璃复核版为基线。「一处开始」小字从 10 pt 提至 12 pt，计数标签从 9 pt 粗体改为 8.5 pt 常规，数字从 17 pt 粗体改为 15 pt 常规。逐帧绘制圆角按压与键盘焦点，移除原生按钮样式画出的方框。胶囊材质取消阴影和高光渐变，滑块以 146/255 的浅色覆盖同一张柔化壁纸。

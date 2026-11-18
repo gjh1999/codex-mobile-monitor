@@ -9,7 +9,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, QTimer, Qt
-from PySide6.QtGui import QEnterEvent, QFontDatabase, QImage, QMouseEvent, QRawFont, QTextCursor
+from PySide6.QtGui import QEnterEvent, QFont, QFontDatabase, QImage, QMouseEvent, QRawFont, QTextCursor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog, QFrame, QLabel, QMessageBox, QPushButton
 
@@ -131,7 +131,13 @@ def main():
             assert len(ocean.wallpapers) == 3 and ocean.rotation.interval() == 30 * 60_000
             assert abs(window.client_switch.geometry().center().x() - ocean.rect().center().x()) <= 1
             assert window.findChild(QLabel, 'heroVerse').font().bold()
-            assert window.findChild(QLabel, 'heroIntro').font().pointSizeF() == 12
+            intro_font = window.findChild(QLabel, 'heroIntro').font()
+            assert intro_font.pointSizeF() == 12 and intro_font.weight() == QFont.Weight.DemiBold
+            task_heading = window.findChild(QLabel, 'taskPanelTitle')
+            current_heading = window.conversation_heading
+            assert task_heading.font() == current_heading.font()
+            assert task_heading.mapTo(ocean, task_heading.rect().center()).y() == (
+                current_heading.mapTo(ocean, current_heading.rect().center()).y())
             columns = window.summary.findChildren(QFrame, 'statColumn')
             assert len(columns) == 3 and len({column.width() for column in columns}) == 1
             for column in columns:

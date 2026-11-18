@@ -127,12 +127,14 @@ QLabel { color:#24344d; background:transparent; }
 QLabel#status[connected="true"] { color:#154e41; }
 QLineEdit { background:rgba(234, 249, 255, 188); color:#15364d; border:1px solid rgba(234, 250, 255, 182); border-radius:8px; padding:5px 9px; min-height:22px; }
 QLineEdit:focus { border-color:#327fb2; }
-QTreeWidget#taskList { background:transparent; border:0; color:#16384d; outline:0; show-decoration-selected:0; }
+QLineEdit#notebookTitle { background:transparent; border:1px solid transparent; padding:5px 0; }
+QLineEdit#notebookTitle:focus { background:rgba(234, 249, 255, 76); border-color:rgba(234, 250, 255, 182); }
+QTreeWidget#taskList, QListWidget#notebookList { background:transparent; border:0; color:#16384d; outline:0; show-decoration-selected:0; }
 QTreeWidget#taskList::branch:selected { background:transparent; }
-QTreeWidget#taskList::item { border:1px solid transparent; border-radius:9px; padding:6px 7px; }
-QTreeWidget#taskList::item:hover { background:rgba(226, 246, 255, 100); }
-QTreeWidget#taskList::item:selected { background:rgba(212, 238, 255, 165); border-color:rgba(219, 247, 255, 150); color:#113951; }
-QTreeWidget#taskList::item:focus { border-color:#327fb2; }
+QTreeWidget#taskList::item, QListWidget#notebookList::item { border:1px solid transparent; border-radius:9px; padding:6px 7px; }
+QTreeWidget#taskList::item:hover, QListWidget#notebookList::item:hover { background:rgba(226, 246, 255, 100); }
+QTreeWidget#taskList::item:selected, QListWidget#notebookList::item:selected { background:rgba(212, 238, 255, 165); border-color:rgba(219, 247, 255, 150); color:#113951; }
+QTreeWidget#taskList::item:focus, QListWidget#notebookList::item:focus { border-color:#327fb2; }
 QTextEdit, QTextBrowser { color:#24344d; background:transparent; border:0; padding:0; selection-background-color:#d9e6fc; selection-color:#1c3151; }
 QTextEdit#composer { background:transparent; border:0; }
 QTextBrowser#conversation, QTextBrowser#infoText { background:transparent; border:0; }
@@ -143,19 +145,14 @@ QPushButton:focus { border-color:#7399db; }
 QPushButton#hoverAction { background:rgba(225, 247, 255, 154); color:#153b53; border-color:rgba(226, 245, 255, 138); padding:5px 8px; }
 QPushButton#hoverAction:hover, QPushButton#hoverAction:focus { background:#d4efff; border-color:#70a8cc; }
 QPushButton#hoverAction:pressed { background:#acd8f1; }
+QWidget#notebook QPushButton#hoverAction:checked { background:rgba(212, 238, 255, 165); border-color:rgba(219, 247, 255, 220); color:#113951; }
+QWidget#notebook QPushButton#hoverAction:checked:focus { border-color:#70a8cc; }
 QPushButton#send, QPushButton#approvalAllow { background:#096cb9; color:white; border-color:#096cb9; }
 QPushButton#send { padding:0; border-radius:17px; font-size:18px; }
 QPushButton#send:hover, QPushButton#approvalAllow:hover { background:#055eaa; border-color:#055eaa; }
 QPushButton#send:pressed, QPushButton#approvalAllow:pressed { background:#044e90; }
 QPushButton:disabled, QPushButton#send:disabled, QPushButton#hoverAction:disabled, QPushButton#approvalAllow:disabled { background:rgba(234, 246, 252, 97); color:#507087; border-color:rgba(225, 245, 255, 80); }
 QDialog#approvalDialog { background:#d6eaf5; }
-QWidget#notebook QTabWidget::pane { background:rgba(234, 246, 252, 141); border:1px solid #c8e0ec; border-radius:10px; }
-QWidget#notebook QTabBar::tab { color:#254359; background:#d9eaf4; border-radius:8px; padding:6px 17px; margin:0 4px 3px 0; }
-QWidget#notebook QTabBar::tab:selected { background:#c3e0f1; color:#123752; }
-QWidget#notebook QComboBox { background:#eff9ff; color:#15364d; border:1px solid #c4dce9; border-radius:8px; padding:5px 8px; }
-QWidget#notebook QListWidget, QWidget#notebook QPlainTextEdit { background:rgba(245, 251, 255, 211); color:#183a50; border:1px solid #d0e3ef; border-radius:8px; padding:7px; }
-QWidget#notebook QListWidget::item { border-radius:6px; padding:5px 7px; }
-QWidget#notebook QListWidget::item:selected { background:#d7ecf9; color:#153c53; }
 QTextBrowser#approvalDetails { background:#e6f2fb; border:1px solid #bfd9ea; border-radius:8px; }
 QScrollArea { border:0; background:transparent; }
 QScrollBar:vertical { background:transparent; width:7px; margin:3px 0; }

@@ -105,6 +105,8 @@ def check_notebook(window, output):
         previous_client = window.client
         previous_task = window.selected_thread
         original_draft = window.message_edit.toPlainText()
+        panels = (window.task_panel, window.conversation_card)
+        positions = [(panel.mapTo(window, QPoint()), panel.size()) for panel in panels]
         QTest.mouseClick(switch.buttons['notebook'], Qt.MouseButton.LeftButton)
         workspace = window.notebook
         assert workspace is not None and workspace.isVisible()
@@ -112,6 +114,9 @@ def check_notebook(window, output):
         QTest.qWait(420)
         assert switch.position == switch.offsets['notebook']
         note = workspace.notes
+        for panel, (position, size) in zip((note.list_panel, note.editor_panel), positions):
+            assert isinstance(panel, FrostedPanel)
+            assert (panel.mapTo(window, QPoint()), panel.size()) == (position, size)
         note.title.setText('海边的随记')
         note.body.setPlainText('记录日常灵感，晚上再回看。')
         QTest.qWait(520)
@@ -120,24 +125,29 @@ def check_notebook(window, output):
         window.grab().save(str(output / 'notebook-desktop.png'))
         QTest.mouseClick(note.file_button, Qt.MouseButton.LeftButton)
         assert not store.entries('note', False)
-        note.view.setCurrentIndex(1)
+        QTest.mouseClick(note.view_buttons[True], Qt.MouseButton.LeftButton)
         note.list.setCurrentRow(0)
         assert note.body.toPlainText() == '记录日常灵感，晚上再回看。'
         QTest.mouseClick(note.file_button, Qt.MouseButton.LeftButton)
         assert not store.entries('note', True) and store.entries('note', False)
 
-        workspace.tabs.setCurrentWidget(workspace.todos)
+        QTest.mouseClick(note.category_buttons['todo'], Qt.MouseButton.LeftButton)
         todo = workspace.todos
+        assert todo.isVisible() and todo.category_buttons['todo'].isChecked()
         todo.title.setText('整理项目待办')
+        todo.body.setPlainText('归拢同一个项目的对话，留一份下次打开时的进度。')
         QTest.mouseClick(todo.save_button, Qt.MouseButton.LeftButton)
+        window.grab().save(str(output / 'todo-desktop.png'))
         QTest.mouseClick(todo.file_button, Qt.MouseButton.LeftButton)
         assert not store.entries('todo', False) and store.entries('todo', True)
-        todo.view.setCurrentIndex(1)
+        QTest.mouseClick(todo.view_buttons[True], Qt.MouseButton.LeftButton)
         todo.list.setCurrentRow(0)
         assert todo.title.text() == '整理项目待办'
         QTest.mouseClick(todo.file_button, Qt.MouseButton.LeftButton)
         todo.new_entry()
         todo.title.setText('关闭窗口时保存')
+        QTest.mouseClick(todo.category_buttons['note'], Qt.MouseButton.LeftButton)
+        assert note.isVisible() and note.category_buttons['note'].isChecked()
         QTest.mouseClick(switch.buttons[previous_client], Qt.MouseButton.LeftButton)
         assert not workspace.isVisible() and window.task_workspace.isVisible()
         assert window.selected_thread == previous_task and window.message_edit.toPlainText() == original_draft

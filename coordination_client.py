@@ -98,6 +98,12 @@ class ControlClient:
             mapped = root if record['cwd'] == '.' else local_path(root, record['cwd'])
             if record['version'] != 1 or not mapped.is_dir():
                 raise ValueError('恢复目录无效')
+            if record.get('lfs'):
+                from lfs_assets import inventory, require_cached, verify_worktree
+
+                lfs = inventory(record)
+                require_cached(root, lfs)
+                verify_worktree(root, lfs)
             return str(mapped)
         except (OSError, ValueError, KeyError, TypeError) as error:
             raise ControlDenied(detail='无法核对已恢复会话的工作目录') from error

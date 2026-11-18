@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import stat
+import tempfile
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -31,15 +32,12 @@ class TransferError(ValueError):
         self.status = status
 
 
-def pointers(repo, ref, paths):
+def pointers(repo, ref, paths, *, optional=False):
     paths = tuple(dict.fromkeys(paths))
     require(paths, '至少选择一个 Git LFS 文件')
     for name in paths:
         local_path(repo, name)
     commit = git(repo, 'rev-parse', '--verify', '--end-of-options', ref + '^{commit}', isolated=True).decode().strip()
-    attributes = names(git(repo, 'check-attr', '--source=' + commit, '-z', '--stdin', 'filter',
-                           data=''.join(name + '\0' for name in paths).encode(), isolated=True))
-    require(attributes[2::3] == ['lfs'] * len(paths), '指定提交未对所选路径启用 Git LFS')
     tree = {}
     # Limit pathspecs per invocation to stay below the Windows command-line limit.
     for offset in range(0, len(paths), BATCH_SIZE):
@@ -49,7 +47,12 @@ def pointers(repo, ref, paths):
             mode, kind, blob = info.split()
             require(kind == 'blob' and mode in ('100644', '100755'), f'LFS 资源必须是普通文件：{name}')
             tree[name] = blob
-    require(set(paths) == tree.keys(), '指定提交缺少要求的 LFS 路径')
+    require(optional or set(paths) == tree.keys(), '指定提交缺少要求的 LFS 路径')
+    if not tree:
+        return commit, {}
+    attributes = names(git(repo, 'check-attr', '--source=' + commit, '-z', '--stdin', 'filter',
+                           data=''.join(name + '\0' for name in tree).encode(), isolated=True))
+    require(attributes[2::3] == ['lfs'] * len(tree), '指定提交未对所选路径启用 Git LFS')
 
     blobs = list(dict.fromkeys(tree.values()))
     request = ''.join(blob + '\n' for blob in blobs).encode()
@@ -71,7 +74,34 @@ def pointers(repo, ref, paths):
         require(match, '需要标准 Git LFS v1 指针')
         oid, size = match.groups()
         decoded[blob] = (oid.decode(), int(size))
-    return commit, {name: decoded[tree[name]] for name in paths}
+    return commit, {name: decoded[tree[name]] for name in paths if name in tree}
+
+
+def inventory(record):
+    values = record.get('lfs', {})
+    require(isinstance(values, dict), 'LFS 清单格式无效')
+    selected = {}
+    for name, value in values.items():
+        require(isinstance(name, str) and isinstance(value, (list, tuple)) and len(value) == 2,
+                'LFS 清单条目无效')
+        oid, size = value
+        require(isinstance(oid, str) and re.fullmatch('[0-9a-f]{64}', oid) and type(size) is int and 0 <= size < 2**63,
+                'LFS 对象或大小无效')
+        selected[name] = oid, size
+    return selected
+
+
+def verify_worktree(repo, selected, memo=None):
+    for name, (oid, size) in selected.items():
+        path = local_path(repo, name)
+        actual = file_size(path)
+        if actual is not None and actual < 1024:
+            with path.open('rb') as stream:
+                raw = stream.read(1024)
+            pointer = POINTER.fullmatch(raw)
+            if pointer and (pointer[1].decode(), int(pointer[2])) == (oid, size):
+                continue
+        require(matches(path, oid, size, memo), f'LFS 文件有未提交修改或缺失：{name}')
 
 
 def ordinary(path):
@@ -102,11 +132,67 @@ def file_size(path):
     return info.st_size if info else None
 
 
-def matches(path, oid, size):
-    if file_size(path) != size:
+def matches(path, oid, size, memo=None):
+    info = ordinary(path)
+    if not info or not stat.S_ISREG(info.st_mode) or info.st_size != size:
         return False
+    def stamp(stat_result):
+        return (stat_result.st_dev, stat_result.st_ino, stat_result.st_size, stat_result.st_mtime_ns,
+                stat_result.st_ctime_ns)
+
+    before = stamp(info)
+    identity = before[:2]
+    if memo is not None and info.st_ino and memo.get(identity) == (before, oid):
+        return True
     with path.open('rb') as stream:
-        return file_hash(stream) == oid
+        digest = file_hash(stream)
+        end = os.fstat(stream.fileno())
+    after = ordinary(path)
+    # On Windows lstat and fstat can expose different creation/change times.
+    valid = digest == oid and after is not None and stamp(after) == before and stamp(end)[:4] == before[:4]
+    if valid and memo is not None and info.st_ino:
+        if len(memo) >= 2048:
+            memo.clear()
+        memo[identity] = before, oid
+    return valid
+
+
+def cache_object(repo, oid, create=False):
+    common = repo / '.git'
+    require(ordinary(common) and common.is_dir(), '仅支持独立 Git 仓库的本机 LFS 缓存')
+    return cache_path(common, f'lfs/objects/{oid[:2]}/{oid[2:4]}', create) / oid
+
+
+def require_cached(repo, selected):
+    require(not git(repo, 'config', '--get', 'lfs.storage', optional=True), '交接使用默认 Git LFS 缓存路径')
+    for oid, size in set(selected.values()):
+        require((size == 0 and oid == EMPTY_OID) or matches(cache_object(repo, oid), oid, size),
+                '必需的 LFS 对象缺失或校验失败')
+
+
+def copy_cache(source, target, selected, memo=None):
+    require(not git(target, 'config', '--get', 'lfs.storage', optional=True), '交接使用默认 Git LFS 缓存路径')
+    for oid, size in set(selected.values()):
+        if size == 0 and oid == EMPTY_OID:
+            continue
+        original = cache_object(source, oid)
+        require(matches(original, oid, size, memo), '必需的 LFS 对象缺失或校验失败')
+        dest = cache_object(target, oid, create=True)
+        if file_size(dest) is None:
+            try:
+                os.link(original, dest)
+                continue
+            except FileExistsError:
+                pass
+            except OSError:
+                # Different volumes cannot share hard links. Publish a verified copy.
+                with tempfile.TemporaryDirectory(dir=dest.parent) as directory:
+                    part = Path(directory) / oid
+                    shutil.copyfile(original, part)
+                    require(matches(part, oid, size), 'LFS 对象在复制时发生变化')
+                    publish(part, dest, oid, size)
+                continue
+        require(matches(dest, oid, size, memo), '现有 LFS 缓存校验失败')
 
 
 class HTTPSource:
@@ -266,6 +352,12 @@ def prefetch(repo, ref, paths, source=None):
     require(common == repo / '.git' and ordinary(common) and common.is_dir(), '仅支持独立 Git 仓库的本机 LFS 缓存')
     require(not git(repo, 'config', '--get', 'lfs.storage', optional=True), '此命令使用默认 Git LFS 缓存路径')
     commit, selected = pointers(repo, ref, paths)
+    return dict(commit=commit, **prefetch_inventory(repo, selected, source))
+
+
+def prefetch_inventory(repo, selected, source=None, memo=None):
+    common = repo / '.git'
+    require(ordinary(common) and common.is_dir(), '仅支持独立 Git 仓库的本机 LFS 缓存')
     objects = {}
     for oid, size in selected.values():
         require(objects.setdefault(oid, size) == size, 'LFS 指针的对象大小不一致')
@@ -279,7 +371,7 @@ def prefetch(repo, ref, paths, source=None):
             if size == 0 and oid == EMPTY_OID:
                 reports[oid] = {'status': 'ready'}
             elif cached is not None:
-                reports[oid] = {'status': 'ready' if matches(location, oid, size) else 'corrupt_cache'}
+                reports[oid] = {'status': 'ready' if matches(location, oid, size, memo) else 'corrupt_cache'}
             else:
                 reports[oid] = {'status': 'missing_cache'}
                 missing[oid] = size
@@ -325,7 +417,7 @@ def prefetch(repo, ref, paths, source=None):
             finally:
                 lock.close()
     files = {name: dict(oid=oid, size=size, **reports[oid]) for name, (oid, size) in selected.items()}
-    return {'version': 1, 'commit': commit, 'status': 'ready' if all(row['status'] == 'ready' for row in files.values())
+    return {'version': 1, 'status': 'ready' if all(row['status'] == 'ready' for row in files.values())
             else 'incomplete', 'files': files}
 
 

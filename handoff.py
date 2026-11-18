@@ -34,7 +34,7 @@ DIFF = ['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--ignore-subm
 INDEX_DIFF = [*DIFF, '--cached', '--binary', '--full-index', '--no-color', '--src-prefix=a/', '--dst-prefix=b/']
 
 
-def git_process(repo, *args, data=None, isolated=False, index_file=None, stream=None):
+def git_process(repo, *args, data=None, isolated=False, index_file=None, stream=None, literal=True):
     overrides = {'GIT_DIR', 'GIT_COMMON_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY',
                  'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_NAMESPACE', 'GIT_QUARANTINE_PATH',
                  'GIT_GLOB_PATHSPECS', 'GIT_NOGLOB_PATHSPECS', 'GIT_ICASE_PATHSPECS'}
@@ -45,15 +45,15 @@ def git_process(repo, *args, data=None, isolated=False, index_file=None, stream=
                    GIT_NO_LAZY_FETCH='1', GIT_NO_REPLACE_OBJECTS='1')
     if index_file:
         env['GIT_INDEX_FILE'] = str(index_file)
-    env.update(GIT_LITERAL_PATHSPECS='1', GIT_TERMINAL_PROMPT='0', GIT_OPTIONAL_LOCKS='0',
+    env.update(GIT_LITERAL_PATHSPECS='1' if literal else '0', GIT_TERMINAL_PROMPT='0', GIT_OPTIONAL_LOCKS='0',
                GIT_LFS_SKIP_SMUDGE='1', GIT_NO_LAZY_FETCH='1')
     return subprocess.run(['git', '-c', 'core.hooksPath=' + os.devnull,
                            '-c', 'core.fsmonitor=false', '-C', str(repo), *map(str, args)],
                           input=data, stdin=stream, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
 
 
-def git(repo, *args, data=None, optional=False, isolated=False, index_file=None, stream=None):
-    proc = git_process(repo, *args, data=data, isolated=isolated, index_file=index_file, stream=stream)
+def git(repo, *args, data=None, optional=False, isolated=False, index_file=None, stream=None, literal=True):
+    proc = git_process(repo, *args, data=data, isolated=isolated, index_file=index_file, stream=stream, literal=literal)
     if proc.returncode and not optional:
         raise HandoffError(f'Git {args[0]} 失败：{proc.stderr.decode("utf-8", "replace").strip()}')
     return None if proc.returncode else proc.stdout
@@ -153,7 +153,28 @@ def check_object_sizes(repo, ids):
     require(all(int(line.split()[1]) <= MAX_FILE for line in result.splitlines()), 'Git 变更包含超出上限的对象')
 
 
-def checked_index(repo):
+def check_filters(attrs, lfs):
+    filters = dict(zip(attrs[::3], attrs[2::3]))
+    require(all(value in ('unset', 'unspecified') or (value == 'lfs' and name in lfs)
+                for name, value in filters.items()) and all(filters.get(path) == 'lfs' for path in lfs),
+            '项目依赖未登记的 Git 内容过滤器')
+
+
+def excluded_paths(lfs):
+    return ['--', *(':(exclude,literal)' + name for name in lfs)] if lfs else []
+
+
+def tracked_lfs(repo, head, paths, memo=None, *, optional=False):
+    if not paths:
+        return {}
+    from lfs_assets import pointers, verify_worktree
+
+    _, inventory = pointers(repo, head, paths, optional=optional)
+    verify_worktree(repo, inventory, memo)
+    return inventory
+
+
+def checked_index(repo, lfs=()):
     head = git(repo, 'rev-parse', '--verify', 'HEAD').decode().strip()
     ref = git(repo, 'symbolic-ref', '-q', 'HEAD', optional=True)
     branch = ref.decode().strip().removeprefix('refs/heads/') if ref else None
@@ -167,13 +188,13 @@ def checked_index(repo):
             '子模块、稀疏检出和特殊索引标志尚不支持')
     paths = ''.join(entry.split('\t', 1)[1] + '\0' for entry in entries).encode('utf-8')
     attrs = names(git(repo, 'check-attr', '-z', '--stdin', 'filter', data=paths))
-    require(all(value in ('unset', 'unspecified') for value in attrs[2::3]),
-            '项目依赖 Git 内容过滤器，请先完成独立对象交付')
+    check_filters(attrs, lfs)
     index = ''.join(entry[2:] + '\0' for entry in entries).encode('utf-8')
     raw = git(repo, *DIFF, '--cached', '--raw', '--no-abbrev', '-z')
     require(raw == git(repo, *DIFF, '--cached', '--raw', '--no-abbrev', '-z', '--ita-visible-in-index'),
             '暂不支持 intent-to-add 索引')
     changed = names(raw)
+    require(not set(changed[1::2]).intersection(lfs), '请先提交 LFS 指针，再交接工作区')
     ids = {oid for header in changed[::2] for oid in header.split()[2:4] if oid.strip('0')}
     check_object_sizes(repo, ''.join(oid + '\n' for oid in ids).encode())
     for item in changed[1::2]:
@@ -181,10 +202,10 @@ def checked_index(repo):
     return head, branch, index
 
 
-def git_state(repo, includes):
-    head, branch, index = checked_index(repo)
+def git_state(repo, includes, lfs=()):
+    head, branch, index = checked_index(repo, lfs)
     staged = git(repo, *INDEX_DIFF)
-    dirty = names(git(repo, *DIFF, '--name-only', '-z'))
+    dirty = names(git(repo, *DIFF, '--name-only', '-z', *excluded_paths(lfs), literal=not lfs))
     extra = sorted(set(includes))
     for item in extra:
         local_path(repo, item)
@@ -220,7 +241,8 @@ def check_applied_history(repo, project, thread, transcript, turn, publish):
                 '自动接收的快照需在本机完成新轮次后再发布')
 
 
-def capture(repo, home, project, base, thread, includes, output, previous_snapshot=None, *, publish=False):
+def capture(repo, home, project, base, thread, includes, output, previous_snapshot=None, *, publish=False,
+            lfs_paths=(), lfs_memo=None):
     repo, output = repo.resolve(), output.absolute()
     require(repo == Path(git(repo, 'rev-parse', '--show-toplevel').decode().strip()).resolve(),
             '请指定项目仓库根目录')
@@ -241,12 +263,18 @@ def capture(repo, home, project, base, thread, includes, output, previous_snapsh
         require(Path(git(source_cwd, 'rev-parse', '--show-toplevel').decode().strip()).resolve() == repo,
                 '会话目录属于另一个嵌套仓库')
     baseline = git(repo, 'rev-parse', '--verify', '--end-of-options', base + '^{commit}').decode().strip()
-    state = git_state(repo, includes)
+    if lfs_paths and lfs_memo is None:
+        lfs_memo = {}
+    lfs = tracked_lfs(repo, 'HEAD', lfs_paths, lfs_memo)
+    state = git_state(repo, includes, lfs)
     head, branch, index_hash, staged, dirty, extra = state
     git(repo, 'merge-base', '--is-ancestor', baseline, head)
     manifest = dict(version=1, project=project, base=baseline, head=head, branch=branch,
                     index_hash=index_hash, cwd=relative_cwd, thread=thread, turn=turn,
                     rollout=source.name, files=[], objects={'index.patch': sha(staged), 'session.jsonl': sha(transcript)})
+    if lfs:
+        manifest['lfs'] = lfs
+        require(tracked_lfs(repo, head, lfs, lfs_memo) == lfs, 'LFS 指针在封存时发生变化')
     for i, item in enumerate([*dirty, *extra]):
         data, executable = work_file(repo, item)
         key = None if data is None else f'files/{i}'
@@ -291,7 +319,8 @@ def capture(repo, home, project, base, thread, includes, output, previous_snapsh
                 if key:
                     put(key, data)
             bundle.writestr('manifest.json', json.dumps(manifest, ensure_ascii=False).encode())
-        require(state == git_state(repo, includes) and limited(source) == transcript,
+        require(state == git_state(repo, includes, lfs) and limited(source) == transcript
+                and tracked_lfs(repo, head, lfs, lfs_memo) == lfs,
                 '项目或会话在封存期间发生变化，请重试')
         for entry in manifest['files']:
             data, executable = work_file(repo, entry['path'])
@@ -301,7 +330,10 @@ def capture(repo, home, project, base, thread, includes, output, previous_snapsh
             checksum = file_hash(stream)
         require(not switch_pending(repo), '原工作区有尚未结束的切换')
         os.link(archive, output)
-    return dict(project=project, head=head, thread=thread, turn=turn, sha256=checksum, snapshot=snapshot)
+    result = dict(project=project, head=head, thread=thread, turn=turn, sha256=checksum, snapshot=snapshot)
+    if lfs:
+        result['lfs'] = {name: list(pointer) for name, pointer in lfs.items()}
+    return result
 
 
 @contextmanager
@@ -371,6 +403,14 @@ def restore(package, checksum, project, seed, dest, expected=None):
             if patch:
                 git(work, 'apply', '--binary', '--index', '--whitespace=nowarn', '-', data=patch, isolated=True)
             require(sha(git(work, 'ls-files', '--stage', '-z', isolated=True)) == m['index_hash'], '目标暂存区与源端不一致')
+            lfs = m.get('lfs', {})
+            if lfs:
+                from lfs_assets import inventory
+
+                selected = inventory(m)
+                require(tracked_lfs(work, head, selected) == selected, '预备工作区的 LFS 指针与清单不符')
+                checked_index(work, selected)
+                require(not any(e['path'] in selected for e in m['files']), '交接包含未提交的 LFS 文件改动')
             dirty, extra = [], []
             # Remove tracked files first to allow a file to turn into a directory.
             entries = sorted(m['files'], key=lambda e: e['object'] is not None)
@@ -405,10 +445,13 @@ def restore(package, checksum, project, seed, dest, expected=None):
             require(mapped.is_dir(), '目标快照缺少会话工作目录')
             private.mkdir()
             (private / 'session.jsonl').write_bytes(transcript)
-            (private / 'handoff.json').write_text(json.dumps(dict(
+            receipt = dict(
                 version=1, project=project, head=head, package_sha256=checksum, cwd=m['cwd'],
                 thread=m['thread'], turn=m['turn'], rollout=m['rollout'],
-                sha256=m['objects']['session.jsonl'], included=sorted(extra))), encoding='utf-8')
+                sha256=m['objects']['session.jsonl'], included=sorted(extra))
+            if lfs:
+                receipt['lfs'] = lfs
+            (private / 'handoff.json').write_text(json.dumps(receipt), encoding='utf-8')
         require(not dest.exists() and not dest.is_symlink(), '目标目录已被占用')
         work.rename(dest)
     return dict(project=project, cwd=str(dest / m['cwd']), head=head, thread=m['thread'], turn=m['turn'])
@@ -535,6 +578,7 @@ class ResumeContext:
     rollout: str
     turn: str
     checksum: str
+    lfs: dict | None = None
 
 
 def resume_context(cwd):
@@ -551,10 +595,17 @@ def resume_context(cwd):
     require(m['version'] == 1, '续接记录版本不支持')
     mapped = root if m['cwd'] == '.' else local_path(root, m['cwd'])
     require(mapped.is_dir(), '目标会话工作目录已不存在')
-    return ResumeContext(m['project'], m['thread'], mapped, private, m['rollout'], m['turn'], m['sha256'])
+    return ResumeContext(m['project'], m['thread'], mapped, private, m['rollout'], m['turn'], m['sha256'], m.get('lfs'))
 
 
 def install_resume(context, home, executable=None):
+    if context.lfs:
+        from lfs_assets import inventory, require_cached
+
+        root = context.private.parent.parent
+        selected = inventory({'lfs': context.lfs})
+        require_cached(root, selected)
+        require(tracked_lfs(root, 'HEAD', selected) == selected, '续接工作区的 LFS 指针已变化')
     data = limited(context.private / 'session.jsonl')
     require(sha(data) == context.checksum and session_info(data)[:2] == (context.thread, context.turn),
             '本地交接记录损坏')
@@ -593,6 +644,7 @@ def main():
     pack.add_argument('--base', required=True, help='两端已有的共同提交或引用')
     pack.add_argument('--thread', required=True)
     pack.add_argument('--include', action='append', default=[], help='准许传输的未跟踪文件，相对项目路径')
+    pack.add_argument('--lfs', action='append', default=[], help='经批准的已提交 Git LFS 指针路径')
     pack.add_argument('--out', type=Path, required=True)
     unpack.add_argument('--package', type=Path, required=True)
     unpack.add_argument('--sha256', required=True)
@@ -604,7 +656,7 @@ def main():
     try:
         if args.action == 'capture':
             result = capture(args.repo, args.codex_home.resolve(), args.project, args.base,
-                             args.thread, args.include, args.out)
+                             args.thread, args.include, args.out, lfs_paths=args.lfs)
         elif args.action == 'restore':
             result = restore(args.package, args.sha256, args.project, args.seed, args.dest)
         else:

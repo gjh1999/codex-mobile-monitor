@@ -9,10 +9,11 @@ import uuid
 from pathlib import Path
 
 from coordination_client import ControlDenied, device_client
-from handoff import (GIT_ID, MAX_FILE, HandoffError, checked_index, file_hash, git, limited, local_path,
-                     names, native_publication_lock, require, session_info, session_progress, sha)
+from handoff import (GIT_ID, MAX_FILE, HandoffError, checked_index, excluded_paths, file_hash, git, limited, local_path,
+                     names, native_publication_lock, require, session_info, session_progress, sha, tracked_lfs)
 from handoff_merge import WorkspaceDirty, check_checkout_paths, object_store, separate, worktree_root
 from handoff_sync import absolute, atomic_write, encode, identifier, local_home
+from lfs_assets import copy_cache, inventory, require_cached
 from service_lock import ServiceLock
 
 
@@ -64,10 +65,12 @@ def checkout_settings(root):
     return settings
 
 
-def clean(root):
-    head, branch, _ = checked_index(root)
+def clean(root, lfs_paths=(), lfs_memo=None):
+    lfs = tracked_lfs(root, 'HEAD', lfs_paths, lfs_memo, optional=True)
+    head, branch, _ = checked_index(root, lfs)
     require(branch, '请先切换到本机 Git 分支')
-    if git(root, *checkout_settings(root), 'status', '--porcelain=v1', '-z', '--untracked-files=no', isolated=True):
+    if git(root, *checkout_settings(root), 'status', '--porcelain=v1', '-z', '--untracked-files=no',
+           *excluded_paths(lfs), isolated=True, literal=not lfs):
         raise WorkspaceDirty('原工作区存在已暂存或未暂存的本机修改')
     return head, 'refs/heads/' + branch
 
@@ -94,11 +97,16 @@ def import_objects(root, gitdir, source_git):
         git(root, 'index-pack', '--stdin', stream=stream, isolated=True)
 
 
-def prepare(root, gitdir, prepared, tx, project, home, before, ref, automatic=None):
+def prepared_receipt(prepared):
     source_git = primary_repo(prepared)
     require(entry(source_git / 'lanxi') and (source_git / 'lanxi').is_dir(), '缺少交接回执目录')
     require(entry(source_git / 'lanxi/handoff.json') and entry(source_git / 'lanxi/session.jsonl'), '缺少交接回执')
     marker = json.loads(limited(source_git / 'lanxi/handoff.json', 65536))
+    return source_git, marker
+
+
+def prepare(root, gitdir, prepared, source_git, marker, tx, project, home, before, ref, automatic=None, lfs_memo=None):
+    lfs = inventory(marker)
     merge = marker['merge']
     head, index, working = marker['head'], merge['indexTree'], merge['worktreeTree']
     require(marker['version'] == 1 and marker['project'] == project and merge['history']['localHead'] == before
@@ -107,6 +115,12 @@ def prepare(root, gitdir, prepared, tx, project, home, before, ref, automatic=No
     require(git(prepared, 'rev-parse', '--verify', 'HEAD', isolated=True).decode().strip() == head,
             '预备工作区已离开合并提交')
     git(prepared, 'merge-base', '--is-ancestor', before, head, isolated=True)
+    if lfs:
+        require(tracked_lfs(prepared, head, lfs) == lfs, '合并后的 LFS 指针与回执不一致')
+        for tree in dict.fromkeys((index, working)):
+            require(not git(prepared, 'diff-tree', '-r', '--name-only', head + '^{tree}', tree, '--', *lfs,
+                            isolated=True), '预备目录含未提交的 LFS 修改')
+        copy_cache(prepared, root, lfs)
     transcript = limited(source_git / 'lanxi/session.jsonl')
     thread, turn, _ = session_info(transcript)
     require((thread, turn, sha(transcript)) == (marker['thread'], marker['turn'], marker['sha256']), '会话回执校验失败')
@@ -114,7 +128,8 @@ def prepare(root, gitdir, prepared, tx, project, home, before, ref, automatic=No
     session_progress(home, thread, transcript)
     if automatic:
         require((marker['package_sha256'], thread, turn) == (automatic['sha256'], automatic['thread'], automatic['turn'])
-                and ref == 'refs/heads/' + automatic['branch'], '自动切换来源或本机分支已变化')
+                and ref == 'refs/heads/' + automatic['branch'] and inventory(automatic) == lfs,
+                '自动切换来源或本机分支已变化')
         marker['automatic'] = automatic
 
     old_tree = before + '^{tree}'
@@ -137,13 +152,13 @@ def prepare(root, gitdir, prepared, tx, project, home, before, ref, automatic=No
     alternates = stage / '.git/objects/info/alternates'
     alternates.write_bytes((object_store(root) + '\n').encode())
     git(stage, 'read-tree', working, isolated=True)
-    check_checkout_paths(stage, root)
+    check_checkout_paths(stage, root, lfs)
     changed = ''.join(name + '\0' for name, (_, present) in work_changes.items() if present)
     if changed:
         git(stage, *checkout_settings(root), 'checkout-index', '-z', '--stdin', data=changed.encode(), isolated=True)
     if index != working:
         git(stage, 'read-tree', index, isolated=True)
-        check_checkout_paths(stage, root)
+        check_checkout_paths(stage, root, lfs)
     if marker['cwd'] != '.':
         cwd = local_path(root, marker['cwd']).relative_to(root).as_posix() + '/'
         paths = git(prepared, 'ls-tree', '-r', '-z', working, '--', cwd, isolated=True)
@@ -165,7 +180,7 @@ def prepare(root, gitdir, prepared, tx, project, home, before, ref, automatic=No
             directories.add(parent.relative_to(root).as_posix())
         changes.append(dict(path=name, old=digest(path), new=digest(stage / name)))
 
-    require(clean(root) == (before, ref), '原工作区在预备期间发生变化')
+    require(clean(root, lfs, lfs_memo) == (before, ref), '原工作区在预备期间发生变化')
     return dict(before=before, head=head, ref=ref, thread=thread, turn=turn, cwd=marker['cwd'],
                 changes=changes, directories=sorted(directories, key=lambda path: (path.count('/'), path)))
 
@@ -297,13 +312,18 @@ def switch(client, project, prepared, home, *, automatic=None, revalidate=None):
 
         try:
             client.event(project, session, 'switch', 1, 'open')
-            before, ref = clean(root)
+            source_git, marker = prepared_receipt(prepared)
+            lfs = inventory(marker)
+            lfs_memo = {} if lfs else None
+            before, ref = clean(root, lfs, lfs_memo)
             tx.mkdir()
-            plan = prepare(root, gitdir, prepared, tx, project, home, before, ref, automatic)
+            plan = prepare(root, gitdir, prepared, source_git, marker, tx, project, home, before, ref, automatic, lfs_memo)
             data = encode(plan)
             require(len(data) <= MAX_FILE, '原工作区切换日志超过上限')
             atomic_write(plan_file, data)
             with native_publication_lock(home, plan['thread']):
+                if lfs:
+                    require_cached(root, lfs)
                 if automatic:
                     transcript = limited(tx / 'stage/.git/lanxi/session.jsonl')
                     require(session_progress(home, plan['thread'], transcript, distinguish_ahead=True)[0] != 'ahead',

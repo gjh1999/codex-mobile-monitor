@@ -2,6 +2,15 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-18 必需 LFS 对象纳入交接
+
+- 基线 `7141cd9` 提供独立的 LFS 预取命令。本轮把已提交且登记的 LFS 指针纳入签名交接，接收后按所需对象校验本机就绪状态，缺件时保留预备目录。环境为 Windows、Python 3.14.7 和 Git 2.56.0.windows.4。测试使用生成的 Git 仓库、会话和回环 HTTP 服务。
+- `.\.venv\Scripts\python.exe -m unittest -v tests.test_handoff_lfs tests.test_lfs_assets` 首轮 8 项，4 项失败或出错，用时 5.699 秒。Windows 上 `lstat` 与 `fstat` 给出的创建或变化时间不同，初版因此误拒绝合法缓存。改用同接口比较读前和读后的路径时间，并校对文件句柄身份后，8 项通过，14.527 秒。补测跨版本复用及改动回执后 9 项通过，22.040 秒。日志为 `build-exe/verification/handoff-lfs-targeted-01.txt` 至 `handoff-lfs-targeted-03.txt`。已核对缺件、坏对象、签名清单与本机回执不一致、未提交 LFS 改动、待齐后切换和切换后缓存丢失。
+- 运行 `.\.venv\Scripts\python.exe -m tests.bench_handoff_lfs --output build-exe/verification/handoff-lfs-64m-01`，数据为单个 64 MiB LFS 对象和少量普通工作区变更。封存与交换目录复制用时 1.638 秒。首轮扫描在 16 MiB 断线，耗时 1.095 秒且原路径未切换。第二轮只收剩余 48 MiB，续传、复验、合并与自动切换共 5.395 秒。已就绪后的重复扫描耗时 0.029 秒，LFS 内容散列次数为 0。结果见 `result.json`。上一版单独预取与本轮端到端口径不同。未测真实网络、并发任务切换或峰值内存。
+- 运行 `.\.venv\Scripts\python.exe -m unittest discover -s tests -t . -p 'test_*.py' -v` 共 187 项，186 项通过，1 项可选 Stream SDK 跳过，182.704 秒。日志为 `build-exe/verification/handoff-lfs-regression-01.txt`。
+- 同参数复验至 `build-exe/verification/handoff-lfs-64m-02`。封存与交换目录复制为 1.402 秒，中断扫描为 0.957 秒，续传与自动应用为 4.812 秒，就绪后的扫描为 0.028 秒，LFS 内容散列仍为 0 次。确认原路径可准备同一线程后，原生 Git LFS 3.8.1 从已校验缓存检出工作副本，用时 0.747 秒，散列相同且未增加下载请求。结果见该目录 `result.json`。
+- 预备和原路径共用对象时在同卷复用硬链接，异卷使用校验后的复制。后台根据文件身份和时间复用本进程的校验结果，实际切换或续接仍复核内容。当前工作副本由原生 Git LFS 按需检出。家庭 Gitea、真实 VPN 和 iPhone 真机继续待验。 [交接配置](../HANDOFF.md#把必需-lfs-对象纳入交接)
+
 ## 2026-11-18 Git LFS 按需预取与续传
 
 - 基线 `cf0f3d9` 的交接流程只支持普通 Git 文件。本轮增加指定提交及路径的 LFS 缓存预取和离线检查。环境为 Windows、Python 3.14.7、Git 2.56.0.windows.4 和 Git LFS 3.8.1。测试服务器仅监听回环地址，数据为确定性生成的测试对象。两个路径指向同一个对象，验证批量请求和对象去重。

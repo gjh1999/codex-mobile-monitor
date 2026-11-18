@@ -11,7 +11,9 @@ from handoff import (HandoffError, limited, local_path, require, session_progres
                      verified_bundle)
 from handoff_apply import clean, switch
 from handoff_merge import SnapshotChanged, WorkspaceDirty, prepare_merge
-from handoff_sync import FAILURES, absolute, chain_conflict, identifier, offer_status, read_offer, separate, stage_path
+from handoff_sync import (FAILURES, absolute, chain_conflict, identifier, offer_status, package_expectations, read_offer,
+                          separate, stage_path)
+from lfs_assets import inventory, prefetch_inventory
 
 
 RETRY_SECONDS = 60
@@ -30,7 +32,7 @@ def applied_receipt(root, project, thread):
     return {}
 
 
-def update(project, device, exchange, key, receive, received, home, control, previous, stop=None):
+def update(project, device, exchange, key, receive, received, home, control, previous, stop=None, lfs_memo=None):
     config = receive['autoApply']
     try:
         peer, thread, branch = identifier(config['peer']), config['thread'], config['branch']
@@ -68,6 +70,9 @@ def update(project, device, exchange, key, receive, received, home, control, pre
         if chain_conflict(prior, offer):
             return dict(result, status='version_conflict')
         if receipt.get('package_sha256') == offer['sha256']:
+            lfs = inventory(offer)
+            if lfs and prefetch_inventory(root, lfs, memo=lfs_memo)['status'] != 'ready':
+                return dict(result, status='lfs_pending', lastApplied=selected)
             return dict(result, status='applied', lastApplied=selected, head=receipt['head'], cwd=str(root / receipt['cwd']))
         if prior and prior['sha256'] == offer['sha256']:
             return dict(result, status='already_seen')
@@ -82,7 +87,7 @@ def update(project, device, exchange, key, receive, received, home, control, pre
         occupancy = control.request(project, 'control')
         if occupancy['writer'] or occupancy['humans']:
             return dict(result, status='occupied')
-        before, ref = clean(root)
+        before, ref = clean(root, inventory(offer), lfs_memo)
         if ref != 'refs/heads/' + branch:
             return dict(result, status='branch_mismatch')
         if same_offer and previous.get('localHead') == before and previous.get('status') in ('conflict', 'history_unavailable'):
@@ -91,7 +96,7 @@ def update(project, device, exchange, key, receive, received, home, control, pre
         stage = stage_path(staging, project, peer, offer)
         shared = local_path(exchange, project)
         package = local_path(shared, 'objects/' + offer['sha256'] + '.zip')
-        expected = {name: offer[name] for name in ('head', 'thread', 'turn', 'snapshot')}
+        expected = package_expectations(offer)
         with verified_bundle(package, offer['sha256'], project, expected) as (_, manifest):
             transcript = limited(stage / '.git/lanxi/session.jsonl')
             if sha(transcript) != manifest['objects']['session.jsonl']:

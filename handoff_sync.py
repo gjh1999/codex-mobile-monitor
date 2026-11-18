@@ -16,6 +16,7 @@ from service_lock import ServiceLock
 
 
 IDENTIFIER = re.compile('[a-z0-9][a-z0-9_-]{0,39}')
+OFFER_LIMIT = 16384
 FAILURES = (ValueError, TypeError, KeyError, AttributeError, OSError, IndexError, zipfile.BadZipFile)
 
 
@@ -39,7 +40,7 @@ def encode(record):
 
 
 def read_offer(path, key, project, device):
-    record = json.loads(limited(path, 16384))
+    record = json.loads(limited(path, OFFER_LIMIT))
     require(isinstance(record, dict), '发布清单格式无效')
     signature = record.pop('signature')
     require(isinstance(signature, str) and DIGEST.fullmatch(signature)
@@ -52,6 +53,10 @@ def read_offer(path, key, project, device):
             and GIT_ID.fullmatch(record['head']) and isinstance(record['thread'], str)
             and str(uuid.UUID(record['thread'])) == record['thread']
             and isinstance(record['turn'], str) and 0 < len(record['turn']) <= 128, '发布清单内容无效')
+    if 'lfs' in record:
+        from lfs_assets import inventory
+
+        inventory(record)
     return record
 
 
@@ -70,7 +75,11 @@ def atomic_write(path, data, scratch=None):
 
 
 def offer_status(offer):
-    return {key: offer[key] for key in ('revision', 'sha256', 'snapshot', 'head', 'thread', 'turn')}
+    return {key: offer[key] for key in ('revision', 'sha256', 'snapshot', 'head', 'thread', 'turn', 'lfs') if key in offer}
+
+
+def package_expectations(offer):
+    return {key: offer[key] for key in ('head', 'thread', 'turn', 'snapshot', 'lfs') if key in offer}
 
 
 def chain_conflict(old, offer):
@@ -99,7 +108,7 @@ def publishing_repo(repo, home, project, thread, receiver):
     return candidate
 
 
-def publish(exchange, project, device, key, settings, home, prior, receiver=None):
+def publish(exchange, project, device, key, settings, home, prior, receiver=None, lfs_memo=None):
     thread = settings['thread']
     registered = absolute(settings['repo'])
     require(not switch_pending(registered), '原工作区有尚未结束的切换')
@@ -127,30 +136,36 @@ def publish(exchange, project, device, key, settings, home, prior, receiver=None
         local_path(repo, filename)
     untracked = set(names(git(repo, 'ls-files', '--others', '--exclude-standard', '-z'))) if allowed else set()
     includes = sorted(untracked.intersection(allowed))
+    lfs_paths = settings.get('lfs', [])
+    require(isinstance(lfs_paths, list), 'publish.lfs 需要文件列表')
     # The sibling temp directory is outside the folder watched by the transport,
     # and on the same volume for atomic publication of the final names.
     with tempfile.TemporaryDirectory(dir=exchange.parent) as scratch:
         temporary = Path(scratch) / 'sealed.zip'
-        result = capture(repo, home, project, base, thread, includes, temporary, previous_snapshot=previous, publish=True)
+        result = capture(repo, home, project, base, thread, includes, temporary, previous_snapshot=previous, publish=True,
+                         lfs_paths=lfs_paths, lfs_memo=lfs_memo)
         if result is not None:
+            revision = current['revision'] + 1 if current else 1
+            current = dict(version=1, device=device, revision=revision, **result)
+            signed = dict(current, signature=hmac.digest(key, encode(current), 'sha256').hex())
+            encoded = encode(signed)
+            require(len(encoded) <= OFFER_LIMIT, '签名交接清单超过容量上限')
             package = local_path(objects, result['sha256'] + '.zip')
             try:
                 os.link(temporary, package)
             except FileExistsError:
                 with package.open('rb') as stream:
                     require(file_hash(stream) == result['sha256'], '同名交接包已损坏')
-            revision = current['revision'] + 1 if current else 1
-            current = dict(version=1, device=device, revision=revision, **result)
-            signed = dict(current, signature=hmac.digest(key, encode(current), 'sha256').hex())
-            atomic_write(manifest_file, encode(signed), scratch)
+            atomic_write(manifest_file, encoded, scratch)
     return {'status': 'published', 'lastPublished': offer_status(current)}
 
 
-def inspect_stage(dest, project, offer, home):
+def inspect_stage(dest, project, offer, home, lfs_settings=None, environment=None, lfs_memo=None, seed=None):
     private = dest / '.git' / 'lanxi'
     marker = json.loads(limited(private / 'handoff.json', 65536))
     require(marker['version'] == 1 and marker['project'] == project and marker['package_sha256'] == offer['sha256']
-            and all(marker[field] == offer[field] for field in ('head', 'thread', 'turn')),
+            and all(marker[field] == offer[field] for field in ('head', 'thread', 'turn'))
+            and marker.get('lfs', {}) == offer.get('lfs', {}),
             '预备目录已存在且回执不同')
     transcript = limited(private / 'session.jsonl')
     require(sha(transcript) == marker['sha256'], '预备目录会话与回执不符')
@@ -162,7 +177,39 @@ def inspect_stage(dest, project, offer, home):
         status = 'session_conflict'
     else:
         status = 'advance_on_resume' if progress == 'advance' else 'ready'
-    return {'status': status, 'cwd': str(cwd), 'lastStaged': {**offer_status(offer), 'cwd': str(cwd)}}
+    result = {'status': status, 'cwd': str(cwd), 'lastStaged': {**offer_status(offer), 'cwd': str(cwd)}}
+    if offer.get('lfs') and status != 'session_conflict':
+        from lfs_assets import HTTPSource, copy_cache, inventory, prefetch_inventory, verify_worktree
+
+        selected = inventory(offer)
+        source = None
+        if lfs_settings is not None:
+            try:
+                paths = lfs_settings['paths']
+                require(isinstance(paths, list) and set(selected) <= set(paths), '来源 LFS 路径未经本机批准')
+                user_var, token_var = lfs_settings.get('userEnv'), lfs_settings.get('tokenEnv')
+                username, token = environment.get(user_var), environment.get(token_var)
+                require(not (user_var or token_var) or (username and token), '缺少 LFS 下载凭据')
+                if lfs_settings.get('endpoint'):
+                    source = HTTPSource(lfs_settings['endpoint'], username, token)
+            except FAILURES:
+                return dict(result, status='lfs_unconfigured')
+        try:
+            verify_worktree(dest, selected, lfs_memo)
+        except FAILURES:
+            return dict(result, status='lfs_staging_changed')
+        files = prefetch_inventory(dest, selected, memo=lfs_memo)['files']
+        missing = {name: selected[name] for name, row in files.items() if row['status'] == 'missing_cache'}
+        if missing:
+            cached = prefetch_inventory(seed, missing, source, lfs_memo)['files']
+            reusable = {name: missing[name] for name, row in cached.items() if row['status'] == 'ready'}
+            if reusable:
+                copy_cache(seed, dest, reusable, lfs_memo)
+            files.update(cached)
+        result['lfs'] = {name: {key: row[key] for key in ('status', 'oid', 'size')} for name, row in files.items()}
+        if any(row['status'] != 'ready' for row in files.values()):
+            result['status'] = 'lfs_pending'
+    return result
 
 
 def stage_path(staging, project, peer, offer):
@@ -170,7 +217,7 @@ def stage_path(staging, project, peer, offer):
     return local_path(folder, f"{peer}-{offer['revision']}-{offer['sha256'][:16]}")
 
 
-def receive(exchange, project, peer, key, settings, home, prior):
+def receive(exchange, project, peer, key, settings, home, prior, environment=None, lfs_memo=None):
     note = {'device': peer, 'lastStaged': prior}
     root = local_path(exchange, project)
     try:
@@ -194,11 +241,11 @@ def receive(exchange, project, peer, key, settings, home, prior):
             return dict(details, status='awaiting_package')
         try:
             restore(package, offer['sha256'], project, seed, dest,
-                    expected={name: offer[name] for name in ('thread', 'turn', 'head', 'snapshot')})
+                    expected=package_expectations(offer))
         except FAILURES:
             return dict(details, status='restore_failed')
     try:
-        return {**details, **inspect_stage(dest, project, offer, home)}
+        return {**details, **inspect_stage(dest, project, offer, home, settings.get('lfs'), environment, lfs_memo, seed)}
     except FAILURES:
         return dict(details, status='staging_conflict')
 
@@ -216,7 +263,7 @@ def read_state(runtime):
     return state
 
 
-def sync_once(runtime, config, home, environment=None, *, control=None, stop=None):
+def sync_once(runtime, config, home, environment=None, *, control=None, stop=None, lfs_memo=None):
     runtime = runtime.resolve()
     device = identifier(config['device'])
     environment = os.environ if environment is None else environment
@@ -248,19 +295,19 @@ def sync_once(runtime, config, home, environment=None, *, control=None, stop=Non
                     try:
                         identifier(peer)
                         require(peer != device, '接收设备不能填写自己')
-                        row['received'].append(receive(exchange, project, peer, key, conf, home, prior))
+                        row['received'].append(receive(exchange, project, peer, key, conf, home, prior, environment, lfs_memo))
                     except FAILURES:
                         row['received'].append({'device': peer, 'status': 'unavailable', 'lastStaged': prior})
                 if conf.get('autoApply', False) is not False:
                     from handoff_auto import update
 
                     row['autoApply'] = update(project, device, exchange, key, conf, row['received'], home, control,
-                                              old.get('autoApply', {}), stop)
+                                              old.get('autoApply', {}), stop, lfs_memo)
         if 'publish' in settings:
             prior = old.get('publish', {}).get('lastPublished')
             try:
                 row['publish'] = publish(exchange, project, device, key, settings['publish'], home, prior,
-                                         settings.get('receive'))
+                                         settings.get('receive'), lfs_memo)
             except FAILURES:
                 row['publish'] = {'status': 'capture_blocked', 'lastPublished': prior}
     state = {'projects': result}
@@ -294,9 +341,10 @@ def run(runtime, configuration, stop, notify, coordination=None):
         return
     try:
         control = auto_control(coordination)
+        lfs_memo = {}
         while not stop.is_set():
             try:
-                sync_once(runtime, configuration, local_home(), control=control, stop=stop)
+                sync_once(runtime, configuration, local_home(), control=control, stop=stop, lfs_memo=lfs_memo)
                 notify('running')
             except FAILURES:
                 notify('unavailable')

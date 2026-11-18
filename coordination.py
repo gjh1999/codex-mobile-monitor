@@ -86,8 +86,13 @@ class Ownership:
                     raise Conflict('已关闭的窗口应使用新的会话标识')
             elif event == 'heartbeat':
                 raise Conflict('活动会话尚未打开')
-            if source == 'cli' and not row and event == 'open':
-                if any(h['source'] == 'cli' for h in self.humans(db, project)):
+            if not row and event == 'open':
+                humans = self.humans(db, project)
+                if source == 'switch' and (humans or self.writer(db, project)):
+                    raise Conflict('项目仍被 IDE、终端或后台占用')
+                if any(h['source'] == 'switch' for h in humans):
+                    raise Conflict('项目正在更新工作区，请稍后打开')
+                if source == 'cli' and any(h['source'] == 'cli' for h in humans):
                     raise Conflict('此项目已有 CLI 会话占用，请先核对其状态')
             if (event == 'close' and row) or (event == 'open' and not row):
                 self.advance(db, project)

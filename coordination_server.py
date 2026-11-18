@@ -14,7 +14,7 @@ from coordination import Conflict, Ownership
 
 class Activity(BaseModel):
     session: str = Field(min_length=1, max_length=128)
-    source: Literal['vscode', 'pycharm', 'cli']
+    source: Literal['vscode', 'pycharm', 'cli', 'switch']
     sequence: int = Field(ge=1, le=2**53 - 1, strict=True)
     event: Literal['open', 'heartbeat', 'close']
 

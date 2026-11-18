@@ -84,6 +84,30 @@ class CoordinationTests(unittest.TestCase):
                 instance='new', thread='thread', version=opened.json()['version']))
             self.assertEqual(rejected.status_code, 409)
 
+    def test_workspace_switch_excludes_writes_and_new_activity_until_closed(self):
+        devices = {'A': {'token': 'a' * 32, 'projects': ['vision']},
+                   'B': {'token': 'b' * 32, 'projects': ['vision']}}
+        token = self.db.reserve('vision', 'B', 'worker', 'thread', 0)
+        with TestClient(create_app(self.path, devices, lambda: self.now)) as api:
+            url = '/api/v1/projects/vision/activity'
+            headers = {d: {'X-Lanxi-Device': d, 'Authorization': 'Bearer ' + d.lower() * 32} for d in devices}
+            body = dict(session='switch-1', source='switch', sequence=1, event='open')
+            self.assertEqual(api.post(url, headers=headers['A'], json=body).status_code, 409)
+            self.db.release('vision', 'B', token)
+            self.assertEqual(api.post(url, headers=headers['A'], json=body).status_code, 200)
+            self.now += 60
+            for source in ('vscode', 'pycharm', 'cli', 'switch'):
+                contender = dict(body, source=source, session=source)
+                self.assertEqual(api.post(url, headers=headers['B'], json=contender).status_code, 409)
+            state = self.db.status('vision')
+            self.assertTrue(state['humans'][0]['stale'])
+            with self.assertRaises(Conflict):
+                self.db.reserve('vision', 'B', 'worker', 'thread', state['version'])
+            close = dict(body, sequence=2, event='close')
+            for _ in range(2):
+                self.assertEqual(api.post(url, headers=headers['A'], json=close).status_code, 200)
+            self.assertEqual(api.post(url, headers=headers['B'], json=dict(body, source='cli')).status_code, 200)
+
     def device(self, name):
         store = self.db
 

@@ -34,7 +34,7 @@ DIFF = ['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--ignore-subm
 INDEX_DIFF = [*DIFF, '--cached', '--binary', '--full-index', '--no-color', '--src-prefix=a/', '--dst-prefix=b/']
 
 
-def git_process(repo, *args, data=None, isolated=False, index_file=None):
+def git_process(repo, *args, data=None, isolated=False, index_file=None, stream=None):
     overrides = {'GIT_DIR', 'GIT_COMMON_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY',
                  'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_NAMESPACE', 'GIT_QUARANTINE_PATH',
                  'GIT_GLOB_PATHSPECS', 'GIT_NOGLOB_PATHSPECS', 'GIT_ICASE_PATHSPECS'}
@@ -49,11 +49,11 @@ def git_process(repo, *args, data=None, isolated=False, index_file=None):
                GIT_LFS_SKIP_SMUDGE='1', GIT_NO_LAZY_FETCH='1')
     return subprocess.run(['git', '-c', 'core.hooksPath=' + os.devnull,
                            '-c', 'core.fsmonitor=false', '-C', str(repo), *map(str, args)],
-                          input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+                          input=data, stdin=stream, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
 
 
-def git(repo, *args, data=None, optional=False, isolated=False, index_file=None):
-    proc = git_process(repo, *args, data=data, isolated=isolated, index_file=index_file)
+def git(repo, *args, data=None, optional=False, isolated=False, index_file=None, stream=None):
+    proc = git_process(repo, *args, data=data, isolated=isolated, index_file=index_file, stream=stream)
     if proc.returncode and not optional:
         raise HandoffError(f'Git {args[0]} 失败：{proc.stderr.decode("utf-8", "replace").strip()}')
     return None if proc.returncode else proc.stdout
@@ -201,16 +201,35 @@ def work_file(root, item):
     return limited(path), bool(path.stat().st_mode & stat.S_IXUSR) if os.name != 'nt' else False
 
 
+def switch_pending(root):
+    return (root / '.git/lanxi-switch/active.json').is_file()
+
+
+def check_applied_history(repo, project, thread, transcript):
+    private = repo / '.git/lanxi'
+    marker = private / 'handoff.json'
+    if not marker.is_file():
+        return
+    receipt = json.loads(limited(marker, 65536))
+    require(isinstance(receipt, dict), '交接回执无效')
+    if receipt.get('applied') is True and receipt['project'] == project and receipt['thread'] == thread:
+        incoming = limited(private / 'session.jsonl')
+        require(sha(incoming) == receipt['sha256'] and transcript.startswith(incoming),
+                '请先在原路径续接接收会话，再发布工作区')
+
+
 def capture(repo, home, project, base, thread, includes, output, previous_snapshot=None):
     repo, output = repo.resolve(), output.absolute()
     require(repo == Path(git(repo, 'rev-parse', '--show-toplevel').decode().strip()).resolve(),
             '请指定项目仓库根目录')
     require(not output.resolve().is_relative_to(repo) and not output.exists(), '请使用项目外尚不存在的输出文件')
+    require(not switch_pending(repo), '原工作区有尚未结束的切换')
     sessions = find_session(home, thread)
     require(len(sessions) == 1 and sessions[0].is_relative_to(home / 'sessions'), '需要唯一且未归档的指定会话')
     source = sessions[0]
     session_location(source.name, thread)
     transcript = limited(source)
+    check_applied_history(repo, project, thread, transcript)
     sid, turn, cwd = session_info(transcript)
     source_cwd = Path(cwd).resolve()
     require(sid == thread and source_cwd.is_dir() and source_cwd.is_relative_to(repo), '会话工作目录不属于指定项目')
@@ -278,6 +297,7 @@ def capture(repo, home, project, base, thread, includes, output, previous_snapsh
                     and executable == entry['executable'], '工作文件在封存期间发生变化，请重试')
         with archive.open('rb') as stream:
             checksum = file_hash(stream)
+        require(not switch_pending(repo), '原工作区有尚未结束的切换')
         os.link(archive, output)
     return dict(project=project, head=head, thread=thread, turn=turn, sha256=checksum, snapshot=snapshot)
 
@@ -387,6 +407,9 @@ def handoff_receipts(projects):
         try:
             root = Path(location)
             require(root.is_absolute(), '项目映射需要绝对路径')
+            if switch_pending(root):
+                results.append(dict(row, status='switch_pending'))
+                continue
             marker = root / '.git' / 'lanxi' / 'handoff.json'
             try:
                 record = json.loads(limited(marker, 65536))
@@ -503,6 +526,7 @@ def resume_context(cwd):
     if not root:
         return None
     root = Path(root.decode().strip())
+    require(not switch_pending(root), '原工作区有尚未结束的切换')
     private = Path(git(root, 'rev-parse', '--absolute-git-dir').decode().strip()) / 'lanxi'
     marker = private / 'handoff.json'
     if not marker.exists():

@@ -85,10 +85,12 @@ class ControlClient:
 
     def restored_directory(self, project, thread):
         root = next(path for path, name in self.paths.items() if name == project)
+        from handoff import limited, local_path, switch_pending
+        if switch_pending(root):
+            raise ControlDenied(detail='原工作区有尚未结束的切换')
         marker = root / '.git' / 'lanxi' / 'handoff.json'
         if not marker.is_file():
             return None
-        from handoff import limited, local_path
         try:
             record = json.loads(limited(marker, 65536))
             if record['project'] != project or record['thread'] != thread:
@@ -241,21 +243,28 @@ def device_client(config):
 def terminal(client, cwd, args, resume=False):
     from handoff import install_resume, resume_context
 
-    context = resume_context(cwd) if resume else None
     project = client.project_at(cwd) if client else None
-    if client and context:
-        owner = client.threads.get(context.thread)
-        if (project and context.project != project) or (owner and owner != context.project):
+    context = resume_context(cwd) if resume and project is None else None
+
+    def check_context(binding, mapped_project):
+        owner = client.threads.get(binding.thread)
+        if (mapped_project and binding.project != mapped_project) or (owner and owner != binding.project):
             raise ControlDenied(detail='交接回执与本机登记的项目不一致')
-        project = project or owner
+        return mapped_project or owner
+
+    if client and context:
+        project = check_context(context, project)
         if project is None and context.project in client.paths.values():
             raise ControlDenied(detail='请把续接的线程 ID 登记到此项目，再从预备目录启动')
 
     def launch():
         command = args
-        if context:
+        selected = resume_context(cwd) if resume and project and context is None else context
+        if selected:
+            if client:
+                check_context(selected, project)
             home = Path(os.environ.get('CODEX_HOME') or Path.home() / '.codex').resolve()
-            binding = install_resume(context, home, args[0])
+            binding = install_resume(selected, home, args[0])
             command = [*args, 'resume', '--cd', binding['cwd'], binding['thread']]
         return subprocess.Popen(command, cwd=cwd)
 

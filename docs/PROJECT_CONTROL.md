@@ -57,6 +57,7 @@ VS Code 在启动完成及工作区根目录变化时更新当前窗口各本地
 - IDE 上报端用 `POST /api/v1/projects/{project}/activity` 发送 `session`、`source`、`sequence`、`event`。每个窗口与工作区组合使用唯一会话 ID，`source` 为 `vscode` 或 `pycharm`，序号递增，依次使用 `open`、`heartbeat` 和 `close`。多根工作区对各登记项目分别上报。请求头为 `X-Lanxi-Device` 与 `Authorization: Bearer <设备令牌>`。通过命令行上报可用 `coordination_client.py activity vision vscode <会话ID> <序号> <事件>`。
 - 失联 30 秒的窗口显示为 `stale`，仍保留人工占用。确认窗口及其终端实际退出后，从同一设备以更高序号上报 `close`。后台发送结果未知时保留写入记录。协调机可用 `--database <路径> --inspect <项目>` 查询。确认旧后台及相关执行已经退出后，再使用 `--release-confirmed <项目> <版本> <设备> <线程>` 解除对应记录。
 - 设备上报在中心事务中撤销后续自动写入许可。已取得发送许可的请求由旧连接继续核对，终端会等待后台退出。若同一后台连接还持有其他活动任务，也会一并等待。挂起的审批可拒绝，或由操作者暂停旧轮次。
+- `handoff_apply.py` 用同一接口登记 `switch` 占用。项目已有 IDE、终端或后台占用时，中心拒绝切换。切换占用期间，中心拒绝新占用和后台写入，失联后仍保留记录。执行端通过本机切换日志恢复后再结束占用。[原路径切换](HANDOFF.md#应用到本机原路径)
 
 本版协调范围覆盖澜汐的 Codex 后台、使用适配器的裸 `codex` 和两个 IDE 上报器。真实 IDE 宿主、未经过适配器的原生调用、Claude Code 与三台物理机联调仍待接入或验证。
 

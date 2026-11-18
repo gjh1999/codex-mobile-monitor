@@ -1,17 +1,22 @@
 """Run the installed native CLI twice with isolated homes and a localhost reply fixture."""
 import argparse
+import hashlib
 import json
 import os
+import secrets
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from automation import Approvals
+from coordination_client import ControlClient
 from handoff import HandoffError, capture, find_session, git, prepare_resume, restore, session_info
 from handoff_merge import prepare_merge
 from universal_rpc import CodexRPC
@@ -78,6 +83,8 @@ def main():
     parser.add_argument('--roundtrip', action='store_true', help='continue on B and then return to the original A profile')
     parser.add_argument('--merge', action='store_true', help='merge local edits before the returning round')
     parser.add_argument('--diverged', action='store_true', help='commit independently on A and B before merging')
+    parser.add_argument('--apply', action='store_true', help='apply the prepared merge to the idle original path')
+    parser.add_argument('--stock-files', type=int, default=0, help='add this many 64 KiB files to the baseline')
     args = parser.parse_args()
     if args.roundtrip and not args.sync:
         parser.error('--roundtrip needs --sync')
@@ -85,6 +92,10 @@ def main():
         parser.error('--merge needs --roundtrip')
     if args.diverged and not args.merge:
         parser.error('--diverged needs --merge')
+    if args.apply and not args.merge:
+        parser.error('--apply needs --merge')
+    if args.stock_files < 0:
+        parser.error('--stock-files must be nonnegative')
     target = args.output.resolve()
     target.mkdir(parents=True, exist_ok=False)
     server = ThreadingHTTPServer(('127.0.0.1', 0), Replies)
@@ -97,6 +108,11 @@ def main():
             git(a, 'config', 'user.name', 'fixture')
             git(a, 'config', 'user.email', 'fixture@example.invalid')
             (a / 'code.bin').write_bytes(b'base\x00')
+            if args.stock_files:
+                (a / 'stock').mkdir()
+                for i in range(args.stock_files):
+                    data = hashlib.shake_128(f'handoff baseline {i}'.encode()).digest(64 * 1024)
+                    (a / 'stock' / f'{i:06}.bin').write_bytes(data)
             git(a, 'add', '.')
             git(a, 'commit', '-qm', 'shared')
             seed = target / 'seed'
@@ -137,10 +153,11 @@ def main():
             report = dict(receipt, next_turn=next_turn, cwd_a=str(a), cwd_b=str(b), reply='reply-on-B',
                           codex=subprocess.check_output([exe, '--version'], text=True).strip(),
                           git=git(a, '--version').decode().strip(), backend='localhost fixture',
+                         shared_mib=args.stock_files / 16,
                           transport='replicated filesystem folders' if args.sync else 'manual package')
             if args.roundtrip:
                 report['return'] = test_return(exe, a, b, target, base, sid, home_a, home_b, server.server_port,
-                                               merge=args.merge, diverged=args.diverged)
+                                               merge=args.merge, diverged=args.diverged, apply=args.apply)
             (target / 'result.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
             print(json.dumps(report))
     finally:
@@ -196,7 +213,45 @@ def commit_fixture(repo, filename):
     return git(repo, 'rev-parse', 'HEAD').decode().strip()
 
 
-def test_return(exe, original, source_b, output, base, thread, home_a, home_b, port, merge=False, diverged=False):
+def apply_at_original(original, merged, home, output):
+    import uvicorn
+    from coordination_server import create_app
+
+    token = secrets.token_urlsafe(32)
+    device, project = 'office', 'fixture'
+    app = create_app(output / 'switch.sqlite3', {device: {'token': token, 'projects': [project]}})
+    server = uvicorn.Server(uvicorn.Config(app, log_level='error'))
+    with socket.socket() as endpoint:
+        endpoint.bind(('127.0.0.1', 0))
+        settings = dict(url=f'http://127.0.0.1:{endpoint.getsockname()[1]}', device=device,
+                        projects={project: {'path': str(original)}})
+        config = output / 'switch-fixture-config.json'
+        config.write_text(json.dumps(dict(coordination=settings, handoffSync={'projects': {
+            project: {'receive': {'staging': str(merged.parent.parent)}}}})), encoding='utf-8')
+        worker = threading.Thread(target=lambda: server.run(sockets=[endpoint]), daemon=True)
+        worker.start()
+        try:
+            deadline = time.monotonic() + 5
+            while not server.started:
+                if time.monotonic() >= deadline or not worker.is_alive():
+                    raise RuntimeError('coordinator failed to listen')
+                time.sleep(0.025)
+            script = Path(__file__).resolve().parents[1] / 'handoff_apply.py'
+            cmd = [sys.executable, str(script), '--config', str(config), '--project', project,
+                   '--prepared', str(merged), '--codex-home', str(home)]
+            started = time.perf_counter()
+            result = json.loads(subprocess.check_output(cmd, env=dict(os.environ, LANXI_DEVICE_TOKEN=token), timeout=60))
+            result['seconds'] = round(time.perf_counter() - started, 3)
+            assert Path(result['cwd']) == original and result['status'] == 'applied', result
+            assert ControlClient(settings, token).request(project, 'control')['humans'] == []
+            return result
+        finally:
+            server.should_exit = True
+            worker.join(5)
+
+
+def test_return(exe, original, source_b, output, base, thread, home_a, home_b, port,
+                merge=False, diverged=False, apply=False):
     log_a, = find_session(home_a, thread)
     previous = log_a.read_bytes()
     assert git(source_b, 'rev-parse', '--verify', 'origin/main', optional=True) is None
@@ -211,19 +266,33 @@ def test_return(exe, original, source_b, output, base, thread, home_a, home_b, p
                                      home_b, home_a, sender='laptop', receiver='office',
                                      sender_runtime=output / 'runtime')
     assert log_a.read_bytes() == previous, 'staging cannot modify the existing Codex home'
+    switched = None
     if merge:
-        (original / 'from-a.bin').write_bytes(b'staged on A\x00')
-        git(original, 'add', 'from-a.bin')
+        if apply:
+            # The fixture confirmed these edits reached B. Recreate A's idle
+            # checkout while keeping a copy of its original untracked file.
+            git(original, 'restore', '--source=HEAD', '--staged', '--worktree', '--', 'code.bin')
+            (original / 'new.txt').rename(original.parent / 'original-note.txt')
+            (original / 'device-local.txt').write_bytes(b'local-only fixture\n')
+        else:
+            (original / 'from-a.bin').write_bytes(b'staged on A\x00')
+            git(original, 'add', 'from-a.bin')
         merged = cwd.parent / 'merged-local'
-        result = prepare_merge(original, cwd, merged, ['new.txt'])
+        result = prepare_merge(original, cwd, merged, [] if apply else ['new.txt'])
         assert result['status'] == 'merged', result
-        assert git(merged, 'show', ':from-a.bin') == b'staged on A\x00'
+        if not apply:
+            assert git(merged, 'show', ':from-a.bin') == b'staged on A\x00'
         if diverged:
             assert result['history']['mode'] == 'merge_commit', result
             assert git(merged, 'rev-list', '--parents', '-1', 'HEAD').decode().split() == [result['head'], local_head, incoming_head]
             for name in ('committed-a.txt', 'committed-b.txt'):
                 assert git(merged, 'show', 'HEAD:' + name) == name.encode() + b'\n'
         cwd = Path(result['cwd'])
+        if apply:
+            switched = apply_at_original(original, merged, home_a, output)
+            cwd = original
+            assert (original / 'device-local.txt').read_bytes() == b'local-only fixture\n'
+            assert (Path(switched['backup']) / 'backup/code.bin').read_bytes() == b'base\x00'
     env = dict(os.environ, CODEX_HOME=str(home_a), NO_PROXY='localhost,127.0.0.1')
     process = subprocess.Popen([exe, 'app-server', '--stdio'], cwd=original, env=env, stdin=subprocess.PIPE,
                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding='utf-8')
@@ -265,7 +334,7 @@ def test_return(exe, original, source_b, output, base, thread, home_a, home_b, p
     return dict(incoming_turn=returned['turn'], new_turn=current_turn, cwd=current_cwd,
                 reply='reply-on-return', active_writer_blocked=True, backup_verified=True,
                 paired_config_reused=True, merged_local_changes=merge,
-                merged_diverging_commits=diverged)
+                merged_diverging_commits=diverged, original_path_switch=switched)
 
 
 if __name__ == '__main__':

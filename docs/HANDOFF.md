@@ -119,7 +119,26 @@ codex
 
 发生冲突时返回 `conflict`、所在层、文件路径和 Git 冲突类型。`history` 层表示已提交内容冲突，`local_index` 或 `incoming_index` 表示一端的暂存区与新提交基线冲突，`index` 表示两端暂存区相互冲突。后续工作层分别报告 `local_worktree`、`incoming_worktree` 或 `worktree`。没有共同历史、不同对象格式或浅克隆遇到不同 HEAD 时，返回 `history_unavailable` 和 `history.reason`，分别为 `unrelated_history`、`object_format` 和 `shallow_history`。这些结果使用退出码 1，配置、校验和运行错误使用退出码 2。
 
-合并只支持普通文件，使用隔离的 Git 配置。最终的暂存区和工作区均会检查内容过滤器及大小写路径冲突。已提交树新带入的路径还会检查私有文件及跨机路径规则。Git 子模块、特殊索引标志和原路径内切换留待支持。
+合并只支持普通文件，使用隔离的 Git 配置。最终的暂存区和工作区均会检查内容过滤器及大小写路径冲突。已提交树新带入的路径还会检查私有文件及跨机路径规则。Git 子模块和特殊索引标志留待支持。
+
+## 应用到本机原路径
+
+Windows 上可把上一步的合并结果应用到 `coordination.projects.<项目>.path` 指定的原工作区。使用支持切换占用的协调服务，并通过 `LANXI_DEVICE_TOKEN` 提供设备令牌。原工作区需要独立的 `.git` 目录、当前分支、干净的暂存区和已跟踪文件，且 HEAD 与合并回执的本机提交一致。执行时关闭该项目的 IDE、终端及其他会写入工作区的进程；协调服务检查已登记的占用，未接入活动上报的进程需由操作者确认。[跨设备项目控制](PROJECT_CONTROL.md)
+
+预备目录必须是 `handoffSync.projects.<项目>.receive.staging` 下对应项目目录的直接子目录，且由 `handoff_merge.py` 生成。执行下列命令后，在原路径用已安装的终端适配器打开 `codex`。
+
+```powershell
+.\.venv\Scripts\python.exe handoff_apply.py --project vision `
+  --prepared 'C:\LanxiStaging\vision\merged-local'
+```
+
+命令在协调服务内取得项目的排他占用，检查原生线程写入锁，按需检出受影响文件，并把原索引和被替换的文件保存在原仓库 `.git/lanxi-switch/<切换ID>/`。原仓库的配置、其他分支和无关的未跟踪或忽略文件留在原位置。发生路径碰撞、出现本机已跟踪修改或检测到占用时，停止切换。当前支持普通文件的增删改。文件与目录互换、符号链接、连接工作树、后台自动替换和断电恢复仍待验证或实现。 [Git 按路径检出索引](https://git-scm.com/docs/git-checkout-index) · [Git 引用校验与更新](https://git-scm.com/docs/git-update-ref)
+
+成功时输出版本 1 的 JSON，`status` 为 `applied`，附原路径、合并提交、线程、受影响文件数和备份目录。运行错误退出码为 2。文件被占用等中途错误会尝试自动回滚。进程中断或协调服务未确认结束时，先退出占用程序，再用以下命令继续恢复。恢复结果 `rolled_back` 表示回到切换前，`applied` 表示已完成切换且补发了结束确认，`no_pending_switch` 表示当前无等待恢复的切换。如果文件或索引在中断后又被修改，操作会保留现场供核对。切换完成前暂停封存和会话续接。切换后，下一次封存须等本机原生记录包含接收的完整历史。
+
+```powershell
+.\.venv\Scripts\python.exe handoff_apply.py --project vision --recover
+```
 
 ## 前端查询
 
@@ -129,7 +148,7 @@ codex
 {"handoffProjects": {"vision": "C:\\Code\\Vision-continued"}}
 ```
 
-登录后读取 `GET /api/v1/handoffs`。响应的 `projects` 数组按登记项返回。状态 `restored` 带有预备工作区的 `head`、`thread`、`turn` 和接收包的 `sha256`。如果登记的是独立合并目录，`head` 为合并结果的 HEAD。`awaiting_restore` 表示尚未发现回执，`invalid_receipt` 表示映射或回执异常。未配置项目时数组为空。接口读取 `.git/lanxi/handoff.json` 的摘要字段。实时运行状态使用现有任务接口。
+登录后读取 `GET /api/v1/handoffs`。响应的 `projects` 数组按登记项返回。状态 `restored` 带有工作区的 `head`、`thread`、`turn` 和接收包的 `sha256`。登记独立合并目录或已完成原路径切换时，`head` 为合并结果的 HEAD。`switch_pending` 表示当前切换尚在执行或等待恢复，`awaiting_restore` 表示尚未发现回执，`invalid_receipt` 表示映射或回执异常。未配置项目时数组为空。接口读取 `.git/lanxi/handoff.json` 的摘要字段。实时运行状态使用现有任务接口。
 
 ## 本机跨盘复验
 
@@ -140,7 +159,9 @@ codex
 .\.venv\Scripts\python.exe tests/smoke_handoff.py --sync --roundtrip --output build-exe/verification/handoff-roundtrip-repeat
 .\.venv\Scripts\python.exe tests/smoke_handoff.py --sync --roundtrip --merge --output build-exe/verification/handoff-merge-native-repeat
 .\.venv\Scripts\python.exe tests/smoke_handoff.py --sync --roundtrip --merge --diverged --output build-exe/verification/handoff-diverged-native-repeat
+.\.venv\Scripts\python.exe tests/smoke_handoff.py --sync --roundtrip --merge --diverged --apply --stock-files 768 --output build-exe/verification/handoff-apply-repeat
 .\.venv\Scripts\python.exe -m unittest -v tests.test_handoff_merge
+.\.venv\Scripts\python.exe -m unittest -v tests.test_handoff_apply tests.test_coordination
 .\.venv\Scripts\python.exe tests/bench_handoff_merge.py --output build-exe/verification/handoff-merge-repeat
 .\.venv\Scripts\python.exe tests/bench_handoff_merge.py --diverged --output build-exe/verification/handoff-diverged-repeat
 ```

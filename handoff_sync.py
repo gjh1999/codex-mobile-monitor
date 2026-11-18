@@ -10,7 +10,8 @@ import zipfile
 from pathlib import Path
 
 from handoff import (DIGEST, GIT_ID, HandoffError, capture, file_hash, git, limited, local_path,
-                     find_session, names, require, restore, resume_context, session_info, session_progress, sha)
+                     find_session, names, require, restore, resume_context, session_info, session_progress, sha,
+                     switch_pending)
 from service_lock import ServiceLock
 
 
@@ -101,6 +102,7 @@ def publishing_repo(repo, home, project, thread, receiver):
 def publish(exchange, project, device, key, settings, home, prior, receiver=None):
     thread = settings['thread']
     registered = absolute(settings['repo'])
+    require(not switch_pending(registered), '原工作区有尚未结束的切换')
     repo = publishing_repo(registered, home, project, thread, receiver)
     separate(exchange, repo)
     root = local_path(exchange, project)

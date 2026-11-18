@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from handoff import (DIFF, GIT_ID, MAX_FILE, MAX_TOTAL, HandoffError, checked_index, git, git_process,
-                     limited, local_path, names, require, resume_context, session_info, sha)
+                     limited, local_path, names, require, resume_context, session_info, sha, switch_pending)
 
 
 class MergeConflict(ValueError):
@@ -180,7 +180,7 @@ def object_store(repo):
     return path
 
 
-def check_checkout_paths(repo):
+def check_checkout_paths(repo, target_repo=None):
     entries = names(git(repo, 'ls-files', '--stage', '-z', isolated=True))
     paths, spellings = [], {}
     for entry in entries:
@@ -197,8 +197,12 @@ def check_checkout_paths(repo):
             spellings[key] = path
             path = path.rpartition('/')[0]
     paths = ''.join(path + '\0' for path in paths).encode('utf-8')
-    filters = names(git(repo, 'check-attr', '--cached', '-z', '--stdin', 'filter', data=paths, isolated=True))
-    require(all(value in ('unset', 'unspecified') for value in filters[2::3]),
+    if target_repo is not None:
+        filters = git(target_repo, 'check-attr', '--cached', '-z', '--stdin', 'filter', data=paths,
+                      index_file=repo / '.git/index')
+    else:
+        filters = git(repo, 'check-attr', '--cached', '-z', '--stdin', 'filter', data=paths, isolated=True)
+    require(all(value in ('unset', 'unspecified') for value in names(filters)[2::3]),
             '合并结果依赖 Git 内容过滤器')
 
 
@@ -208,6 +212,7 @@ def prepare_merge(local, incoming, dest, includes=(), incoming_includes=()):
     require(all(separate(a, b) for a, b in ((local, incoming), (local, dest.resolve()), (incoming, dest.resolve()))),
             '合并预备目录必须独立于两个输入工作区')
     require(dest.parent.is_dir() and not dest.exists() and not dest.is_symlink(), '请指定尚不存在的预备目录')
+    require(not switch_pending(local), '原工作区有尚未结束的切换')
 
     local_head = git(local, 'rev-parse', '--verify', 'HEAD^{commit}', isolated=True).decode().strip()
     incoming_head = git(incoming, 'rev-parse', '--verify', 'HEAD^{commit}', isolated=True).decode().strip()
@@ -286,7 +291,8 @@ def prepare_merge(local, incoming, dest, includes=(), incoming_includes=()):
         git(work, '-c', 'pack.compression=1', '-c', 'pack.threads=2', 'pack-objects', '--quiet', '--revs', '--delta-base-offset',
             prefix, data=roots, isolated=True)
         require(capture_index(local, work, includes, write_objects=False) == here
-                and capture_index(incoming, work, remote_paths, write_objects=False) == there,
+                and capture_index(incoming, work, remote_paths, write_objects=False) == there
+                and not (switch_pending(local) or switch_pending(incoming)),
                 '输入工作区在合并期间发生变化')
         alternates.unlink()
         git(work, 'fsck', '--connectivity-only', '--no-dangling', head, index, working, isolated=True)

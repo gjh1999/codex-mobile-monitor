@@ -2,6 +2,15 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-18 Windows 原路径切换与中断恢复
+
+- 基线 `1bd5157` 支持在独立目录打开合并结果。本轮为已登记的独立 Git 仓库增加原路径应用和恢复。试验使用 Windows、Python 3.14.7、Git 2.56.0.windows.4 与 Codex CLI 0.169.1，项目、配置、设备身份和模型回复均为测试环境生成。
+- `.\.venv\Scripts\python.exe -m unittest -v tests.test_handoff_apply tests.test_coordination` 首轮 12 项，4 项错误，25.135 秒。临时 Codex 根目录未初始化，Windows 原生锁目录创建失败。增加首次运行目录初始化后，第二轮 13 项，2 项错误，26.421 秒。Git 拒绝把 `symref-verify HEAD` 和更新其分支放在同一 Files 引用事务。进一步尝试 `no-deref` 后，2 项复验仍因重复锁定 HEAD 失败，用时 9.421 秒。最终用索引锁防止普通检出，并以预期旧对象 ID 校验后更新指定分支。专项第 3 轮 13 项通过，24.424 秒。三轮存档为 `build-exe/verification/handoff-apply-targeted-01.txt` 至 `handoff-apply-targeted-03.txt`。
+- 执行 `.\.venv\Scripts\python.exe tests/smoke_handoff.py --sync --roundtrip --merge --diverged --apply --output build-exe/verification/handoff-apply-native-01`，再用 `--stock-files 768 --output build-exe/verification/handoff-apply-native-48m-01` 复验。测试用真实 CLI 和回环协调服务，在 C、D 盘符内模拟往返。在小仓库与 768 个 64 KiB 共享文件的 48 MiB 仓库中，原路径切换命令分别为 1.172 秒和 1.606 秒，每次更新 4 个工作区文件。时长包含进程启动、Git 对象导入与协调请求，独立合并、封存和模型往返另行执行。旧基线没有同路径切换可比数据。未测峰值内存、并行任务切换或实际网络。两轮的 `result.json` 和再次封存的 `merged-onward.zip` 保存在各自输出目录，临时源目录在退出时清理。
+- `.\.venv\Scripts\python.exe -m unittest discover -s tests -t . -p 'test_*.py' -v` 首轮 171 项，170 项通过，1 项可选 Stream SDK 跳过，111.298 秒。已加入已完成切换但协调服务回复丢失后的恢复测试。输出为 `build-exe/verification/handoff-apply-regression-01.txt`。
+- 快进到并行的桌面提交 `ff3f703` 后，同命令第一轮集成回归 171 项，170 项通过，1 项跳过，107.024 秒。把索引复核移到取锁之后，并核对刚移入备份的文件后，集成复验 172 项，171 项通过，1 项跳过，113.769 秒。最后用 `-m unittest -v tests.test_handoff tests.test_handoff_apply.ApplyTests.test_new_worktree_with_old_local_history_cannot_be_published` 补验旧历史配新工作区的发布拦截，14 项通过，33.645 秒。日志分别为 `handoff-apply-integrated-01.txt`、`handoff-apply-integrated-02.txt` 和 `handoff-apply-history-final.txt`。同一 48 MiB 参数在 `handoff-apply-native-48m-02` 再验，原路径切换用时 1.996 秒，成功续接并再次封存。
+- 使用 Windows 实际文件句柄模拟占用，验证已移动文件回滚。模拟在新文件、提交与索引已安装后中断，恢复到原索引字节和原目录状态。也验证已登记 IDE、协调后台、原生线程写入、未跟踪路径碰撞及本机已跟踪修改等切换拦截条件。自动更新策略、断电恢复和真实双机 Syncthing 与 IDE 联调仍待完成。[原路径切换与恢复](../HANDOFF.md#应用到本机原路径) · [Git 校验与更新引用](https://git-scm.com/docs/git-update-ref)
+
 ## 2026-11-18 不同提交工作区合并与往返续接
 
 - 基线 `f39661a` 支持同 HEAD 的独立预备合并。本轮验证本机领先、接收端领先和历史分叉。存在祖先关系时使用较新的提交。分叉合并成功时，只在预备目录生成双父提交，源端暂存和未暂存修改分别叠加。环境为 Windows、Python 3.14.7、Git 2.56.0.windows.4、Codex CLI 0.169.1。输入为临时 Git 仓库和虚构会话。

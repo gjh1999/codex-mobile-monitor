@@ -147,6 +147,32 @@ class Tests(unittest.TestCase):
             wait_for(lambda: 'new history' in self.window.conversation.toPlainText())
             self.assertNotIn('old history', self.window.conversation.toPlainText())
 
+    def test_shutdown_waits_for_current_history_read_to_release_resources(self):
+        started, release, finished = threading.Event(), threading.Event(), threading.Event()
+
+        def delayed_history(*_):
+            started.set()
+            release.wait(3)
+            finished.set()
+            return {'messages': [], 'events': []}
+
+        deadline = time.monotonic() + 2
+        while self.window._history_busy and time.monotonic() < deadline:
+            self.app.processEvents()
+            time.sleep(.005)
+        self.assertFalse(self.window._history_busy)
+        with patch.object(monitor, 'conversation_for', delayed_history):
+            self.window.refresh_conversation()
+            self.assertTrue(started.wait(1))
+            timer = threading.Timer(.05, release.set)
+            timer.start()
+            try:
+                self.window.shutdown()
+                self.assertTrue(finished.is_set())
+            finally:
+                release.set()
+                timer.join()
+
 
 if __name__ == '__main__':
     unittest.main()

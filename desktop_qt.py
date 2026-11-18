@@ -42,6 +42,8 @@ def display_text(value):
 
 
 def load_conversation(key, previous, font, option, width, gui_thread, stop):
+    if stop.is_set():
+        return None
     client, thread = key
     data = monitor.conversation_for(thread, client)
     if data == previous or stop.is_set():
@@ -590,7 +592,7 @@ class MainWindow(QMainWindow):
             self.notebook.flush()
         self.stop.set()
         self.timer.stop()
-        self._history_pool.shutdown(wait=False, cancel_futures=True)
+        self._history_pool.shutdown(wait=True, cancel_futures=True)
         if self.worker:
             self.worker.join(timeout=8)
         self.tray.hide()

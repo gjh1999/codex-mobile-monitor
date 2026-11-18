@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from automation import Approvals
 from handoff import HandoffError, capture, find_session, git, prepare_resume, restore, session_info
+from handoff_merge import prepare_merge
 from universal_rpc import CodexRPC
 
 
@@ -75,9 +76,12 @@ def main():
     parser.add_argument('--source-parent', type=Path, default=Path(tempfile.gettempdir()))
     parser.add_argument('--sync', action='store_true', help='stage via replicated folder scans')
     parser.add_argument('--roundtrip', action='store_true', help='continue on B and then return to the original A profile')
+    parser.add_argument('--merge', action='store_true', help='merge local edits before the returning round')
     args = parser.parse_args()
     if args.roundtrip and not args.sync:
         parser.error('--roundtrip needs --sync')
+    if args.merge and not args.roundtrip:
+        parser.error('--merge needs --roundtrip')
     target = args.output.resolve()
     target.mkdir(parents=True, exist_ok=False)
     server = ThreadingHTTPServer(('127.0.0.1', 0), Replies)
@@ -132,7 +136,8 @@ def main():
                           git=git(a, '--version').decode().strip(), backend='localhost fixture',
                           transport='replicated filesystem folders' if args.sync else 'manual package')
             if args.roundtrip:
-                report['return'] = test_return(exe, a, b, target, base, sid, home_a, home_b, server.server_port)
+                report['return'] = test_return(exe, a, b, target, base, sid, home_a, home_b, server.server_port,
+                                               merge=args.merge)
             (target / 'result.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
             print(json.dumps(report))
     finally:
@@ -179,17 +184,26 @@ def through_exchange(a, target, base, thread, seed, home_a, home_b, sender='offi
     return sent['publish']['lastPublished'], Path(offer['cwd'])
 
 
-def test_return(exe, original, source_b, output, base, thread, home_a, home_b, port):
+def test_return(exe, original, source_b, output, base, thread, home_a, home_b, port, merge=False):
     log_a, = find_session(home_a, thread)
     previous = log_a.read_bytes()
     assert git(source_b, 'rev-parse', '--verify', 'origin/main', optional=True) is None
-    (source_b / 'code.bin').write_bytes(b'staged-on-B\x00')
-    git(source_b, 'add', 'code.bin')
-    (source_b / 'code.bin').write_bytes(b'unstaged-on-B\x00')
+    changed = 'from-b.bin' if merge else 'code.bin'
+    (source_b / changed).write_bytes(b'staged-on-B\x00')
+    git(source_b, 'add', changed)
+    (source_b / changed).write_bytes(b'unstaged-on-B\x00')
     returned, cwd = through_exchange(source_b, original.parent / 'return', base, thread, original,
                                      home_b, home_a, sender='laptop', receiver='office',
                                      sender_runtime=output / 'runtime')
     assert log_a.read_bytes() == previous, 'staging cannot modify the existing Codex home'
+    if merge:
+        (original / 'from-a.bin').write_bytes(b'staged on A\x00')
+        git(original, 'add', 'from-a.bin')
+        merged = cwd.parent / 'merged-local'
+        result = prepare_merge(original, cwd, merged, ['new.txt'])
+        assert result['status'] == 'merged', result
+        assert git(merged, 'show', ':from-a.bin') == b'staged on A\x00'
+        cwd = Path(result['cwd'])
     env = dict(os.environ, CODEX_HOME=str(home_a), NO_PROXY='localhost,127.0.0.1')
     process = subprocess.Popen([exe, 'app-server', '--stdio'], cwd=original, env=env, stdin=subprocess.PIPE,
                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding='utf-8')
@@ -215,8 +229,8 @@ def test_return(exe, original, source_b, output, base, thread, home_a, home_b, p
     binding = prepare_resume(cwd, home_a, exe)
     past, = (home_a / 'lanxi-handoff-backups' / thread).glob('*.jsonl')
     assert past.read_bytes() == previous
-    assert git(cwd, 'show', ':code.bin') == b'staged-on-B\x00'
-    assert (cwd / 'code.bin').read_bytes() == b'unstaged-on-B\x00'
+    assert git(cwd, 'show', ':' + changed) == b'staged-on-B\x00'
+    assert (cwd / changed).read_bytes() == b'unstaged-on-B\x00'
     assert original.joinpath('code.bin').read_bytes() == b'unstaged\x00'
     assert native_turn(exe, home_a, Path(binding['cwd']), port, thread, 'Handoff fixture returning A') == thread
     contents = log_a.read_bytes()
@@ -227,7 +241,7 @@ def test_return(exe, original, source_b, output, base, thread, home_a, home_b, p
     (output / 'return-local-after.jsonl').write_bytes(contents)
     return dict(incoming_turn=returned['turn'], new_turn=current_turn, cwd=current_cwd,
                 reply='reply-on-return', active_writer_blocked=True, backup_verified=True,
-                paired_config_reused=True)
+                paired_config_reused=True, merged_local_changes=merge)
 
 
 if __name__ == '__main__':

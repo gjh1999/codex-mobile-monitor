@@ -2,6 +2,16 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-18 同提交工作区合并与性能验证
+
+- 基线 `26c0d7e` 可恢复两端各自的目录。本轮加入按需工作区合并，保持两端的 Git 暂存和工作层，以版本 1 的 JSON 报告冲突。运行环境为 Windows、Python 3.14.7、Git 2.56.0.windows.4 和 Codex CLI 0.169.1。测试输入由临时 Git 仓库和虚构会话生成。
+- 初次专项运行 4 项，7.520 秒，出现 1 项误报冲突。Windows 的两份工作区采用 LF 和 CRLF，初版按原始字节生成 Git 文本对象。调整后按输入仓库的 Git 换行规则读取跟踪文件，在隔离配置中进行 Git 操作。专项 4 项复测全部通过，8.519 秒。再补合并后才生效的内容过滤器和中途保存检查，6 项通过，15.103 秒。额外核对自定义合并驱动隔离、文本和二进制冲突、原索引字节及显式纳入的新文件。
+- 执行 `.\.venv\Scripts\python.exe tests/bench_handoff_merge.py --output build-exe/verification/handoff-merge-48m-02`。数据为 768 个 64 KiB 基线文件，共 48 MiB，加少量暂存和未暂存文本变更。`handoff-merge-48m-01` 的合并成功和冲突用时分别为 3.659、2.054 秒，末次为 3.334、1.288 秒。末次成功只调用 1 次 `merge-tree`、1 次检出和 1 次对象打包。冲突路径执行 2 次 `merge-tree`，检出和打包均为 0 次。同批输入的既有封存与恢复为 13.994 秒，属于独立步骤。结果保存在各轮的 `result.json`，时长为单次本机墙钟实测，未测峰值内存及网络吞吐。
+- 执行 `.\.venv\Scripts\python.exe tests/smoke_handoff.py --sync --roundtrip --merge --output build-exe/verification/handoff-merge-native-01`，真实 Codex CLI 往返后在合并目录续写同一线程。已核对 A 独有的暂存文件、B 文件的暂存版和工作版，以及原生写入锁和旧历史备份。文件传输采用本机目录复制，模型回复来自回环测试服务。此前无合并参数的往返复测也通过，用时 8.28 秒。
+- 首轮全量回归运行 156 项，56.442 秒，1 项跳过。快进到并行桌面更新 `16f4206` 后的集成复测，156 项中有 1 项 Windows 临时库清理失败，耗时 58.554 秒，日志在 `handoff-merge-integrated-regression.txt`。原因是对话读线程偶尔晚于窗口关闭。改为退出时收尾当前读任务后，运行 `python -m unittest discover -s tests -t . -p 'test_*.py' -v` 共 157 项，156 项通过，1 项可选 Stream SDK 跳过，53.059 秒，结果在 `build-exe/verification/handoff-merge-final-regression.txt`。
+- 用与前次相同的 35 条长消息和 140 毫秒读取等待，运行 `python tests/bench_task_switch.py --output build-exe/verification/task-switch-after-merge`。界面事件循环等待中位数为 1.51 毫秒，显示历史中位数为 8.39 毫秒。上一版同口径记录分别为 1.58 毫秒和 8.34 毫秒。本轮 `tests/smoke_desktop.py --output build-exe/verification/handoff-merge-desktop-smoke` 通过，使用 Qt offscreen 模式。
+- 当前覆盖同 HEAD 的独立合并结果。不同提交的分支合并、原目录内应用和两台设备的网络验收仍待完成。 [工作区合并与交接说明](../HANDOFF.md) · [Git 三方树合并](https://git-scm.com/docs/git-merge-tree)
+
 ## 2026-11-18 跨盘往返续接与原生写入锁
 
 - 基线 `b3b8dbf` 已支持自动发布和接收目录，但返回源端时，早期同线程历史会被判为冲突。本轮验证完整字节前缀的原生 JSONL 快进与重复发布。环境为 Windows、Python 3.14.7、Git 2.56.0.windows.4 和 Codex CLI 0.169.1。输入为虚构的独立仓库、互不共享状态的两个 Codex 目录和本地固定回复服务。

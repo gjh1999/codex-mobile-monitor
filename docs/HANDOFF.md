@@ -99,9 +99,23 @@ codex
 
 目标端等清单和包都到达后校验，在本机独立目录预备。已有工作区和较早的预备目录会保留。登录后可从 `GET /api/v1/handoff-sync` 查看各项目的来源、版本与本机预备路径。`ready` 表示包已还原且本机历史通过相容性检查。`advance_on_resume` 表示本机历史是较早的完整前缀，使用适配器启动时再验证原生锁并快进。`session_conflict` 表示预备成功且现有历史需核对，原记录和预备目录均保留。`awaiting_package` 表示只有清单到达。`restore_failed` 表示包或本地基线校验失败，后续扫描会重试。`version_conflict` 表示清单版本回退或同版本内容不同。
 
-在返回的预备目录中使用终端适配器续接。当前自动化覆盖封存、发布、预备和兼容历史快进，打开正确的预备目录仍由操作者决定。合并现用工作树留待联调。
+在返回的预备目录中使用终端适配器续接。当前自动化覆盖封存、发布、预备和兼容历史快进，打开正确的预备目录仍由操作者决定。
 
 两端都要续写时，可以在同一项目条目同时配置 `publish` 和 `receive`。`publish.repo` 填本机登记仓库，`publish.thread` 填同一线程。最近完成轮次位于登记的预备区、且该目录回执与项目和线程相符时，下次自动封存会使用该预备工作区。Git 基线仍从登记仓库解析，例如其 `origin/main`。首次配对完成后，各回合之间可以复用同一份配置。
+
+## 合并本机和已接收的工作区
+
+两份工作区的 HEAD 相同且各自已有本机改动时，可按需生成独立的合并工作区。既有的两个输入目录都保留。`--incoming` 指向带恢复回执的目录。`--dest` 使用尚不存在的目录，父目录需已存在。
+
+```powershell
+.\.venv\Scripts\python.exe handoff_merge.py `
+  --local 'C:\Code\Vision' --incoming 'C:\LanxiStaging\vision\office-1-示例' `
+  --dest 'C:\LanxiStaging\vision\merged-local' --include 'notes/mine.md'
+```
+
+本机未跟踪文件用 `--include` 逐个列出。接收端使用恢复回执里的逐文件清单。旧回执没有该字段时，可用 `--include-incoming` 指定。合并使用 Git 的三方树合并，分别计算暂存区和未暂存层。无冲突时只检出一次，并打包并校验独立工作区所需的 Git 对象。放在已登记预备区下的结果可使用终端适配器续接原线程。 [Git 三方树合并](https://git-scm.com/docs/git-merge-tree)
+
+命令返回版本 1 的 JSON。成功为 `merged`，包含两个结果树标识、线程和可打开的目录。发生冲突时返回 `conflict`、所在层、文件路径与 Git 冲突类型，且退出码为 1。HEAD 不同时返回 `different_head` 和两端提交，同样使用退出码 1。配置错误、数据不一致和运行失败使用退出码 2。当前入口为按需执行，支持普通文件，合并结果的暂存区和工作区均会检查内容过滤器。Git 子模块、特殊索引标志、不同提交的分支合并与原路径内切换留待支持。
 
 ## 前端查询
 
@@ -120,6 +134,9 @@ codex
 .\.venv\Scripts\python.exe tests/smoke_handoff.py --output build-exe/verification/handoff-local-repeat
 .\.venv\Scripts\python.exe tests/smoke_handoff.py --sync --output build-exe/verification/handoff-sync-repeat
 .\.venv\Scripts\python.exe tests/smoke_handoff.py --sync --roundtrip --output build-exe/verification/handoff-roundtrip-repeat
+.\.venv\Scripts\python.exe tests/smoke_handoff.py --sync --roundtrip --merge --output build-exe/verification/handoff-merge-native-repeat
+.\.venv\Scripts\python.exe -m unittest -v tests.test_handoff_merge
+.\.venv\Scripts\python.exe tests/bench_handoff_merge.py --output build-exe/verification/handoff-merge-repeat
 ```
 
 每次为 smoke 指定新输出目录。它在系统临时目录创建源仓库，在输出目录创建目标仓库，运行本机真实 Codex CLI，使用不同的临时 Codex 数据目录和仅监听回环的回复服务。第二轮仅在收到第一轮历史后返回预期文本。脚本验证 Git 状态、原线程、新轮次和实际工作目录，保存 `result.json`、封存包和目标端现场。双机、两种 IDE、实际模型服务及日常操作次数需另行验收。

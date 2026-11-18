@@ -34,15 +34,26 @@ DIFF = ['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--ignore-subm
 INDEX_DIFF = [*DIFF, '--cached', '--binary', '--full-index', '--no-color', '--src-prefix=a/', '--dst-prefix=b/']
 
 
-def git(repo, *args, data=None, optional=False):
+def git_process(repo, *args, data=None, isolated=False, index_file=None):
     overrides = {'GIT_DIR', 'GIT_COMMON_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY',
                  'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_NAMESPACE', 'GIT_QUARANTINE_PATH',
                  'GIT_GLOB_PATHSPECS', 'GIT_NOGLOB_PATHSPECS', 'GIT_ICASE_PATHSPECS'}
-    env = {k: v for k, v in os.environ.items() if k.upper() not in overrides}
-    env.update(GIT_LITERAL_PATHSPECS='1', GIT_TERMINAL_PROMPT='0', GIT_OPTIONAL_LOCKS='0', GIT_LFS_SKIP_SMUDGE='1')
-    proc = subprocess.run(['git', '-c', 'core.hooksPath=' + os.devnull,
+    env = {k: v for k, v in os.environ.items()
+           if k.upper() not in overrides and not (isolated and k.upper().startswith('GIT_'))}
+    if isolated:
+        env.update(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull, GIT_ATTR_NOSYSTEM='1',
+                   GIT_NO_LAZY_FETCH='1', GIT_NO_REPLACE_OBJECTS='1')
+    if index_file:
+        env['GIT_INDEX_FILE'] = str(index_file)
+    env.update(GIT_LITERAL_PATHSPECS='1', GIT_TERMINAL_PROMPT='0', GIT_OPTIONAL_LOCKS='0',
+               GIT_LFS_SKIP_SMUDGE='1', GIT_NO_LAZY_FETCH='1')
+    return subprocess.run(['git', '-c', 'core.hooksPath=' + os.devnull,
                            '-c', 'core.fsmonitor=false', '-C', str(repo), *map(str, args)],
                           input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+
+
+def git(repo, *args, data=None, optional=False, isolated=False, index_file=None):
+    proc = git_process(repo, *args, data=data, isolated=isolated, index_file=index_file)
     if proc.returncode and not optional:
         raise HandoffError(f'Git {args[0]} 失败：{proc.stderr.decode("utf-8", "replace").strip()}')
     return None if proc.returncode else proc.stdout
@@ -136,11 +147,13 @@ def session_location(filename, thread):
 
 
 def check_object_sizes(repo, ids):
+    if not ids:
+        return
     result = git(repo, 'cat-file', '--batch-check=%(objecttype) %(objectsize)', data=ids)
     require(all(int(line.split()[1]) <= MAX_FILE for line in result.splitlines()), 'Git 变更包含超出上限的对象')
 
 
-def git_state(repo, includes):
+def checked_index(repo):
     head = git(repo, 'rev-parse', '--verify', 'HEAD').decode().strip()
     ref = git(repo, 'symbolic-ref', '-q', 'HEAD', optional=True)
     branch = ref.decode().strip().removeprefix('refs/heads/') if ref else None
@@ -152,11 +165,11 @@ def git_state(repo, includes):
     entries = names(git(repo, 'ls-files', '-v', '--stage', '-z'))
     require(all(e.startswith('H ') and e[2:8] != '160000' for e in entries),
             '子模块、稀疏检出和特殊索引标志尚不支持')
-    paths = git(repo, 'ls-files', '-z')
+    paths = ''.join(entry.split('\t', 1)[1] + '\0' for entry in entries).encode('utf-8')
     attrs = names(git(repo, 'check-attr', '-z', '--stdin', 'filter', data=paths))
     require(all(value in ('unset', 'unspecified') for value in attrs[2::3]),
             '项目依赖 Git 内容过滤器，请先完成独立对象交付')
-    index_hash = sha(git(repo, 'ls-files', '--stage', '-z'))
+    index = ''.join(entry[2:] + '\0' for entry in entries).encode('utf-8')
     raw = git(repo, *DIFF, '--cached', '--raw', '--no-abbrev', '-z')
     require(raw == git(repo, *DIFF, '--cached', '--raw', '--no-abbrev', '-z', '--ita-visible-in-index'),
             '暂不支持 intent-to-add 索引')
@@ -165,6 +178,11 @@ def git_state(repo, includes):
     check_object_sizes(repo, ''.join(oid + '\n' for oid in ids).encode())
     for item in changed[1::2]:
         local_path(repo, item)
+    return head, branch, index
+
+
+def git_state(repo, includes):
+    head, branch, index = checked_index(repo)
     staged = git(repo, *INDEX_DIFF)
     dirty = names(git(repo, *DIFF, '--name-only', '-z'))
     extra = sorted(set(includes))
@@ -172,7 +190,7 @@ def git_state(repo, includes):
         local_path(repo, item)
         require(names(git(repo, 'ls-files', '--others', '--exclude-standard', '-z', '--', item)) == [item],
                 f'新增文件须为未忽略的单个未跟踪文件：{item}')
-    return head, branch, index_hash, staged, dirty, extra
+    return head, branch, sha(index), staged, dirty, extra
 
 
 def work_file(root, item):
@@ -355,7 +373,7 @@ def restore(package, checksum, project, seed, dest, expected=None):
             (private / 'handoff.json').write_text(json.dumps(dict(
                 version=1, project=project, head=head, package_sha256=checksum, cwd=m['cwd'],
                 thread=m['thread'], turn=m['turn'], rollout=m['rollout'],
-                sha256=m['objects']['session.jsonl'])), encoding='utf-8')
+                sha256=m['objects']['session.jsonl'], included=sorted(extra))), encoding='utf-8')
         require(not dest.exists() and not dest.is_symlink(), '目标目录已被占用')
         work.rename(dest)
     return dict(project=project, cwd=str(dest / m['cwd']), head=head, thread=m['thread'], turn=m['turn'])

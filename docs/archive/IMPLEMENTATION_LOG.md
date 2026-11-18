@@ -24,6 +24,7 @@
 - Windows 11 x64、Python 3.14.7、PySide6 6.12.0。在 `build-exe/verification/lanxi-notebook-matching/worktree` 设置 `QT_QPA_PLATFORM=windows`，执行 `python tests/smoke_desktop.py --output ../windows-hourly-poetry`，约 9.07 秒通过。保留早期截图 `windows`、筛选复验 `windows-final` 和固定诗句版 `windows-release`。用模拟时间走完 25 联并验证整点换句、出处更新、同小时稳定，以及 1020×640 下不裁字。随记和待办以临时 SQLite 验证新增、自动保存、归档、恢复、完成与切回 Codex 时保留草稿。未等待自然整点或触发真实休眠。
 - 选诗依据 [chinese-poetry《唐诗三百首》](https://github.com/chinese-poetry/chinese-poetry/blob/master/全唐诗/唐诗三百首.json)，简体篇名有通用别名，另核对 [常建原文](https://zh.wikisource.org/wiki/破山寺後禪院) 与 [钱起原文](https://ctext.org/text.pl?if=gb&node=153790)。源数据留在验收目录，运行时仅使用随包的 25 联。
 - 运行 `python -m unittest discover -s tests -t . -p 'test_*.py' -q`，打包基线集成回归 147 项中 146 项通过、1 项跳过，用时 33.867 秒。执行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-exe.ps1 -AppName Lanxi-Glass-R9`，PyInstaller 6.22.3 构建最终包约 36.69 秒。单独存放前序构建 `package-first` 和 `package-notebook`。交付文件 `release/Lanxi-Glass-R9.exe` 为 61,422,902 字节，包含诗词、随记和 Qt Windows 插件。使用 `python build-exe/verify-lanxi-launch.py Lanxi-Glass-R9.exe` 在 `lanxi-folder-package-kvwtc0zh` 中于 1.43 秒验证原生窗口和 SQLite。
+- 源码合并并行的后台提交 `26c0d7e` 后重跑 150 项。首次用时 38.580 秒，Claude 暂停测试清理临时数据库时遇到 Windows 文件占用，输出在 `integrated-regression.txt`。同命令复验用时 38.147 秒，149 项通过、1 项跳过，输出在 `integrated-regression-rerun.txt`。
 
 ## 2026-11-18 自动封存、签名发布和预备目录恢复
 

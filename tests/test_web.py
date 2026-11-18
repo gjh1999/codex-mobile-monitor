@@ -57,3 +57,57 @@ class WebTests(unittest.TestCase):
             self.assertEqual(self.client.get(url).json(), {'projects': []})
         with patch('monitor.config', return_value={'handoffProjects': {'alpha': 'relative-is-invalid'}}):
             self.assertEqual(self.client.get(url).json(), {'projects': [{'project': 'alpha', 'status': 'invalid_receipt'}]})
+
+    def test_project_control_requires_login_and_reports_coordinator_outage(self):
+        from coordination_client import ControlDenied
+        url = '/api/v1/project-control'
+        self.assertEqual(self.client.get(url).status_code, 401)
+        self.login()
+        client = Mock(paths={str(os.getcwd()): 'vision'})
+        client.request.side_effect = ControlDenied(detail='coordinator offline')
+        with patch('web_server.device_client', return_value=client):
+            self.assertEqual(self.client.get(url).json(), {'projects': [{'project': 'vision', 'status': 'unavailable'}]})
+
+    def test_embedded_web_reads_the_desktop_worker_state(self):
+        import socket
+        import tempfile
+        import time
+        from pathlib import Path
+        from urllib.error import URLError
+        from urllib.request import build_opener, HTTPCookieProcessor, ProxyHandler, Request
+        import monitor
+
+        with socket.socket() as reservation:
+            reservation.bind(('127.0.0.1', 0))
+            port = reservation.getsockname()[1]
+        states = {'shared_worker': True, 'threads': []}
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(monitor, 'ROOT', Path(directory)), \
+                patch.object(monitor, 'poll', lambda stop: stop.wait()), \
+                patch.object(monitor, 'poll_claude', lambda stop: stop.wait()), \
+                patch.object(monitor, 'snapshot', return_value=states), \
+                patch.dict(os.environ, MONITOR_PASSWORD='test-password-123456', MONITOR_HOST='127.0.0.1',
+                           MONITOR_PORT=str(port), MONITOR_HTTPS='0', DINGTALK_CLIENT_ID=''):
+            stop, workers = monitor.start_background_service(embed_web=True)
+            opener = build_opener(ProxyHandler({}), HTTPCookieProcessor())
+            url = f'http://127.0.0.1:{port}'
+            try:
+                deadline = time.monotonic() + 5
+                login = Request(url + '/api/login', data=b'{"password":"test-password-123456"}',
+                                headers={'Content-Type': 'application/json'})
+                while True:
+                    try:
+                        with opener.open(login, timeout=1) as response:
+                            self.assertEqual(response.status, 200)
+                        break
+                    except URLError:
+                        if time.monotonic() >= deadline:
+                            raise
+                        time.sleep(0.05)
+                with opener.open(url + '/api/state', timeout=1) as response:
+                    self.assertIn(b'"shared_worker":true', response.read())
+                self.assertEqual(len(workers.threads), 3)
+            finally:
+                stop.set()
+                workers.join(6)
+            self.assertFalse(workers.is_alive())

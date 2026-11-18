@@ -3,6 +3,7 @@ import hashlib
 import json
 import math
 import uuid
+from coordination_client import ControlDenied
 
 
 def quota_state(snapshot):
@@ -184,6 +185,9 @@ class QuotaRecovery:
             if task.get('_sendGuard') is not None:
                 params['_sendGuard'] = task['_sendGuard']
             rpc.call('turn/start', params)
+        except ControlDenied:
+            self.defer(tid, 'checking', now)
+            return 'blocked:project_control'
         except Exception:
             self.db.execute("UPDATE quota_waits SET state='unknown' WHERE thread=?", (tid,));self.db.commit()
             return 'blocked:quota_delivery'

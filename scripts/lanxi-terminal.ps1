@@ -7,12 +7,5 @@ function global:codex {
     }
     $lanxiRoot = Split-Path -Parent $PSScriptRoot
     $python = Join-Path $lanxiRoot '.venv\Scripts\python.exe'
-    $reply = & $python (Join-Path $lanxiRoot 'handoff.py') prepare-resume --cwd (Get-Location).ProviderPath
-    if ($LASTEXITCODE -ne 0) { return }
-    if ($reply -ne 'null') {
-        $binding = $reply | ConvertFrom-Json
-        & $native resume --cd $binding.cwd $binding.thread
-    } else {
-        & $native
-    }
+    & $python (Join-Path $lanxiRoot 'coordination_client.py') terminal --cwd (Get-Location).ProviderPath --resume -- $native
 }

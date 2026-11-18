@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path
 
 from rpc_errors import RPCError
+from coordination_client import ControlDenied
 
 
 class TaskControl:
@@ -108,11 +109,19 @@ class TaskControl:
             detail = error.detail or ''
             if 'active writer' in detail:
                 rpc.owned_threads.discard(tid)
-                thread = rpc.call('thread/read', {'threadId': tid, 'includeTurns': False}).get('thread', {})
+                try:
+                    thread = rpc.call('thread/read', {'threadId': tid, 'includeTurns': False}).get('thread', {})
+                except RPCError:
+                    if not isinstance(error, ControlDenied):
+                        raise
+                    thread = {}
                 client = 'Claude Code' if getattr(rpc, 'client_type', 'codex') == 'claude' else 'Codex'
+                message = ('项目处于人工使用或后台交还中，当前仅可查看。' if isinstance(error, ControlDenied)
+                           else '原' + client + '窗口仍在占用会话，只读关注中；请先退出原会话再接入控制。')
                 return dict(threadId=tid, mode='observe', status='observing', title=thread.get('name') or thread.get('title'), cwd=thread.get('cwd'),
-                            message='原' + client + '窗口仍在占用会话，只读关注中；请先退出原会话再接入控制。', canControl=False,
-                            threadStatus=thread.get('status'), goalStatus=self._goal(rpc, tid).get('status'), retryAt=time.time() + 60)
+                            message=message, canControl=False,
+                            threadStatus=thread.get('status'), goalStatus=self._goal(rpc, tid).get('status'),
+                            retryAt=time.time() + (3 if isinstance(error, ControlDenied) else 60))
             return dict(threadId=tid, mode='none', status='failed', message='接入失败：' + detail[:180], canControl=False, retryAt=time.time() + 300)
 
     def _active_turn(self, rpc, tid):

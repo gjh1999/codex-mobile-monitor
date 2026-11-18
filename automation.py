@@ -1,6 +1,7 @@
 ﻿"""Connection-bound approvals and durable wake reservations."""
 import copy, hashlib, json, secrets, sqlite3, threading, time
 from quota_recovery import QuotaRecovery, quota_state
+from coordination_client import ControlDenied
 APPROVAL_METHODS = {'item/commandExecution/requestApproval','item/fileChange/requestApproval','item/permissions/requestApproval'}
 class Approvals:
  def __init__(self,clock=time.time):self.items={};self.lock=threading.RLock();self.clock=clock
@@ -23,14 +24,27 @@ class Approvals:
    for v in self.items.values():
     if v['rpc'] is rpc and v['decision'] is None:v['decision']='disconnected'
  def decide(self,token,allow):
+  guard=None
   with self.lock:
    v=self.items[token]
    if v['decision'] is not None:return v['decision']
-   allow=allow and self.clock()<v['expires'];req=v['request'];p=req.get('params',{})
+   req=v['request'];p=req.get('params',{})
+   provider=getattr(v['rpc'],'approval_guard',None) if allow and self.clock()<v['expires'] else None
+  if provider is not None:
+   try:guard=provider(p.get('threadId'))
+   except ControlDenied:return 'control_lost'
+  with self.lock:
+   if v['decision'] is not None:return v['decision']
+   allow=allow and self.clock()<v['expires']
    if allow and not any(p.get(k) for k in ('command','changes','permissions','networkApprovalContext')):raise ValueError('Concrete approval details unavailable')
    result=({'permissions':p.get('permissions',{}) if allow else {},'scope':'turn'} if req['method']=='item/permissions/requestApproval' else {'decision':'accept' if allow else 'decline'})
    v['decision']='responding'
-   try:v['rpc'].send({'id':req['id'],'result':result})
+   try:
+    if not allow or guard is None:v['rpc'].send({'id':req['id'],'result':result})
+    else:v['rpc'].send({'id':req['id'],'result':result},guard=guard)
+   except ControlDenied:
+    v['decision']=None
+    return 'control_lost'
    except Exception:v['decision']='unknown_delivery'
    else:v['decision']='allowed' if allow else 'denied'
    return v['decision']
@@ -93,7 +107,11 @@ class Scheduler:
      if not cur.rowcount:out.append('blocked:duplicate');continue
      params={'threadId':key,'input':[{'type':'text','text':t['prompt']}]}
      if t.get('_sendGuard') is not None:params['_sendGuard']=t['_sendGuard']
-     rpc.call('turn/start',params)
+     try:rpc.call('turn/start',params)
+     except ControlDenied:
+      self.db.execute("DELETE FROM reservations WHERE id=? AND state='reserved'",(stamp,))
+      self.db.execute('UPDATE tasks SET next=? WHERE id=?',(now+5,key));self.db.commit()
+      out.append('blocked:project_control');continue
      self.db.execute('UPDATE reservations SET state=? WHERE id=?',('sent',stamp));self.db.execute('UPDATE tasks SET failures=0 WHERE id=?',(key,));self.db.commit();out.append('sent:'+key)
     except Exception:
      pending_wait=self.quota_recovery.get(key)

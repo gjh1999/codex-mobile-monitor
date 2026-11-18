@@ -11,6 +11,7 @@ from automation import APPROVAL_METHODS
 
 
 from rpc_errors import RPCError
+from coordination_client import ControlDenied, ProjectWrites
 
 
 class UniversalRPC:
@@ -184,10 +185,101 @@ class UniversalRPC:
 
 class CodexRPC(UniversalRPC):
     """Codex-specific RPC client."""
+    project_writes = None
 
-    def __init__(self, approvals, journal=None, custom_process=None):
+    def __init__(self, approvals, journal=None, custom_process=None, coordination=None):
         self.approvals = approvals
+        self.project_writes = ProjectWrites(coordination) if coordination else None
+        self.loaded_threads = set()
+        self.draining = False
         super().__init__('codex', journal=journal, custom_process=custom_process)
+
+    def call(self, method, params, timeout=20):
+        writes = self.project_writes
+        if not writes:
+            return super().call(method, params, timeout)
+        if method == 'thread/start':
+            result = super().call(method, params, timeout)
+            self.loaded_threads.add(result['thread']['id'])
+            return result
+        if method not in ('turn/start', 'turn/steer', 'thread/goal/set', 'thread/resume'):
+            return super().call(method, params, timeout)
+        thread = params['threadId']
+        project = writes.project_for(self, thread, params.get('cwd'))
+        if project is None:
+            result = super().call(method, params, timeout)
+            if method == 'thread/resume':
+                self.loaded_threads.add(thread)
+            return result
+        previous_guard = params.get('_sendGuard')
+        reservation = None
+
+        def guard():
+            nonlocal reservation
+            if previous_guard and not previous_guard():
+                return False
+            try:
+                reservation = writes.reserve(project, thread)
+            except ControlDenied as error:
+                if method == 'thread/resume':
+                    raise ControlDenied(detail='active writer: ' + error.detail) from error
+                raise
+            return True
+
+        confirmed = False
+        accepted = False
+        turn = None
+        wired = {**params, '_sendGuard': guard}
+        if method == 'thread/resume' and not params.get('cwd'):
+            mapped = writes.client.restored_directory(project, thread)
+            if mapped:
+                wired['cwd'] = mapped
+        try:
+            result = super().call(method, wired, timeout)
+            accepted = True
+            if method == 'thread/resume':
+                self.loaded_threads.add(thread)
+            elif method == 'turn/start':
+                turn = result.get('turn', {}).get('id')
+            elif method == 'turn/steer':
+                turn = params.get('expectedTurnId')
+            confirmed = method not in ('turn/start', 'turn/steer') or bool(turn)
+            return result
+        except RPCError:
+            # An explicit RPC error settles a sent request. A refused preflight
+            # never created a new local reservation for this request.
+            confirmed = True
+            raise
+        finally:
+            if reservation is not None:
+                with self.write_lock:
+                    reservation.pending -= 1
+                    reservation.uncertain = reservation.uncertain or not confirmed
+                    if thread in self.loaded_threads:
+                        reservation.attached = True
+                    reservation.needs_idle |= accepted
+                    if turn:
+                        reservation.turn = turn
+
+    def approval_guard(self, thread):
+        writes = self.project_writes
+        if not writes:
+            return None
+        if not thread:
+            raise ControlDenied(detail='无法核对此审批所属的线程')
+        project = writes.project_for(self, thread)
+        if project is None:
+            return None
+
+        def guard():
+            writes.reserve(project, thread, approval=True)
+            return True
+
+        return guard
+
+    def reconcile_writes(self, shutdown=False):
+        self.project_writes.release_finished(self)
+        return self.project_writes.yield_to_foreground(self, shutdown)
 
 
 # Claude Code uses its own stream-json control protocol, not Codex app-server.

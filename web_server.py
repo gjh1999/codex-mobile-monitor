@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 import monitor
 from handoff import handoff_receipts
+from coordination_client import ControlDenied, device_client
 
 
 def create_app(start_workers=True):
@@ -24,11 +25,13 @@ def create_app(start_workers=True):
     @asynccontextmanager
     async def lifespan(app):
         stop = threading.Event()
-        worker = monitor.start_background_service(stop)[1] if start_workers else None
-        yield
-        stop.set()
-        if worker:
-            await asyncio.to_thread(worker.join, 8)
+        worker = monitor.start_background_service(stop, embed_web=False)[1] if start_workers else None
+        try:
+            yield
+        finally:
+            stop.set()
+            if worker:
+                await asyncio.to_thread(worker.join, 8)
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None)
 
@@ -95,6 +98,21 @@ def create_app(start_workers=True):
             raise HTTPException(503, 'handoffProjects 配置应为项目与本机目录的映射')
         return {'projects': handoff_receipts(projects)}
 
+    @app.get('/api/v1/project-control', dependencies=[Depends(auth)])
+    def project_control():
+        try:
+            client = device_client(monitor.config())
+        except (OSError, TypeError, ValueError, KeyError) as error:
+            raise HTTPException(503, '协调服务配置有误') from error
+        projects = []
+        if client:
+            for project in client.paths.values():
+                try:
+                    projects.append({'project': project, **client.request(project, 'control')})
+                except ControlDenied:
+                    projects.append({'project': project, 'status': 'unavailable'})
+        return {'projects': projects}
+
     @app.get('/api/conversation/{thread}', dependencies=[Depends(auth)])
     def conversation(thread: str, client: Literal['codex', 'claude'] = 'codex'):
         return monitor.conversation_for(thread, client)
@@ -136,6 +154,24 @@ def create_app(start_workers=True):
     return app
 
 
+def embedded_web_worker(stop):
+    """Serve the authenticated Web UI against the desktop's live monitor state."""
+    import uvicorn
+    config = uvicorn.Config(create_app(start_workers=False), host=os.environ.get('MONITOR_HOST', '127.0.0.1'),
+                            port=int(os.environ.get('MONITOR_PORT', 8765)), timeout_graceful_shutdown=3)
+    server = uvicorn.Server(config)
+
+    async def serve():
+        task = asyncio.create_task(server.serve())
+        while not stop.is_set() and not task.done():
+            await asyncio.sleep(0.2)
+        server.should_exit = True
+        await task
+
+    return threading.Thread(target=lambda: asyncio.run(serve()), name='monitor-web', daemon=True)
+
+
 if __name__ == '__main__':
     import uvicorn
-    uvicorn.run(create_app(), host=os.environ.get('MONITOR_HOST', '127.0.0.1'), port=8765)
+    uvicorn.run(create_app(), host=os.environ.get('MONITOR_HOST', '127.0.0.1'),
+                port=int(os.environ.get('MONITOR_PORT', 8765)))

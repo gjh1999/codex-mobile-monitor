@@ -2,6 +2,15 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-18 跨设备项目控制与桌面共用后台
+
+- 目的为验证人工活动能撤销下一次后台写入许可，且原生写入锁在交还后可重新取得。上一阶段 `b707345` 完成跨盘会话续接，回归 128 项、通过 127 项、跳过 1 项。此次实现中心 SQLite 事务、设备身份验证、活动序号和项目版本，接入 Codex 原生发送边界。试验在 Windows、Python 3.14.7、Codex CLI 0.169.1 下进行。
+- 初次用两份 Codex app-server 和临时会话探测 `thread/unsubscribe`，因缺少测试模型提供方配置而接入失败，C 盘临时目录清理还遇到 Windows 文件占用。把原测试配置复制到独立目录后，`ownership-native-03` 证实旧连接收到 `unsubscribed`，第二份原生连接仍被写入锁拒绝。复验 `ownership-native-04` 在 0.2 秒、再等 1 秒和再等 3 秒后重试，仍均拒绝。实现随后改为确认空闲并退出原生进程，再释放中心记录。
+- 首轮协调与额度专项共 32 项，其中旧回归用 `__new__` 构造 RPC 导致缺少默认协调字段，1 项报错；补默认字段后 37 项均通过，2.805 秒。PowerShell 裸命令续接和显式参数透传用例独立通过，2.369 秒。专项还覆盖 3 设备并发登记、重复事件、多窗口、中心重开后保留失联占用、旧审批拒绝、发送超时保留写入记录以及明确拒发后的调度重试。
+- 使用 `.\.venv\Scripts\python.exe tests/smoke_handoff.py --output build-exe/verification/handoff-v2-regression` 创建独立的跨盘验收数据，约 4.08 秒通过。再运行 `.\.venv\Scripts\python.exe tests/smoke_coordination.py --fixture build-exe/verification/handoff-v2-regression --output build-exe/verification/coordination-native-04`。单机回环使用 3 个虚构设备身份、3 次真实 app-server 连接和 1 条完成的原生会话；验证后台按回执加载目标目录、人工报到后拒发旧后台的新轮次、旧连接退出后人工接手、最后一个人工会话关闭后后台重接。四次通过的协调验证分别记录 1.438、0.873、0.927 和 0.715 秒，未测线上时延。最后一次结果位于 `build-exe/verification/coordination-native-04/result.json`，后台重接后的项目版本为 7。
+- 用 `.\.venv\Scripts\python.exe -m unittest discover -s tests -t . -p 'test_*.py' -v` 跑本机工作树两次，均运行 139 项，138 项通过，1 项可选 Stream SDK 跳过，分别用时 26.493 和 25.841 秒。最终输出位于 `build-exe/verification/coordination-regression-02.txt`。其中用真实回环 HTTP 验证桌面内嵌 Web 登录、读取同进程 Worker 状态及收尾退出。
+- 已完成协议、终端适配器和工作进程接入。VS Code、PyCharm 自动上报，独立网络故障，Claude Code，三台物理设备以及本次源码的 EXE 打包仍待验收。配置、恢复口径与复现命令见 [跨设备项目控制](../PROJECT_CONTROL.md)。
+
 ## 2026-11-18 以 R4 为基线重建 R5
 
 - 在 `build-exe/verification/lanxi-r4-baseline/r5-source/mobile-monitor` 解包 R4 源码 `287a3f6`。只覆盖 `9f4ff0d` 的 `desktop_qt.py` 和配套桌面验收脚本。第一轮发现 Git 归档受 CRLF 设置影响，第二轮关闭归档的 CRLF 转换，逐字节核对桌面入口、毛玻璃、配色、后台模块、图标和构建脚本均来自 R4。重建使用已提交的快照。

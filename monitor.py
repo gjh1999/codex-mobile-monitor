@@ -11,6 +11,7 @@ from daemon_support import ScopedPolicy,WindowsNotifications
 from attachments import Attachments
 from task_control import TaskControl
 from history_labels import load_labels
+from coordination_client import device_client
 def _runtime_root():
  # A frozen app must keep its databases/configuration beside the EXE.  PyInstaller's
  # temporary extraction directory is disposable and cannot be used for state.
@@ -102,7 +103,7 @@ def poll(stop):
  scheduler=Scheduler(str(ROOT/'scheduler.sqlite3'),approvals)
  notifications=Notifications(str(ROOT/'notifications.sqlite3'))
  managed=ManagedTasks(str(ROOT/'managed.sqlite3'),ROOT.parent)
- rpc=None;channel=None;failures=0
+ rpc=None;channel=None;failures=0;drained=[]
  controller=TaskControl(ROOT/'task-control.sqlite3');controller.seed(config().get('autoAttachThreads',[]))
  journal=ReplyLog(str(ROOT/'replies.sqlite3'))
  native=WindowsNotifications(str(ROOT/'windows-notifications.sqlite3'))
@@ -110,10 +111,19 @@ def poll(stop):
   while not stop.is_set():
    try:
     cfg=config()
+    for previous in drained[:]:
+     previous.project_writes.release_closed()
+     if not previous.project_writes.tickets:drained.remove(previous)
     if not history_labels:history_labels=load_labels()
     if rpc is None or rpc.closed:
-     if rpc:rpc.close()
-     rpc=RPC(approvals,journal=journal)
+     if rpc:
+      rpc.close()
+      if getattr(rpc,'draining',False):
+       rpc.p.wait(timeout=3)
+       drained.append(rpc)
+     client=device_client(cfg)
+     rpc=RPC(approvals,journal=journal,coordination=client) if client else RPC(approvals,journal=journal)
+    if getattr(rpc,'project_writes',None) and rpc.reconcile_writes():continue
     controller.tick(rpc)
     controls=controller.snapshot();update(controls=controls,attachments=controls['tasks'])
     managed_jobs,managed_status=managed.sync(rpc,cfg.get('managedTasks',[]))
@@ -150,7 +160,9 @@ def poll(stop):
     native.notify('failure:'+str(int(time.time()//3600)),'Codex monitor retrying','Connection unavailable; no replacement research thread created.')
    stop.wait(min(300,3*2**min(failures,6)))
  finally:
-  if rpc:rpc.close()
+  if rpc:
+   if getattr(rpc,'project_writes',None) and not rpc.closed:rpc.reconcile_writes(shutdown=True)
+   rpc.close()
   if controller:controller.db.close()
   scheduler.db.close();notifications.db.close();managed.db.close()
 
@@ -202,14 +214,20 @@ class ServiceWorkers:
   if not self.is_alive() and self.service_lock:self.service_lock.close()
  def is_alive(self):return any(thread.is_alive() for thread in self.threads)
 
-def start_background_service(stop=None):
+def start_background_service(stop=None, embed_web=None):
  """Start independent Codex and Claude workers inside the desktop process."""
  from service_lock import ServiceLock
- service_lock=ServiceLock(ROOT/'monitor.lockfile')
  stop = stop or threading.Event()
+ if embed_web is None:embed_web=os.environ.get('MONITOR_EMBED_WEB')=='1'
+ web_worker=None
+ if embed_web:
+  from web_server import embedded_web_worker
+  web_worker=embedded_web_worker(stop)
+ service_lock=ServiceLock(ROOT/'monitor.lockfile')
  worker=threading.Thread(target=poll,args=(stop,),daemon=True,name='monitor-worker')
  claude_worker=threading.Thread(target=poll_claude,args=(stop,),daemon=True,name='claude-monitor-worker')
  worker.start();claude_worker.start()
+ if web_worker:web_worker.start()
  if os.environ.get('DINGTALK_CLIENT_ID') and os.environ.get('DINGTALK_CLIENT_SECRET'):
   from dingtalk_commands import CommandRouter,run_stream
   cfg=config()
@@ -219,4 +237,4 @@ def start_background_service(stop=None):
    try:run_stream(router,os.environ['DINGTALK_CLIENT_ID'],os.environ['DINGTALK_CLIENT_SECRET'],lambda:update(streamStatus='callback_received'))
    except Exception:update(streamStatus='unavailable; credentials or SDK need local verification')
   threading.Thread(target=stream_worker,daemon=True,name='dingtalk-stream').start()
- return stop,ServiceWorkers([worker,claude_worker],service_lock)
+ return stop,ServiceWorkers([worker,claude_worker]+([web_worker] if web_worker else []),service_lock)

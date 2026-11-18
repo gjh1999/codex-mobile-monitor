@@ -25,6 +25,7 @@ Windows 原生桌面软件，用于集中查看和控制本机 Codex / Claude Co
 | 配置键、默认值、环境变量和数据位置 | [配置说明](docs/CONFIGURATION.md) |
 | 了解模块职责和后台处理流程 | [架构与文件说明](docs/ARCHITECTURE.md) |
 | 在另一台电脑恢复 Git 工作区与原 Codex 线程，查询恢复回执 | [代码与会话交接](docs/HANDOFF.md) |
+| 登记开发机、协调后台写入权，在桌面进程中启用 Web | [跨设备项目控制](docs/PROJECT_CONTROL.md) |
 | 使用桌面窗口、托盘及 EXE | [桌面使用说明](docs/DESKTOP.md) |
 | 切换客户端、理解控制与自动推进边界 | [双客户端使用说明](docs/MULTI_CLIENT.md) |
 | 配置 Webhook 通知与 Stream 指令 | [钉钉配置](docs/DINGTALK_SETUP.md) |

@@ -1,4 +1,4 @@
-import tempfile,unittest,threading
+import json,tempfile,unittest,threading
 from pathlib import Path
 from task_control import TaskControl
 from rpc_client import RPCError
@@ -35,6 +35,40 @@ class Tests(unittest.TestCase):
   c.submit(TARGET,'message','do work','send1');c.tick(r)
   self.assertEqual(c.snapshot()['operations'][0]['status'],'failed')
   self.assertNotIn('turn/start',[m for m,p in r.calls])
+ def test_codex_choices_and_settings_are_scoped_to_the_owned_thread(self):
+  control=self.make()
+  rpc=Mock()
+  control.seed([TARGET],managed=False)
+  control.tick(rpc)
+  original_call=rpc.call
+
+  def call(method,params,timeout=20):
+   if method=='model/list':
+    return {'data':[{'model':'real-model','displayName':'Real model','defaultReasoningEffort':'high',
+                     'supportedReasoningEfforts':[{'reasoningEffort':'high'}]}]}
+   if method=='permissionProfile/list':
+    return {'data':[{'id':':workspace','allowed':True},{'id':':danger-full-access','allowed':False}]}
+   if method=='thread/settings/update':
+    self.assertTrue(params['_sendGuard']())
+   return original_call(method,params)
+
+  rpc.call=call
+  for field,value in (('model','real-model'),('permissions',':workspace')):
+   control.submit(TARGET,'codex_settings',json.dumps({'field':field,'value':value}))
+   control.tick(rpc)
+   self.assertEqual(control.snapshot()['operations'][0]['status'],'succeeded')
+  settings=control.snapshot()['tasks'][0]['codexSettings']
+  self.assertEqual(settings,{'model':'real-model','effort':'high','permissions':':workspace'})
+  writes=[{key:value for key,value in params.items() if key!='_sendGuard'}
+          for method,params in rpc.calls if method=='thread/settings/update']
+  self.assertEqual(writes,[{'threadId':TARGET,'model':'real-model','effort':'high'},
+                          {'threadId':TARGET,'permissions':':workspace'}])
+  control.submit(TARGET,'codex_settings',json.dumps({'field':'permissions','value':':danger-full-access'}))
+  control.tick(rpc)
+  self.assertEqual(control.snapshot()['operations'][0]['status'],'failed')
+  with self.assertRaisesRegex(ValueError,'请先执舟'):
+   control.codex_options(OTHER,'model')
+  self.assertEqual(sum(method=='thread/settings/update' for method,_ in rpc.calls),2)
  def test_focus_replaces_only_after_success_and_preserves_stop_intent(self):
   c=self.make();r=Mock();c.seed([TARGET]);c.tick(r)
   r.writer=True

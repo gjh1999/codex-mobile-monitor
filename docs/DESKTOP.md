@@ -22,7 +22,7 @@
 
 ## EXE 与数据
 
-本轮毛玻璃版交付文件为 `release/Lanxi-Glass-R12.exe`。默认构建名为 `release/Lanxi.exe`。
+本轮毛玻璃版交付文件为 `release/Lanxi-Glass-R13.exe`。默认构建名为 `release/Lanxi.exe`。
 
 首页从 25 联唐诗里每小时轮换一句，并同步显示作者与篇名。重开窗口沿用当前小时的诗句，电脑唤醒后直接显示当时的一句。诗句可离线轮换，副标题沿用开发方案封面原文。选诗参考 [Wscats/poetry-skills](https://github.com/Wscats/poetry-skills) 使用的 [chinese-poetry《唐诗三百首》](https://github.com/chinese-poetry/chinese-poetry/blob/master/全唐诗/唐诗三百首.json)，并参考 [常建《题破山寺后禅院》](https://zh.wikisource.org/wiki/破山寺後禪院) 与 [钱起《省试湘灵鼓瑟》](https://ctext.org/text.pl?if=gb&node=153790) 的原文。
 
@@ -35,6 +35,10 @@ EXE 的 `local-config.json`、任务数据库、回复记录和草稿位于 EXE 
 正式使用前应检查源码与 EXE 使用的数据根目录。构建预览版时可指定不同文件名。完整步骤见 [运行与维护](RUNBOOK.md)。
 
 ## 任务操作
+
+在已执舟的 Codex 会话里，在空输入框键入 `/`，上下键或鼠标选择 `/model` 和 `/permissions`。回车打开选项，Esc 收起菜单。模型和权限档位来自当前 Codex，受限制的档位显示为不可选。
+
+设置只作用于所选会话的后续轮次。权限档位沿用当前审批策略。重连后以 Codex 返回的会话设置为准。功能依赖本机 CLI 提供的 App Server 会话设置接口。[Codex 斜杠命令](https://learn.chatgpt.com/docs/developer-commands?surface=cli#slash-commands)
 
 案头按项目目录分组。同一个项目开多个终端时，各段会话显示在同一个可折叠组里。在 Git 项目的子目录启动终端也会归到仓库根目录。同名项目用父路径区分，搜索支持项目名、会话名和路径。
 

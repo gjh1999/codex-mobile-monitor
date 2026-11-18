@@ -1,4 +1,5 @@
 """Persistent task controls; observing a session never grants write access."""
+import json
 import re
 import sqlite3
 import threading
@@ -8,6 +9,12 @@ from pathlib import Path
 
 from rpc_errors import RPCError
 from coordination_client import ControlDenied
+
+CODEX_PERMISSIONS = {
+    ':read-only': ('只读', '在只读沙箱内工作'),
+    ':workspace': ('工作区', '可写入当前工作区'),
+    ':danger-full-access': ('完全访问', '以当前 Windows 用户的权限运行'),
+}
 
 
 class TaskControl:
@@ -25,6 +32,8 @@ class TaskControl:
         self.db.execute('CREATE TABLE IF NOT EXISTS auto_progress(thread TEXT PRIMARY KEY, due REAL NOT NULL, revision TEXT, state TEXT NOT NULL)')
         self.db.execute('CREATE TABLE IF NOT EXISTS operations(id TEXT PRIMARY KEY, thread TEXT, action TEXT, text TEXT, status TEXT, result TEXT, stamp REAL)')
         self.db.execute("UPDATE operations SET status='unknown',result='服务曾中断，请核查操作是否已执行；不会自动重发。' WHERE status='running'")
+        self.db.execute("UPDATE operations SET status='cancelled',result='原 Codex 连接已结束，请重新选择设置。' "
+                        "WHERE status='queued' AND action='codex_settings'")
         self.db.execute("UPDATE targets SET managed=0 WHERE id IN (SELECT thread FROM auto_progress WHERE state='reserved')")
         self.db.execute("UPDATE auto_progress SET state='unknown' WHERE state='reserved'")
         self.db.commit()
@@ -44,7 +53,8 @@ class TaskControl:
     def submit(self, thread, action, text='', request_id=None):
         if action == 'create_test' and not thread:
             thread = '00000000-0000-0000-0000-000000000000'
-        actions = {'create_test', 'attach', 'detach', 'focus', 'manage', 'unmanage', 'pause', 'resume', 'message', 'rename'}
+        actions = {'create_test', 'attach', 'detach', 'focus', 'manage', 'unmanage', 'pause', 'resume', 'message', 'rename',
+                   'codex_settings'}
         if not re.fullmatch(r'[0-9a-fA-F-]{36}', str(thread)) or action not in actions:
             raise ValueError('无效任务或操作。')
         if not isinstance(text, str) or len(text) > 10000 or (action == 'message' and not text.strip()):
@@ -69,6 +79,9 @@ class TaskControl:
                 self.db.execute('UPDATE targets SET paused=1 WHERE id=?', (thread,))
             if action in ('pause', 'detach'):
                 self.db.execute("UPDATE operations SET status='cancelled',result='任务已暂停或移出，未发送这条指令。' WHERE thread=? AND action IN ('message','resume') AND status='queued'", (thread,))
+            if action == 'detach':
+                self.db.execute("UPDATE operations SET status='cancelled',result='任务已移出，未修改设置。' "
+                                "WHERE thread=? AND action='codex_settings' AND status='queued'", (thread,))
             if action == 'focus':
                 self.db.execute("UPDATE operations SET status='cancelled',result='已选择更新的任务。' WHERE action='focus' AND status='queued'")
             self.db.execute("INSERT INTO operations VALUES(?,?,?,?,'queued','等待后台处理',?)", (key, thread, action, text, time.time()))
@@ -98,13 +111,15 @@ class TaskControl:
 
     def _load(self, rpc, tid):
         try:
-            thread = rpc.call('thread/resume', {'threadId': tid, 'excludeTurns': True}).get('thread', {})
+            response = rpc.call('thread/resume', {'threadId': tid, 'excludeTurns': True})
+            thread = response.get('thread', {})
             if thread.get('id') != tid:
                 raise ValueError('后台返回任务标识不一致。')
             rpc.owned_threads.add(tid)
             return dict(threadId=tid, mode='control', status='attached', message='已接入控制，可暂停或发送消息。', canControl=True,
                         threadStatus=thread.get('status'), title=thread.get('name') or thread.get('title'), cwd=thread.get('cwd'),
-                        goalStatus=self._goal(rpc, tid).get('status'), retryAt=time.time() + 3600)
+                        goalStatus=self._goal(rpc, tid).get('status'), retryAt=time.time() + 3600,
+                        codexSettings=self._codex_settings(response))
         except RPCError as error:
             detail = error.detail or ''
             if 'active writer' in detail:
@@ -123,6 +138,82 @@ class TaskControl:
                             threadStatus=thread.get('status'), goalStatus=self._goal(rpc, tid).get('status'),
                             retryAt=time.time() + (3 if isinstance(error, ControlDenied) else 60))
             return dict(threadId=tid, mode='none', status='failed', message='接入失败：' + detail[:180], canControl=False, retryAt=time.time() + 300)
+
+    @staticmethod
+    def _codex_settings(response):
+        if not response.get('model') and not response.get('activePermissionProfile'):
+            return {}
+        return {
+            'model': response.get('model'),
+            'provider': response.get('modelProvider'),
+            'effort': response.get('reasoningEffort'),
+            'permissions': (response.get('activePermissionProfile') or {}).get('id'),
+        }
+
+    def _owns_codex_settings(self, rpc, tid):
+        with self.lock:
+            row = self.db.execute('SELECT enabled FROM targets WHERE id=?', (tid,)).fetchone()
+            return bool(rpc is not None and rpc is self.connection and not getattr(rpc, 'closed', False)
+                        and getattr(rpc, 'client_type', 'codex') == 'codex'
+                        and row and row[0] and tid in rpc.owned_threads
+                        and self.runtime.get(tid, {}).get('canControl'))
+
+    def codex_options(self, tid, field):
+        if field not in ('model', 'permissions'):
+            raise ValueError('无效的 Codex 设置。')
+        with self.lock:
+            rpc = self.connection
+            if not self._owns_codex_settings(rpc, tid):
+                raise ValueError('请先执舟接入该 Codex 会话。')
+            target = self.runtime[tid]
+            settings = dict(target.get('codexSettings') or {})
+            cwd = target.get('cwd')
+        method = 'model/list' if field == 'model' else 'permissionProfile/list'
+        params = {'limit': 100}
+        if field == 'model' and settings.get('provider'):
+            params['modelProvider'] = settings['provider']
+        if field == 'permissions' and cwd:
+            params['cwd'] = cwd
+        rows, cursors = [], set()
+        while True:
+            page = rpc.call(method, params, timeout=8)
+            rows.extend(page.get('data', []))
+            cursor = page.get('nextCursor')
+            if not cursor or cursor in cursors:
+                break
+            params['cursor'] = cursor
+            cursors.add(cursor)
+        options = []
+        for entry in rows:
+            if field == 'model' and entry.get('model') and not entry.get('hidden'):
+                options.append({'value': entry['model'], 'title': entry.get('displayName') or entry['model'],
+                                'detail': entry.get('description'), 'allowed': True,
+                                'effort': entry.get('defaultReasoningEffort'),
+                                'efforts': [item.get('reasoningEffort') for item in entry.get('supportedReasoningEfforts', [])]})
+            elif field == 'permissions' and entry.get('id'):
+                title, detail = CODEX_PERMISSIONS.get(entry['id'], (entry['id'], ''))
+                options.append({'value': entry['id'], 'title': title, 'detail': entry.get('description') or detail,
+                                'allowed': entry.get('allowed') is True})
+        return settings, options
+
+    def _update_codex_settings(self, rpc, tid, text):
+        try:
+            change = json.loads(text)
+            field, value = change['field'], change['value']
+        except (ValueError, TypeError, KeyError) as error:
+            raise ValueError('无效的 Codex 设置。') from error
+        settings, options = self.codex_options(tid, field)
+        picked = next((item for item in options if item['value'] == value and item['allowed']), None)
+        if picked is None:
+            raise ValueError('Codex 当前未开放这一选项。')
+        changes = {field: value}
+        if field == 'model' and picked['effort'] and settings.get('effort') not in picked['efforts']:
+            changes['effort'] = picked['effort']
+        rpc.call('thread/settings/update', {'threadId': tid, **changes,
+                                            '_sendGuard': lambda: self._owns_codex_settings(rpc, tid)})
+        with self.lock:
+            self.runtime[tid]['codexSettings'] = {**settings, **changes}
+        return f'已选「{picked["title"]}」，后续轮次生效。'
 
     def _active_turn(self, rpc, tid):
         data = rpc.call('thread/turns/list', {'threadId': tid, 'limit': 1, 'sortDirection': 'desc'})
@@ -158,6 +249,11 @@ class TaskControl:
                     "WHERE status='queued' AND action IN ('message','resume') "
                     "AND thread IN (SELECT id FROM targets WHERE enabled=1 AND id!=?)", (tid,),
                 )
+                self.db.execute(
+                    "UPDATE operations SET status='cancelled',result='已切换任务，未修改设置。' "
+                    "WHERE status='queued' AND action='codex_settings' "
+                    "AND thread IN (SELECT id FROM targets WHERE enabled=1 AND id!=?)", (tid,),
+                )
                 self.db.execute('UPDATE targets SET enabled=0 WHERE enabled=1 AND id!=?', (tid,))
                 self.db.execute(
                     'INSERT INTO targets(id,enabled,paused,managed) VALUES(?,1,0,0) '
@@ -171,14 +267,17 @@ class TaskControl:
 
     def _perform(self, rpc, tid, action, text, operation):
         is_claude = getattr(rpc, 'client_type', 'codex') == 'claude'
+        if action == 'codex_settings':
+            return self._update_codex_settings(rpc, tid, text)
         if action == 'rename':
             self._execute('INSERT INTO task_names VALUES(?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name', (tid, text))
             return '任务名称已更新。'
         if action == 'focus':
             return self._focus(rpc, tid, operation)
         if action == 'create_test':
-            thread = rpc.call('thread/start', {'cwd': str(Path(__file__).resolve().parent), 'approvalPolicy': 'on-request', 'sandbox': 'workspace-write',
-                             'developerInstructions': '这是独立功能测试任务。只响应用户发送的简单测试消息；不操作医学研究文件，不主动执行命令或修改文件。'}).get('thread', {})
+            response = rpc.call('thread/start', {'cwd': str(Path(__file__).resolve().parent), 'approvalPolicy': 'on-request', 'sandbox': 'workspace-write',
+                                'developerInstructions': '这是独立功能测试任务。只响应用户发送的简单测试消息；不操作医学研究文件，不主动执行命令或修改文件。'})
+            thread = response.get('thread', {})
             created = thread.get('id')
             if not created:
                 raise ValueError('后台未返回新测试任务。')
@@ -186,7 +285,8 @@ class TaskControl:
             rpc.owned_threads.add(created)
             with self.lock:
                 self.runtime[created] = dict(threadId=created, mode='control', status='attached', canControl=True, title='桌面功能测试', goalStatus=None, cwd=thread.get('cwd'),
-                                             message='测试任务已就绪，等待你发送第一条指令。', retryAt=time.time() + 3600)
+                                             message='测试任务已就绪，等待你发送第一条指令。', retryAt=time.time() + 3600,
+                                             codexSettings=self._codex_settings(response))
             try:
                 rpc.call('thread/name/set', {'threadId': created, 'name': '桌面功能测试'})
             except RPCError:
@@ -413,6 +513,9 @@ class TaskControl:
         try:
             with self.lock:
                 if rpc is not self.connection:
+                    if self.connection is not None:
+                        self._execute("UPDATE operations SET status='cancelled',result='原 Codex 连接已结束，请重新选择设置。' "
+                                      "WHERE status='queued' AND action='codex_settings'")
                     self.connection = rpc
                     self.runtime = {}
             # Existing owned sessions can be stopped before slow history reads.

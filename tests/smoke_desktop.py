@@ -1,6 +1,7 @@
 """Click real production Qt widgets against synthetic state (no model requests)."""
 import argparse
 import copy
+import json
 import sqlite3
 import sys
 import tempfile
@@ -108,6 +109,54 @@ def check_client_switch(window, output):
     with patch('desktop_glass.motion_enabled', return_value=False):
         QTest.mouseClick(codex, left)
         assert switch.position == 0.0 and not switch.spring.isActive()
+
+
+def check_codex_slash(window, codex, output):
+    def choices(thread, field):
+        assert thread == window.selected_thread
+        if field == 'model':
+            return {'model': 'model-a'}, [
+                {'value': 'model-a', 'title': 'Model A', 'detail': '', 'allowed': True},
+                {'value': 'model-b', 'title': 'Model B', 'detail': '', 'allowed': True},
+            ]
+        return {'permissions': ':read-only'}, [
+            {'value': ':read-only', 'title': '只读', 'detail': '', 'allowed': True},
+            {'value': ':workspace', 'title': '工作区', 'detail': '', 'allowed': True},
+            {'value': ':danger-full-access', 'title': '完全访问', 'detail': '', 'allowed': False},
+        ]
+
+    editor = window.message_edit
+    editor.clear()
+    editor.setFocus()
+    before = len(codex.calls)
+    with patch.object(codex, 'codex_options', side_effect=choices, create=True):
+        QTest.keyClicks(editor, '/')
+        assert editor.slash.popup().isVisible() and editor.slash.completionCount() == 2
+        QTest.keyClick(editor, Qt.Key.Key_Down)
+        assert editor.slash.popup().currentIndex().data().startswith('/permissions')
+        QTest.keyClick(editor, Qt.Key.Key_Up)
+        assert editor.slash.popup().currentIndex().data().startswith('/model')
+        editor.slash.popup().grab().save(str(output / 'codex-slash.png'))
+        QTest.keyClick(editor, Qt.Key.Key_Return)
+        assert wait_until(lambda: window._codex_menu and window._codex_menu.isVisible())
+        menu = window._codex_menu
+        assert menu.actions()[0].isChecked()
+        QTest.mouseClick(menu, Qt.MouseButton.LeftButton, pos=menu.actionGeometry(menu.actions()[1]).center())
+        assert len(codex.calls) == before + 1
+        model = codex.calls[-1]
+        assert model[1] == 'codex_settings' and json.loads(model[2]) == {'field': 'model', 'value': 'model-b'}
+        editor.setFocus()
+        QTest.keyClicks(editor, '/p')
+        assert editor.slash.popup().isVisible() and editor.slash.completionCount() == 1
+        QTest.keyClick(editor, Qt.Key.Key_Return)
+        assert wait_until(lambda: window._codex_menu and window._codex_menu.isVisible())
+        menu = window._codex_menu
+        assert menu.actions()[0].isChecked() and not menu.actions()[2].isEnabled()
+        menu.grab().save(str(output / 'codex-permissions.png'))
+        QTest.mouseClick(menu, Qt.MouseButton.LeftButton, pos=menu.actionGeometry(menu.actions()[1]).center())
+        permission = codex.calls[-1]
+        assert permission[1] == 'codex_settings' and json.loads(permission[2]) == {'field': 'permissions', 'value': ':workspace'}
+        assert len(codex.calls) == before + 2 and not editor.toPlainText()
 
 
 def check_notebook(window, output):
@@ -654,6 +703,7 @@ def main():
             window.show_window()
             QTest.qWait(30)
             assert window.isVisible(), 'The tray action must reopen the workspace'
+            check_codex_slash(window, codex, args.output)
             check_notebook(window, args.output)
             print('Qt smoke passed: glass, rotation, hover/focus, approval, dual-client controls, drafts, rename, failure dialogs, Chinese glyphs, layout and tray.')
     finally:

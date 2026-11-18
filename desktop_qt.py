@@ -13,10 +13,10 @@ from collections import Counter, OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QRectF, QSharedMemory, QSignalBlocker, Qt, QTimer, Signal
+from PySide6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, QRectF, QSharedMemory, QSignalBlocker, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QPainter, QPainterPath, QPen, QShortcut, QTextDocument
 from PySide6.QtWidgets import (
-    QApplication, QDialog, QFrame, QGraphicsDropShadowEffect, QGraphicsOpacityEffect,
+    QApplication, QCompleter, QDialog, QFrame, QGraphicsDropShadowEffect, QGraphicsOpacityEffect,
     QHBoxLayout, QLabel, QLineEdit, QTreeWidget, QTreeWidgetItem,
     QMainWindow, QMenu, QMessageBox, QPushButton, QSizePolicy, QStackedWidget, QStyle,
     QStyleOptionViewItem, QSystemTrayIcon,
@@ -28,7 +28,8 @@ from desktop_glass import ClientSwitch, FrostedPanel, OceanBackdrop, motion_enab
 from desktop_notebook import NotebookStore, NotebookWorkspace
 from desktop_poetry import COVER_VERSES
 from desktop_projects import SessionTitles, folder_name, project_group
-from desktop_theme import STYLESHEET, configure_text, format_reading_document, message_html, ui_font, warning_html
+from desktop_theme import SLASH_MENU_STYLE, STYLESHEET, configure_text, format_reading_document, message_html, ui_font, warning_html
+from rpc_errors import RPCError
 
 MUTED = '#24495f'
 WINDOW_TITLE = '澜汐'
@@ -279,8 +280,56 @@ class ActionButton(QPushButton):
 
 class Composer(QTextEdit):
     send_requested = Signal()
+    slash_requested = Signal(str)
+    SLASH_OPTIONS = {'/model': '选择模型', '/permissions': '调整权限'}
+
+    def __init__(self):
+        super().__init__()
+        self.codex_slash = True
+        self.slash = QCompleter([f'{command}   {title}' for command, title in self.SLASH_OPTIONS.items()], self)
+        self.slash.setWidget(self)
+        self.slash.popup().setAccessibleName('Codex 斜杠选项')
+        self.slash.popup().setFont(ui_font(10))
+        self.slash.popup().setStyleSheet(SLASH_MENU_STYLE)
+        self.slash.popup().setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.slash.activated[str].connect(lambda choice: self.slash_requested.emit(choice.split()[0]))
+        self.textChanged.connect(self.show_slash)
+
+    def show_slash(self):
+        prefix = self.toPlainText()
+        popup = self.slash.popup()
+        if not (self.codex_slash and self.hasFocus() and prefix.startswith('/')
+                and any(command.startswith(prefix) for command in self.SLASH_OPTIONS)):
+            popup.hide()
+            return
+        self.slash.setCompletionPrefix(prefix)
+        anchor = self.cursorRect()
+        anchor.moveLeft(0)
+        anchor.setWidth(min(280, self.viewport().width()))
+        self.slash.complete(anchor)
+        popup.move(self.mapToGlobal(QPoint(0, -popup.height() - 5)))
+        popup.setCurrentIndex(self.slash.completionModel().index(0, 0))
 
     def keyPressEvent(self, event):
+        popup = self.slash.popup()
+        if popup.isVisible():
+            if event.key() in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+                model = self.slash.completionModel()
+                step = -1 if event.key() == Qt.Key.Key_Up else 1
+                row = (popup.currentIndex().row() + step) % model.rowCount()
+                popup.setCurrentIndex(model.index(row, 0))
+                event.accept()
+                return
+            if event.key() in (Qt.Key.Key_Enter, Qt.Key.Key_Return, Qt.Key.Key_Tab):
+                choice = popup.currentIndex().data() or self.slash.currentCompletion()
+                if choice:
+                    self.slash_requested.emit(choice.split()[0])
+                    event.accept()
+                    return
+            if event.key() == Qt.Key.Key_Escape:
+                popup.hide()
+                event.accept()
+                return
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             self.send_requested.emit()
             event.accept()
@@ -290,6 +339,7 @@ class Composer(QTextEdit):
 
 class MainWindow(QMainWindow):
     history_ready = Signal(object, object)
+    codex_options_ready = Signal(object, object)
 
     def __init__(self, shared):
         super().__init__()
@@ -328,7 +378,10 @@ class MainWindow(QMainWindow):
         self._history_cache = OrderedDict()
         self._history_scroll = {}
         self._visible_history = None
+        self._codex_request = None
+        self._codex_menu = None
         self.history_ready.connect(self.history_loaded, Qt.ConnectionType.QueuedConnection)
+        self.codex_options_ready.connect(self.show_codex_options, Qt.ConnectionType.QueuedConnection)
         self.setWindowTitle(WINDOW_TITLE)
         icon_path = Path(getattr(sys, '_MEIPASS', monitor.ROOT)) / 'app.ico'
         if icon_path.exists():
@@ -552,7 +605,8 @@ class MainWindow(QMainWindow):
         self.message_edit.setPlaceholderText('把下一步，写在这里…')
         self.message_edit.setAccessibleName('任务指令')
         self.message_edit.setAcceptRichText(False)
-        self.message_edit.send_requested.connect(lambda: self.operate('message') if self.send_button.isEnabled() else None)
+        self.message_edit.send_requested.connect(self.submit_composer)
+        self.message_edit.slash_requested.connect(self.open_codex_options)
         composer_layout.addWidget(self.message_edit)
         send_row = QHBoxLayout()
         self.message_hint = label('', 8.5, color=MUTED)
@@ -693,6 +747,10 @@ class MainWindow(QMainWindow):
         previous = (self.client, self.selected_thread)
         selected = (client, tid)
         if selected != previous:
+            self._codex_request = None
+            if self._codex_menu:
+                self._codex_menu.close()
+            self.message_edit.codex_slash = client == 'codex'
             self.task_drafts[previous] = self.message_edit.toPlainText()
             self.client, self.selected_thread = selected
             self.message_edit.setPlainText(self.task_drafts.get(selected, ''))
@@ -937,12 +995,95 @@ class MainWindow(QMainWindow):
         box.finished.connect(lambda _result: self._dialogs.remove(box) if box in self._dialogs else None)
         box.open()
 
+    def submit_composer(self):
+        text = self.message_edit.toPlainText().strip()
+        if self.send_button.isEnabled() or (self.client == 'codex' and (text == '/' or text in Composer.SLASH_OPTIONS)):
+            self.operate('message')
+
+    def open_codex_options(self, command):
+        if self.client != 'codex' or not self.selected_thread:
+            self._popup('请先选择任务', '在案头选择一个 Codex 会话。')
+            return
+        controller = monitor.get_controller('codex')
+        if controller is None:
+            self._popup('Codex 尚未就绪', '后台正在启动，请稍后重试。')
+            return
+        field = command[1:]
+        request = (self.selected_thread, field, uuid.uuid4())
+        self._codex_request = request
+        self.message_edit.slash.popup().hide()
+        self.message_edit.clear()
+        self.control_message.setText('正在读取 Codex 选项…')
+
+        def read_options():
+            try:
+                result = controller.codex_options(request[0], field)
+            except RPCError as error:
+                result = (error.detail or '当前 Codex 版本暂未提供此选项。')[:240]
+            except ValueError as error:
+                result = str(error)
+            except Exception:
+                result = 'Codex 选项暂不可用，请检查连接后重试。'
+            try:
+                self.codex_options_ready.emit(request, result)
+            except RuntimeError:
+                pass  # The window closed during the read.
+
+        threading.Thread(target=read_options, daemon=True, name='codex-options').start()
+
+    def show_codex_options(self, request, result):
+        if self._quitting or request != self._codex_request or self.workspace_pages.currentWidget() is not self.task_workspace:
+            return
+        self._codex_request = None
+        self.control_message.clear()
+        if self.message_edit.toPlainText():
+            return
+        if isinstance(result, str):
+            self._popup('Codex 选项暂不可用', result)
+            return
+        settings, options = result
+        if not options:
+            self._popup('Codex 选项暂不可用', '当前 Codex 没有返回可显示的选项。')
+            return
+        target, field, _ = request
+        menu = QMenu(self)
+        menu.setMinimumWidth(190)
+        menu.setToolTipsVisible(True)
+        menu.setAccessibleName(Composer.SLASH_OPTIONS['/' + field])
+        self._codex_menu = menu
+        for option in options:
+            action = menu.addAction(option['title'])
+            action.setToolTip(option['detail'] or '')
+            action.setCheckable(True)
+            action.setChecked(settings.get(field) == option['value'])
+            action.setEnabled(option['allowed'])
+            action.triggered.connect(
+                lambda _checked, value=option['value']: self.operate(
+                    'codex_settings', json.dumps({'field': field, 'value': value}), tid=target))
+        menu.aboutToHide.connect(lambda: self.close_codex_menu(menu))
+        editor = self.message_edit
+        menu.popup(editor.mapToGlobal(QPoint(0, -menu.sizeHint().height() - 5)))
+
+    def close_codex_menu(self, menu):
+        if self._codex_menu is menu:
+            self._codex_menu = None
+        menu.deleteLater()
+
     def operate(self, action, text_override=None, tid=None):
+        text = self.message_edit.toPlainText() if action == 'message' else (text_override or '')
+        if action == 'message' and self.client == 'codex':
+            command = text.strip()
+            if command in Composer.SLASH_OPTIONS:
+                self.open_codex_options(command)
+                return
+            if command == '/':
+                self.message_edit.setFocus()
+                self.message_edit.show_slash()
+                return
         target = self.selected_thread if tid is None else tid
         if action != 'create_test' and not target:
             self._popup('无法操作', '请先选择一个任务。')
             return
-        text = self.message_edit.toPlainText() if action == 'message' else (text_override or '')
         if action == 'message' and not text.strip():
             self._popup('消息未发送', '请输入要发送的内容。')
             return

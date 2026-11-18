@@ -181,3 +181,9 @@ QMenu#notebookMenu { background:#184359; border-color:#547b8d; color:#f3faff; }
 QMenu#notebookMenu::item:selected { background:#34657a; color:#f3faff; }
 QMenu#notebookMenu::item:disabled { color:#93afbf; }
 '''
+
+SLASH_MENU_STYLE = '''
+QListView { background:#f0f9ff; border:1px solid #bedbe9; border-radius:8px; color:#173b52; outline:0; padding:4px; }
+QListView::item { padding:6px 9px; border-radius:5px; }
+QListView::item:selected { background:#dbedf9; color:#153951; }
+'''

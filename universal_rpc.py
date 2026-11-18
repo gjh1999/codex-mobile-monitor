@@ -202,7 +202,7 @@ class CodexRPC(UniversalRPC):
             result = super().call(method, params, timeout)
             self.loaded_threads.add(result['thread']['id'])
             return result
-        if method not in ('turn/start', 'turn/steer', 'thread/goal/set', 'thread/resume'):
+        if method not in ('turn/start', 'turn/steer', 'thread/goal/set', 'thread/resume', 'thread/settings/update'):
             return super().call(method, params, timeout)
         thread = params['threadId']
         project = writes.project_for(self, thread, params.get('cwd'))

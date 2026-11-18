@@ -65,6 +65,13 @@
 - `tests/smoke_desktop.py --output build-exe/verification/task-switch-desktop-smoke-02` 通过。全套 `.\.venv\Scripts\python.exe -m unittest discover -s tests -t . -p 'test_*.py' -v` 运行 147 项，146 项通过、1 项可选 Stream SDK 跳过，用时 37.993 秒，见 `build-exe/verification/task-switch-regression.txt`。
 - 运行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-exe.ps1 -AppName Lanxi-Glass-R8`，PyInstaller 完成构建约 40.89 秒。包位于 `release/Lanxi-Glass-R8.exe`，61,417,833 字节，同目录 R7 为 54,104,555 字节。归档核对包含新版桌面模块、交接后台和 Qt Windows 插件。切换测试执行的是源码窗口，新 EXE 的实机启动和操作耗时未测。
 
+## 2026-11-19 Codex 斜杠模型与权限
+
+- 基线 R12 的输入框仅发送普通消息。增设 `/` 弹出 `/model` 和 `/permissions`。从当前 Codex 连接读取模型、权限档位与现有值，把用户选择通过控制队列交给 `thread/settings/update`。权限选择沿用当前审批策略，设置面向所选会话的后续轮次。已有 IDE 写入权与托管限制仍由现有控制链检查。
+- Windows 11 x64、Python 3.14.7、PySide6 6.12.0、Codex CLI 0.169.1。用 `codex app-server generate-json-schema --out ../schema --experimental` 核对方法。第一次 CLI 探测把新建线程当成既有会话接入，未取得控制权，复测改用应用自己的测试任务创建入口。在隔离目录 `settings-native-retry-home` 的真实 app-server 返回 11 个模型和 3 个权限档位，切换模型及只读权限后收到两条 `thread/settings/updated`，两次都命中同一线程。间隔含进程启动为 0.707 秒，未发送模型轮次，结果见 `result.json`。
+- 在 `build-exe/verification/lanxi-codex-slash/worktree` 设置 `QT_QPA_PLATFORM=windows`，执行 `python tests/smoke_desktop.py --output ../windows-keyboard`。第一次 UI 测试发现回车未打开二级菜单，显式处理选择键后通过。最终同时验证上下键、前缀筛选、回车、鼠标选择及不可选的权限档位，截图在 `windows-keyboard`。在 R12 交付基线的 `r12-release` 设置 `QT_QPA_PLATFORM=offscreen`，运行 `python -m unittest -q tests.test_task_control tests.test_coordination tests.test_codex_desktop tests.test_claude tests.test_web`，68 项全部通过，9.329 秒。
+- 用 PyInstaller 6.22.3 执行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-exe.ps1 -AppName Lanxi-Glass-R13`，保留 `package-first`。最终构建约 55.97 秒，交付包 `release/Lanxi-Glass-R13.exe` 为 61,442,675 字节，复制前后 SHA-256 一致。运行 `python build-exe/verify-lanxi-launch.py Lanxi-Glass-R13.exe`，于 1.32 秒在隔离目录 `lanxi-folder-package-2l77mnbc` 核对原生窗口和 SQLite 启动。未使用线上模型发送任务。
+
 ## 2026-11-18 对话气泡圆角与底色
 
 - 以 R11 的对话区为基线，保留正文排版、左右对齐和内边距。普通消息使用 11 像素圆角和更透的浅蓝底。助理及用户气泡的背景 alpha 分别为 132 和 172，色值为 `#EBF9FF` 和 `#DAF0FD`。第一版实机图中，助理气泡背景比原位置向右偏 10 像素。最终根据文本单元格的布局和内边距定位。

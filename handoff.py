@@ -33,8 +33,11 @@ INDEX_DIFF = [*DIFF, '--cached', '--binary', '--full-index', '--no-color', '--sr
 
 
 def git(repo, *args, data=None, optional=False):
-    env = {k: v for k, v in os.environ.items() if not k.upper().startswith('GIT_')}
-    env.update(GIT_LITERAL_PATHSPECS='1', GIT_TERMINAL_PROMPT='0', GIT_OPTIONAL_LOCKS='0')
+    overrides = {'GIT_DIR', 'GIT_COMMON_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY',
+                 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_NAMESPACE', 'GIT_QUARANTINE_PATH',
+                 'GIT_GLOB_PATHSPECS', 'GIT_NOGLOB_PATHSPECS', 'GIT_ICASE_PATHSPECS'}
+    env = {k: v for k, v in os.environ.items() if k.upper() not in overrides}
+    env.update(GIT_LITERAL_PATHSPECS='1', GIT_TERMINAL_PROMPT='0', GIT_OPTIONAL_LOCKS='0', GIT_LFS_SKIP_SMUDGE='1')
     proc = subprocess.run(['git', '-c', 'core.hooksPath=' + os.devnull,
                            '-c', 'core.fsmonitor=false', '-C', str(repo), *map(str, args)],
                           input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
@@ -129,9 +132,15 @@ def session_location(filename, thread):
     return Path('sessions', f'{day.year:04}', f'{day.month:02}', f'{day.day:02}', filename)
 
 
+def check_object_sizes(repo, ids):
+    result = git(repo, 'cat-file', '--batch-check=%(objecttype) %(objectsize)', data=ids)
+    require(all(int(line.split()[1]) <= MAX_FILE for line in result.splitlines()), 'Git 变更包含超出上限的对象')
+
+
 def git_state(repo, includes):
     head = git(repo, 'rev-parse', '--verify', 'HEAD').decode().strip()
-    branch = git(repo, 'symbolic-ref', '--short', '-q', 'HEAD', optional=True)
+    ref = git(repo, 'symbolic-ref', '-q', 'HEAD', optional=True)
+    branch = ref.decode().strip().removeprefix('refs/heads/') if ref else None
     gitdir = Path(git(repo, 'rev-parse', '--absolute-git-dir').decode().strip())
     require(not any((gitdir / name).exists() for name in
                     ('MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'rebase-merge', 'rebase-apply', 'sequencer')),
@@ -145,17 +154,22 @@ def git_state(repo, includes):
     require(all(value in ('unset', 'unspecified') for value in attrs[2::3]),
             '项目依赖 Git 内容过滤器，请先完成独立对象交付')
     index_hash = sha(git(repo, 'ls-files', '--stage', '-z'))
-    staged = git(repo, *INDEX_DIFF)
-    require(staged == git(repo, *INDEX_DIFF, '--ita-visible-in-index'), '暂不支持 intent-to-add 索引')
-    for item in names(git(repo, *DIFF, '--cached', '--name-only', '-z')):
+    raw = git(repo, *DIFF, '--cached', '--raw', '--no-abbrev', '-z')
+    require(raw == git(repo, *DIFF, '--cached', '--raw', '--no-abbrev', '-z', '--ita-visible-in-index'),
+            '暂不支持 intent-to-add 索引')
+    changed = names(raw)
+    ids = {oid for header in changed[::2] for oid in header.split()[2:4] if oid.strip('0')}
+    check_object_sizes(repo, ''.join(oid + '\n' for oid in ids).encode())
+    for item in changed[1::2]:
         local_path(repo, item)
+    staged = git(repo, *INDEX_DIFF)
     dirty = names(git(repo, *DIFF, '--name-only', '-z'))
     extra = sorted(set(includes))
     for item in extra:
         local_path(repo, item)
         require(names(git(repo, 'ls-files', '--others', '--exclude-standard', '-z', '--', item)) == [item],
                 f'新增文件须为未忽略的单个未跟踪文件：{item}')
-    return head, branch.decode().strip() if branch else None, index_hash, staged, dirty, extra
+    return head, branch, index_hash, staged, dirty, extra
 
 
 def work_file(root, item):
@@ -180,6 +194,10 @@ def capture(repo, home, project, base, thread, includes, output):
     source_cwd = Path(cwd).resolve()
     require(sid == thread and source_cwd.is_dir() and source_cwd.is_relative_to(repo), '会话工作目录不属于指定项目')
     relative_cwd = source_cwd.relative_to(repo).as_posix()
+    if relative_cwd != '.':
+        local_path(repo, relative_cwd)
+        require(Path(git(source_cwd, 'rev-parse', '--show-toplevel').decode().strip()).resolve() == repo,
+                '会话目录属于另一个嵌套仓库')
     baseline = git(repo, 'rev-parse', '--verify', '--end-of-options', base + '^{commit}').decode().strip()
     state = git_state(repo, includes)
     head, branch, index_hash, staged, dirty, extra = state
@@ -190,8 +208,7 @@ def capture(repo, home, project, base, thread, includes, output):
         for filename in set(changed):
             local_path(repo, filename)
         ids = git(repo, 'rev-list', '--objects', '--no-object-names', revision_range)
-        sizes = git(repo, 'cat-file', '--batch-check=%(objecttype) %(objectsize)', data=ids)
-        require(all(int(line.split()[1]) <= MAX_FILE for line in sizes.splitlines()), '未推送提交中有大对象')
+        check_object_sizes(repo, ids)
     manifest = dict(version=1, project=project, base=baseline, head=head, branch=branch,
                     index_hash=index_hash, cwd=relative_cwd, thread=thread, turn=turn,
                     rollout=source.name, files=[], objects={})
@@ -261,7 +278,7 @@ def restore(package, checksum, project, seed, dest):
             session_location(m['rollout'], m['thread'])
             work = Path(tmp) / 'work'
             work.mkdir()
-            git(work, 'init', '--quiet', '--template=')
+            git(work, 'init', '--quiet', '--template=', '--object-format=' + ('sha256' if len(base) == 64 else 'sha1'))
             git(work, 'fetch', '--no-tags', '--', seed, base)
             if head != base:
                 commits = Path(tmp) / 'commits.bundle'
@@ -289,6 +306,8 @@ def restore(package, checksum, project, seed, dest):
             for e in entries:
                 path = local_path(work, e['path'])
                 if e['new']:
+                    if path.is_dir():
+                        path.rmdir()
                     require(not path.exists() and e['object'] is not None, '新增路径已被占用')
                     extra.append(e['path'])
                 else:
@@ -297,6 +316,10 @@ def restore(package, checksum, project, seed, dest):
                     dirty.append(e['path'])
                 if e['object'] is None:
                     path.unlink()
+                    parent = path.parent
+                    while parent != work and not any(parent.iterdir()):
+                        parent.rmdir()
+                        parent = parent.parent
                 else:
                     data = get(e['object'])
                     path.parent.mkdir(parents=True, exist_ok=True)
@@ -312,11 +335,39 @@ def restore(package, checksum, project, seed, dest):
             private.mkdir()
             (private / 'session.jsonl').write_bytes(transcript)
             (private / 'handoff.json').write_text(json.dumps(dict(
-                version=1, project=project, cwd=m['cwd'], thread=m['thread'], turn=m['turn'], rollout=m['rollout'],
+                version=1, project=project, head=head, package_sha256=checksum, cwd=m['cwd'],
+                thread=m['thread'], turn=m['turn'], rollout=m['rollout'],
                 sha256=m['objects']['session.jsonl'])), encoding='utf-8')
         require(not dest.exists() and not dest.is_symlink(), '目标目录已被占用')
         work.rename(dest)
     return dict(project=project, cwd=str(dest / m['cwd']), head=head, thread=m['thread'], turn=m['turn'])
+
+
+def handoff_receipts(projects):
+    """Read restore receipts only from the workspaces registered on this device."""
+    results = []
+    for project, location in projects.items():
+        row = dict(project=project, status='awaiting_restore')
+        try:
+            root = Path(location)
+            require(root.is_absolute(), '项目映射需要绝对路径')
+            marker = root / '.git' / 'lanxi' / 'handoff.json'
+            try:
+                record = json.loads(limited(marker, 65536))
+            except FileNotFoundError:
+                pass
+            else:
+                require(record['version'] == 1 and record['project'] == project, '交接项目不匹配')
+                require(GIT_ID.fullmatch(record['head']) and DIGEST.fullmatch(record['package_sha256'])
+                        and isinstance(record['thread'], str) and str(uuid.UUID(record['thread'])) == record['thread']
+                        and isinstance(record['turn'], str) and record['turn'],
+                        '交接记录不完整')
+                row.update(status='restored', head=record['head'], thread=record['thread'],
+                           turn=record['turn'], sha256=record['package_sha256'])
+        except (KeyError, OSError, TypeError, ValueError):
+            row = dict(project=project, status='invalid_receipt')
+        results.append(row)
+    return results
 
 
 def prepare_resume(cwd, home):

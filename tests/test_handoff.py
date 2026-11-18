@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 import uuid
@@ -147,3 +148,49 @@ class HandoffTests(unittest.TestCase):
         with self.assertRaises(HandoffError):
             prepare_resume(self.dest, self.home_b)
         self.assertEqual(conflict.read_bytes(), b'different thread history')
+
+    def test_changed_then_removed_private_file_in_unpushed_history(self):
+        secret = self.a / '.env'
+        secret.write_bytes(b'synthetic fixture')
+        git(self.a, 'add', '.env')
+        git(self.a, 'commit', '-qm', 'temporary private file')
+        git(self.a, 'rm', '.env')
+        git(self.a, 'commit', '-qm', 'remove private file')
+        with self.assertRaisesRegex(HandoffError, '私有'):
+            self.pack()
+        self.assertFalse(self.out.exists())
+
+    def test_turn_context_in_project_subdirectory_and_web_receipt(self):
+        subdir = self.a / '子项目'
+        subdir.mkdir()
+        (subdir / 'file').touch()
+        git(self.a, 'add', '子项目/file')
+        lines = self.log.read_bytes().splitlines(keepends=True)
+        lines.insert(-1, (json.dumps(dict(type='turn_context', payload={'cwd': str(subdir)})) + '\n').encode())
+        self.log.write_bytes(b''.join(lines))
+        digest = self.pack()
+        self.unpack(digest)
+        self.assertEqual(prepare_resume(self.dest, self.home_b)['cwd'], str(self.dest / '子项目'))
+        receipts = handoff.handoff_receipts({'alpha': str(self.dest), 'missing': str(self.seed),
+                                            'wrong': str(self.dest)})
+        self.assertEqual([r['status'] for r in receipts], ['restored', 'awaiting_restore', 'invalid_receipt'])
+        self.assertEqual(receipts[0]['sha256'], digest)
+
+    @unittest.skipUnless(os.name == 'nt' and (Path(__file__).resolve().parents[1] /
+                         '.venv/Scripts/python.exe').is_file(), 'requires the Windows terminal adapter')
+    def test_bare_powershell_command_and_passthrough(self):
+        self.unpack(self.pack())
+        script = Path(__file__).resolve().parents[1] / 'scripts/lanxi-terminal.ps1'
+        (self.root / 'codex.cmd').write_text('@echo off\necho argc1=[%~1] argc2=[%~2] argc3=[%~3] argc4=[%~4]\n',
+                                            encoding='ascii')
+        env = dict(os.environ, LANXI_TEST_SCRIPT=str(script), PATH=str(self.root) + os.pathsep + os.environ['PATH'],
+                   CODEX_HOME=str(self.home_b), LANXI_SEED=str(self.seed))
+        cmd = '. $env:LANXI_TEST_SCRIPT; codex; codex --version; Set-Location -LiteralPath $env:LANXI_SEED; codex'
+        proc = subprocess.run(['powershell.exe', '-NoProfile', '-Command',
+                               '[Console]::OutputEncoding = [Text.UTF8Encoding]::new(); ' + cmd],
+                              cwd=self.dest, env=env, capture_output=True, encoding='utf-8', errors='replace',
+                              timeout=30, check=True)
+        lines = proc.stdout.splitlines()
+        self.assertEqual(lines[0], f'argc1=[resume] argc2=[--cd] argc3=[{self.dest}] argc4=[{self.thread}]')
+        self.assertEqual(lines[1], 'argc1=[--version] argc2=[] argc3=[] argc4=[]')
+        self.assertEqual(lines[2], 'argc1=[] argc2=[] argc3=[] argc4=[]')

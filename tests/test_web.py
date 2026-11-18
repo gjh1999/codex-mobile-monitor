@@ -48,3 +48,12 @@ class WebTests(unittest.TestCase):
             self.assertEqual(self.client.get('/api/conversation/test?client=claude').json(),{'messages':[]})
             history.assert_called_once_with('test','claude')
         self.assertEqual(self.client.get('/api/state?client=invalid').status_code,422)
+
+    def test_handoff_receipts_require_login_and_read_local_mapping(self):
+        url = '/api/v1/handoffs'
+        self.assertEqual(self.client.get(url).status_code, 401)
+        self.login()
+        with patch('monitor.config', return_value={}):
+            self.assertEqual(self.client.get(url).json(), {'projects': []})
+        with patch('monitor.config', return_value={'handoffProjects': {'alpha': 'relative-is-invalid'}}):
+            self.assertEqual(self.client.get(url).json(), {'projects': [{'project': 'alpha', 'status': 'invalid_receipt'}]})

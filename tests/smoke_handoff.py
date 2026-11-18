@@ -113,7 +113,10 @@ def main():
             events = [json.loads(line) for line in data.splitlines()]
             contexts = [e['payload'] for e in events if e['type'] == 'turn_context']
             assert next_turn != receipt['turn'] and Path(contexts[-1]['cwd']).resolve() == b
-            assert any(e['type'] == 'event_msg' and e['payload'].get('message') == 'reply-on-B' for e in events)
+            assert any(e['type'] == 'event_msg' and e['payload'].get('turn_id') == next_turn
+                       and e['payload'].get('last_agent_message') == 'reply-on-B' for e in events)
+            onward = capture(b, home_b, 'fixture', base, sid, ['new.txt'], target / 'onward.zip')
+            assert onward['turn'] == next_turn
             report = dict(receipt, next_turn=next_turn, cwd_a=str(a), cwd_b=str(b), reply='reply-on-B',
                           codex=subprocess.check_output([exe, '--version'], text=True).strip(),
                           git=git(a, '--version').decode().strip(), backend='localhost fixture')

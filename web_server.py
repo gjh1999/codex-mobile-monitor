@@ -12,6 +12,7 @@ from fastapi import FastAPI, HTTPException, Request, Response, Depends
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 import monitor
+from handoff import handoff_receipts
 
 
 def create_app(start_workers=True):
@@ -86,6 +87,13 @@ def create_app(start_workers=True):
     @app.get('/api/state', dependencies=[Depends(auth)])
     def state(client: Literal['codex', 'claude'] = 'codex'):
         return monitor.client_snapshot(monitor.snapshot(), client)
+
+    @app.get('/api/v1/handoffs', dependencies=[Depends(auth)])
+    def handoffs():
+        projects = monitor.config().get('handoffProjects', {})
+        if not isinstance(projects, dict):
+            raise HTTPException(503, 'handoffProjects 配置应为项目与本机目录的映射')
+        return {'projects': handoff_receipts(projects)}
 
     @app.get('/api/conversation/{thread}', dependencies=[Depends(auth)])
     def conversation(thread: str, client: Literal['codex', 'claude'] = 'codex'):

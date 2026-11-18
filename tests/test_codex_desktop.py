@@ -1,5 +1,7 @@
 """Real Qt controls + persistent controller for Codex reattach/continue regressions."""
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -107,6 +109,43 @@ class Tests(unittest.TestCase):
         self.assertFalse(self.window.action_buttons['resume'].isEnabled())
         self.assertFalse(self.window.send_button.isEnabled())
         self.assertFalse([m for m, p in self.rpc.calls if m in ('turn/start', 'turn/steer')])
+
+    def test_late_history_cannot_replace_the_newly_selected_task(self):
+        other = '22222222-2222-4222-8222-222222222222'
+        pending, release = threading.Event(), threading.Event()
+        monitor.update(threads=[
+            {'id': TARGET, 'title': 'First task'},
+            {'id': other, 'title': 'Second task'},
+        ])
+
+        def wait_for(condition):
+            deadline = time.monotonic() + 3
+            while not condition() and time.monotonic() < deadline:
+                self.app.processEvents()
+                time.sleep(.005)
+            self.assertTrue(condition())
+
+        def slow_history(thread, _client):
+            if thread == TARGET:
+                pending.set()
+                release.wait(3)
+            return {'messages': [{'role': 'assistant', 'text': 'old history' if thread == TARGET else 'new history'}],
+                    'events': []}
+
+        wait_for(lambda: not self.window._history_busy)
+        with patch.object(monitor, 'conversation_for', slow_history):
+            self.window.refresh()
+            self.assertTrue(pending.wait(1))
+            try:
+                self.window.message_edit.setPlainText('保留的草稿')
+                self.window.task_choice.setCurrentItem(self.window.task_items[other])
+                self.assertEqual(self.window.conversation_heading.text(), 'Second task')
+                self.assertNotIn('old history', self.window.conversation.toPlainText())
+                self.assertEqual(self.window.task_drafts['codex', TARGET], '保留的草稿')
+            finally:
+                release.set()
+            wait_for(lambda: 'new history' in self.window.conversation.toPlainText())
+            self.assertNotIn('old history', self.window.conversation.toPlainText())
 
 
 if __name__ == '__main__':

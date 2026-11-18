@@ -53,7 +53,11 @@ def configure_text(widget, size=10, inset=10):
 
 def set_reading_html(widget, html):
     widget.setHtml(html)
-    block = widget.document().begin()
+    format_reading_document(widget.document())
+
+
+def format_reading_document(document):
+    block = document.begin()
     while block.isValid():
         cursor = QTextCursor(block)
         fmt = block.blockFormat()
@@ -73,7 +77,7 @@ def set_reading_html(widget, html):
                     runs.append((item.position(), item.length(), char_format))
                 fragment += 1
             for position, length, char_format in runs:
-                selection = QTextCursor(widget.document())
+                selection = QTextCursor(document)
                 selection.setPosition(position)
                 selection.setPosition(position + length, QTextCursor.MoveMode.KeepAnchor)
                 selection.setCharFormat(char_format)

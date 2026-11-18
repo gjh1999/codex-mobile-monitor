@@ -131,8 +131,12 @@ def main():
             assert len(ocean.wallpapers) == 3 and ocean.rotation.interval() == 30 * 60_000
             assert abs(window.client_switch.geometry().center().x() - ocean.rect().center().x()) <= 1
             assert window.findChild(QLabel, 'heroVerse').font().bold()
+            assert window.findChild(QLabel, 'heroIntro').font().pointSizeF() == 12
             columns = window.summary.findChildren(QFrame, 'statColumn')
             assert len(columns) == 3 and len({column.width() for column in columns}) == 1
+            for column in columns:
+                caption, number = column.findChildren(QLabel)
+                assert caption.font().pointSizeF() == 8.5 and not number.font().bold()
             assert len(window.summary.findChildren(QFrame, 'statDivider')) == 2
             normal = ocean.grab().toImage()
             original = ocean.current
@@ -150,6 +154,11 @@ def main():
             pos = switch.mapTo(ocean, QPoint(switch.width() - 9, switch.height() // 2))
             pos *= normal.devicePixelRatio()
             assert normal.pixel(pos) != unblurred.pixel(pos), 'The switch must sample the blurred wallpaper'
+            thumb = switch.thumb_rect()
+            pos = switch.mapTo(ocean, QPoint(round(thumb.center().x()), round(thumb.top()) + 4))
+            pos *= normal.devicePixelRatio()
+            assert normal.pixel(pos) != unblurred.pixel(pos), 'The thumb must also transmit wallpaper'
+            assert switch.graphicsEffect() is None
             check_client_switch(window, args.output)
             assert window.conversation_header.opacity.opacity() == 0.0
             original_top = window.conversation.y()

@@ -139,10 +139,6 @@ QPushButton { background:#ffffff; color:#425a7b; border:1px solid #dae3f0; borde
 QPushButton:hover { background:#f2f6fe; border-color:#a9c1e7; color:#28599f; }
 QPushButton:pressed { background:#e3edff; border-color:#83a7dd; }
 QPushButton:focus { border-color:#7399db; }
-QPushButton#clientSwitch { background:transparent; color:#f1faff; border:1px solid transparent; border-radius:16px; padding:0; }
-QPushButton#clientSwitch:hover { background:rgba(180, 231, 251, 21); }
-QPushButton#clientSwitch:pressed { background:rgba(143, 214, 243, 75); }
-QPushButton#clientSwitch:focus { border-color:#93dffa; }
 QPushButton#hoverAction { background:rgba(225, 247, 255, 154); color:#153b53; border-color:rgba(226, 245, 255, 138); padding:5px 8px; }
 QPushButton#hoverAction:hover, QPushButton#hoverAction:focus { background:#d4efff; border-color:#70a8cc; }
 QPushButton#hoverAction:pressed { background:#acd8f1; }

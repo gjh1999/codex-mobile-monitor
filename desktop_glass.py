@@ -6,7 +6,7 @@ from time import monotonic
 
 from PySide6.QtCore import QEvent, QEasingCurve, QPoint, QPointF, QRectF, Qt, QTimer, QVariantAnimation
 from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import QApplication, QFrame, QGraphicsDropShadowEffect, QHBoxLayout, QPushButton, QStyle, QStyleOptionButton, QStylePainter, QWidget
+from PySide6.QtWidgets import QApplication, QFrame, QHBoxLayout, QPushButton, QWidget
 
 WALLPAPERS = ('os-x-mavericks-wave.jpg', 'macos-big-sur-day.jpg', 'macos-catalina-night.jpg')
 
@@ -126,8 +126,9 @@ class FrostedPanel(QFrame):
         self.backdrop.draw_wallpaper(painter, blurred=True)
         painter.restore()
         painter.fillPath(glass, tint)
-        painter.setPen(QPen(edge))
-        painter.drawPath(glass)
+        if edge is not None:
+            painter.setPen(QPen(edge))
+            painter.drawPath(glass)
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -137,24 +138,35 @@ class FrostedPanel(QFrame):
 class ClientSegment(QPushButton):
     """Keep both labels readable as the glass thumb passes under them."""
     def paintEvent(self, event):
-        painter = QStylePainter(self)
-        option = QStyleOptionButton()
-        self.initStyleOption(option)
-        option.text = ''
-        painter.drawControl(QStyle.ControlElement.CE_PushButton, option)
-        thumb = self.parentWidget().thumb_rect().translated(-QPointF(self.pos()))
+        switch = self.parentWidget()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setFont(self.font())
+        bounds = QRectF(self.rect())
+        if not switch.dragging and (self.isDown() or self.underMouse()):
+            feedback = QPainterPath()
+            feedback.addRoundedRect(bounds, bounds.height() / 2, bounds.height() / 2)
+            painter.fillPath(feedback, QColor(194, 237, 252, 42 if self.isDown() else 15))
+
+        thumb = switch.thumb_rect().translated(-QPointF(self.pos()))
         thumb_clip = QPainterPath()
         thumb_clip.addRoundedRect(thumb, thumb.height() / 2, thumb.height() / 2)
         outside = QPainterPath()
-        outside.addRect(QRectF(self.rect()))
+        outside.addRect(bounds)
         painter.save()
         painter.setClipPath(outside.subtracted(thumb_clip))
         painter.setPen(QColor('#f3fcff'))
         painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.text())
         painter.restore()
+        painter.save()
         painter.setClipPath(thumb_clip)
-        painter.setPen(QColor('#10364d'))
+        painter.setPen(QColor('#0a2a40'))
         painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.text())
+        painter.restore()
+        if self.hasFocus() and not self.isDown() and not switch.dragging:
+            painter.setPen(QPen(QColor('#d1f0fc'), 1))
+            ring = bounds.adjusted(.5, .5, -.5, -.5)
+            painter.drawRoundedRect(ring, ring.height() / 2, ring.height() / 2)
 
 
 class ClientSwitch(FrostedPanel):
@@ -162,7 +174,7 @@ class ClientSwitch(FrostedPanel):
     SPRING_RATE = 25.0
 
     def __init__(self, backdrop, select):
-        super().__init__(backdrop, radius=21, tint=QColor(5, 47, 65, 141), edge=QColor(210, 245, 255, 120))
+        super().__init__(backdrop, radius=21, tint=QColor(8, 54, 70, 141), edge=QColor(210, 245, 255, 77))
         self.setObjectName('clientPill')
         self.setAccessibleName('客户端')
         self.select_client = select
@@ -180,16 +192,12 @@ class ClientSwitch(FrostedPanel):
             button.setFixedSize(width, 30)
             button.setObjectName('clientSwitch')
             button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
             button.setCheckable(True)
             button.installEventFilter(self)
             button.clicked.connect(lambda _=False, client=key: self.select_client(client))
             layout.addWidget(button)
             self.buttons[key] = button
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setColor(QColor(1, 21, 35, 92))
-        shadow.setBlurRadius(12)
-        shadow.setOffset(0, 3)
-        self.setGraphicsEffect(shadow)
         self.active = 'codex'
         self.position = self.velocity = 0.0
         self.target = 0.0
@@ -287,13 +295,6 @@ class ClientSwitch(FrostedPanel):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        bounds = QRectF(self.rect())
-        tint = QLinearGradient(bounds.topLeft(), bounds.bottomLeft())
-        tint.setColorAt(0.0, QColor(23, 111, 130, 118))
-        tint.setColorAt(1.0, self.tint)
-        self.paint_glass(painter, bounds, self.radius, tint, self.edge)
+        self.paint_glass(painter, QRectF(self.rect()), self.radius, self.tint, self.edge)
         thumb = self.thumb_rect()
-        highlight = QLinearGradient(thumb.topLeft(), thumb.bottomLeft())
-        highlight.setColorAt(0.0, QColor(226, 248, 255, 227))
-        highlight.setColorAt(1.0, QColor(174, 222, 243, 205))
-        self.paint_glass(painter, thumb, thumb.height() / 2, highlight, QColor(238, 252, 255, 152))
+        self.paint_glass(painter, thumb, thumb.height() / 2, QColor(215, 243, 253, 146), None)

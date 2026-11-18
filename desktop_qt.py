@@ -250,7 +250,9 @@ class MainWindow(QMainWindow):
         verse.setFont(QFont('SimSun', 34, QFont.Weight.Bold))
         verse.setWordWrap(False)
         title.addWidget(verse)
-        title.addWidget(label('一处开始，处处继续。百日写的那一行，暮归时仍等着你。', 10, color='#effaff'))
+        intro = label('一处开始，处处继续。百日写的那一行，暮归时仍等着你。', 12, color='#effaff')
+        intro.setObjectName('heroIntro')
+        title.addWidget(intro)
         title.addStretch()
         heading.addLayout(title, 1)
 
@@ -260,7 +262,7 @@ class MainWindow(QMainWindow):
         counts = QHBoxLayout(self.summary)
         counts.setContentsMargins(5, 8, 5, 8)
         counts.setSpacing(0)
-        self.stat_total, self.stat_running, self.stat_pending = (label('0', 17, True, '#f3fbff') for _ in range(3))
+        self.stat_total, self.stat_running, self.stat_pending = (label('0', 15, color='#f3fbff') for _ in range(3))
         for index, (value, caption, meaning) in enumerate((
             (self.stat_total, '案头', '任务总数'), (self.stat_running, '行舟', '运行中的任务'),
             (self.stat_pending, '待你定夺', '待审批的请求'),
@@ -276,7 +278,7 @@ class MainWindow(QMainWindow):
             column_contents = QVBoxLayout(column)
             column_contents.setContentsMargins(10, 0, 0, 0)
             column_contents.setSpacing(2)
-            caption_label = label(caption, 9, True, '#e4f2fa')
+            caption_label = label(caption, 8.5, color='#e4f2fa')
             caption_label.setWordWrap(False)
             caption_label.setToolTip(meaning)
             caption_label.setAccessibleName(meaning)

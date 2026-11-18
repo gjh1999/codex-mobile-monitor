@@ -2,6 +2,12 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-18 扁平玻璃滑块与字号调整
+
+- 以顶部玻璃复核版为基线。「一处开始」小字从 10 pt 提至 12 pt，计数标签从 9 pt 粗体改为 8.5 pt 常规，数字从 17 pt 粗体改为 15 pt 常规。逐帧绘制圆角按压与键盘焦点，移除原生按钮样式画出的方框。胶囊材质取消阴影和高光渐变，滑块以 146/255 的浅色覆盖同一张柔化壁纸。
+- Windows 11 x64、Python 3.14.7、PySide6 6.12.0。设置 `QT_QPA_PLATFORM=windows`，执行 `python tests/smoke_desktop.py --output build-exe/verification/lanxi-flat-glass`。检查计数字号与字重、滑块底座和移动块的壁纸透射像素，并复测拖动、反转和减弱动态效果。人工核对静态工作台与拖动截图，动画实际帧率未测。
+- 同环境执行 `python -m unittest discover -s tests -t . -p 'test_*.py' -q`，119 项中 118 项通过、1 项跳过，10.895 秒。用 PyInstaller 6.22.3 运行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-exe.ps1 -AppName Lanxi-Glass-R3`，生成 `release/Lanxi-Glass-R3.exe`，54,086,517 字节，前一版为 54,087,019 字节。已检查包内 Qt 平台插件、桌面模块与壁纸。上一版运行期间完成源码窗口和归档验证。
+
 ## 2026-11-18 澜汐顶部玻璃与动效复核
 
 - 对照通过的 `docs/design-preview/workspace-hover.png` 与首版实机截图，校正顶部胶囊位置及分段宽度、右侧计数卡的宽度和对齐。计数卡设为三个 60 像素等宽栏，分隔线为 1×35 像素。顶部胶囊与滑块直接采样柔化壁纸。诗句换为 34 pt 粗宋体并加 0.85 像素描边，客户端标签用 11 pt 粗体。

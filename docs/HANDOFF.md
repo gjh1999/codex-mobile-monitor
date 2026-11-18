@@ -38,7 +38,62 @@ codex
 
 仅在已恢复的仓库中，裸命令 `codex` 才会准备会话并调用原生 `codex resume --cd <映射后的轮次目录> <原线程 ID>`。显式参数直接传给原生 CLI，在当前目录主动开新会话可用 `codex --cd .`。执行 `handoff.py prepare-resume --cwd <目录>` 可单独完成准备并输出线程和目录。它把封存的单个线程放到当前用户的 Codex 会话目录，遵从 `CODEX_HOME`。发现已归档、重复或分叉的同 ID 记录时会报错并保留现场。已有记录包含同一封存前缀时，保留本机后来追加的轮次。
 
-本阶段由操作者交接源端和目标端。后台监听、自动传包、已用工作树的合并与跨设备写入租约尚待开发。首次恢复使用新目录；下一次交接包若与现有线程历史冲突，需要核对两端记录。
+上面是手动流程。首次恢复使用新目录，后续交接包若与现有线程历史冲突，需要核对两端记录。
+
+## 使用同步目录自动封存和预备
+
+只登记允许把原始会话和 Git 状态跨机保存的项目。在两端准备由 Syncthing 等工具配对的专用交换目录，项目仓库、本机配置、状态文件和预备工作区留在这两个交换目录之外。两端使用同项目标识和同一个至少 32 字节的随机密钥，通过 `keyEnv` 指定密钥环境变量的名称。分别使用不同的设备标识。项目和设备标识使用小写英文、数字、下划线或连字符。
+
+在源端 `local-config.json` 中加入配置，替换线程 UUID、仓库路径和 Git 基线。设置 `include` 时列出允许传输的单个未跟踪文件，可提前列入后续才创建的文件。仓库已跟踪的工作区变化和暂存改动按封存规则处理。
+
+```json
+{
+  "handoffSync": {
+    "device": "office",
+    "projects": {
+      "vision": {
+        "exchange": "D:\\LanxiExchange",
+        "keyEnv": "LANXI_VISION_HANDOFF_KEY",
+        "publish": {
+          "repo": "D:\\Work\\Vision",
+          "base": "origin/main",
+          "thread": "替换为原线程的 UUID",
+          "include": ["notes/next.md"]
+        }
+      }
+    }
+  }
+}
+```
+
+目标端示例使用同项目的 `keyEnv`，`seed` 需拥有共同基线提交。`staging` 位于目标机本地，后台会为每个已校验的设备版本创建独立子目录。
+
+```json
+{
+  "handoffSync": {
+    "device": "laptop",
+    "projects": {
+      "vision": {
+        "exchange": "C:\\LanxiExchange",
+        "keyEnv": "LANXI_VISION_HANDOFF_KEY",
+        "receive": {
+          "seed": "C:\\Code\\Vision",
+          "staging": "C:\\LanxiStaging",
+          "peers": ["office"]
+        }
+      }
+    }
+  }
+}
+```
+
+启动桌面或 Web 后台后自动扫描，默认间隔 15 秒。可在 `handoffSync.scanSeconds` 设置间隔，最短 5 秒。用 `python handoff_sync.py --config local-config.json` 可在后台未运行时执行单次扫描。
+
+源端只发布已确认落盘的轮次及其封存时的 Git 状态。未改变的输入不会反复发布；同一轮后的新增保存也可以生成新版本。源端先写入按 SHA-256 命名的交接包，再发布带 HMAC 的清单。密钥由登记设备共享，用于验证来源和完整性。包内代码和原始会话为明文，由配对工具负责传输与访问控制。
+
+目标端等清单和包都到达后校验，在本机独立目录预备。已有工作区和较早的预备目录会保留。登录后可从 `GET /api/v1/handoff-sync` 查看各项目的来源、版本与本机预备路径。`ready` 表示包已还原且本机历史通过相容性检查；`session_conflict` 表示预备成功但同线程历史不同，原记录和预备目录均保留；`awaiting_package` 表示只有清单到达；`restore_failed` 表示包或本地基线校验失败，后续扫描会重试；`version_conflict` 表示清单版本回退或同版本内容不同。
+
+在返回的预备目录中使用终端适配器续接。当前自动化覆盖封存、发布和预备，打开正确的预备目录仍由操作者决定。合并现用工作树或将较短的本机同线程历史快进到远端进度，需在独立联调后接入。
 
 ## 前端查询
 
@@ -55,6 +110,7 @@ codex
 ```powershell
 .\.venv\Scripts\python.exe -m unittest -v tests.test_handoff tests.test_web
 .\.venv\Scripts\python.exe tests/smoke_handoff.py --output build-exe/verification/handoff-local-repeat
+.\.venv\Scripts\python.exe tests/smoke_handoff.py --sync --output build-exe/verification/handoff-sync-repeat
 ```
 
 每次为 smoke 指定新输出目录。它在系统临时目录创建源仓库，在输出目录创建目标仓库，运行本机真实 Codex CLI，使用不同的临时 Codex 数据目录和仅监听回环的回复服务。第二轮仅在收到第一轮历史后返回预期文本。脚本验证 Git 状态、原线程、新轮次和实际工作目录，保存 `result.json`、封存包和目标端现场。双机、两种 IDE、实际模型服务及日常操作次数需另行验收。

@@ -2,6 +2,21 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-18 桌面任务切换延迟
+
+- 复现于 Windows、Python 3.14.7、PySide6 6.12.0，基线为 `1a3617d`。用三份虚构任务和每份 35 条长消息，给读取增加 140 毫秒固定等待。执行 `tests/bench_task_switch.py --output build-exe/verification/task-switch-final`，使用 `QT_QPA_PLATFORM=offscreen`。基线用相同脚本和独立归档源码，输出于 `task-switch-baseline-final`。
+- 初次基线记录为 337.41 毫秒事件循环等待中位数。初版异步测试连续使用 `QTest.qWait`，Python 工作线程无法及时获得执行时间，三次达到 8 秒超时。改用真实 Qt 事件循环轮询完成状态，异步初次复测的等待中位数为 1.52 毫秒。随后桌面 smoke 的同步断言未等到异步历史读取，改为按条件等待，并覆盖迟到历史不会覆盖当前任务。
+- 最终两组串行测量中，六次任务选中后的事件循环等待中位数从 338.19 毫秒降为 1.58 毫秒，显示对话的中位数从 344.38 毫秒降为 8.34 毫秒。新版本首次选中未缓存任务约 178 毫秒显示历史，返回已缓存任务约 7–9 毫秒。测量为本机合成负载，不含远端接入或真实用户数据库。改动将记录读取和富文本排版放入后台，保留最近五个视图的渲染文档与滚动位置。
+- `tests/smoke_desktop.py --output build-exe/verification/task-switch-desktop-smoke-02` 通过。全套 `.\.venv\Scripts\python.exe -m unittest discover -s tests -t . -p 'test_*.py' -v` 运行 147 项，146 项通过、1 项可选 Stream SDK 跳过，用时 37.993 秒，见 `build-exe/verification/task-switch-regression.txt`。
+- 运行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-exe.ps1 -AppName Lanxi-Glass-R8`，PyInstaller 完成构建约 40.89 秒。包位于 `release/Lanxi-Glass-R8.exe`，61,417,833 字节，同目录 R7 为 54,104,555 字节。归档核对包含新版桌面模块、交接后台和 Qt Windows 插件。切换测试执行的是源码窗口，新 EXE 的实机启动和操作耗时未测。
+
+## 2026-11-18 自动封存、签名发布和预备目录恢复
+
+- 第一阶段的手动封存、复制和恢复作为基线。新增后台定期扫描、按内容去重、签名发布、接收滞后重试和独立预备目录。输入沿用临时 Git 仓库、同一文件的暂存与未暂存两版、未推送提交、选定新增文件及隔离的 Codex 会话目录。Windows、Python 3.14.7、Git 2.56.0.windows.4、Codex CLI 0.169.1，回环模型回复为固定测试文本。
+- `.\.venv\Scripts\python.exe -m unittest -v tests.test_handoff tests.test_web` 运行 18 项全部通过，25.456 秒。覆盖重复扫描、同一轮次后的已保存变更生成新版本、清单先到、包截断、清单篡改、合法签名但包身份不同、回退清单以及本机存在分叉会话。验证源仓库、目标 Git 基线、现用工作区和原会话均保留。
+- 执行 `.\.venv\Scripts\python.exe tests/smoke_handoff.py --sync --output build-exe/verification/handoff-sync-native-01`，5.24 秒通过。第二次输出保存于 `build-exe/verification/handoff-sync-native-02`，再次通过。测试用 C 盘和 D 盘的独立交换目录模拟文件复制，两次均用真实 Codex CLI 续写原线程，核对目标目录、暂存内容与新回复。结果、接收侧清单、交接包与继续封存包均保留在相应输出目录。
+- 本轮验证覆盖自动封存和预备目录恢复。保留已用工作区合并与本机旧会话快进，真实 Syncthing、两台物理机和两种 IDE 交接待验。未测量网络速度和大包吞吐。配置及接口见 [代码与会话交接](../HANDOFF.md)。
+
 ## 2026-11-18 封面诗句与三栏工作区
 
 - 以 R6 为基线，对照开发方案头图。诗句从 34 pt 调至 42 pt 粗宋体，保留单行，下方补出处与方案封面的两行副标题。顶部滑块新增「吉光片羽」作为第三个停靠点。随记和待办进入主窗口，切回客户端前提交待保存编辑。

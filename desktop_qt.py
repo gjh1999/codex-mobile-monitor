@@ -9,11 +9,12 @@ import sys
 import threading
 import time
 import uuid
-from collections import Counter
+from collections import Counter, OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QSharedMemory, QSignalBlocker, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QPainter, QPainterPath, QPen, QShortcut
+from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QPainter, QPainterPath, QPen, QShortcut, QTextDocument
 from PySide6.QtWidgets import (
     QApplication, QDialog, QFrame, QGraphicsDropShadowEffect, QGraphicsOpacityEffect,
     QHBoxLayout, QLabel, QLineEdit, QTreeWidget, QTreeWidgetItem,
@@ -25,7 +26,7 @@ import monitor
 from desktop_glass import ClientSwitch, FrostedPanel, OceanBackdrop, motion_enabled
 from desktop_notebook import NotebookStore, NotebookWorkspace
 from desktop_projects import SessionTitles, folder_name, project_group
-from desktop_theme import STYLESHEET, configure_text, message_html, set_reading_html, ui_font, warning_html
+from desktop_theme import STYLESHEET, configure_text, format_reading_document, message_html, ui_font, warning_html
 
 MUTED = '#24495f'
 WINDOW_TITLE = '澜汐'
@@ -37,6 +38,41 @@ UUID_PATTERN = re.compile(r'\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a
 def display_text(value):
     """Identifiers remain in data, not in task captions or operation notices."""
     return UUID_PATTERN.sub('此任务', str(value or ''))
+
+
+def load_conversation(key, previous, font, option, width, gui_thread, stop):
+    client, thread = key
+    data = monitor.conversation_for(thread, client)
+    if data == previous or stop.is_set():
+        return None
+    bubbles = []
+    for message in data.get('messages') or []:
+        assistant = message.get('role') == 'assistant'
+        role = ('Claude Code' if client == 'claude' else 'Codex') if assistant else '你'
+        bubbles.append(message_html(role, message.get('text', ''), assistant))
+    errors = {json.dumps(event, sort_keys=True, ensure_ascii=False) for event in data.get('events') or []
+              if isinstance(event.get('status'), dict) and event['status'].get('error')}
+    for encoded in sorted(errors):
+        bubbles.append(warning_html(display_text(json.loads(encoded)['status']['error'])))
+    # Text-only documents are reentrant. Build and lay out an unparented
+    # document here, then transfer ownership before handing it to the widget.
+    document = QTextDocument()
+    document.setLayoutEnabled(False)
+    document.setDefaultFont(font)
+    document.setDefaultTextOption(option)
+    document.setDocumentMargin(3)
+    document.setDefaultStyleSheet('p { margin-top:3px; margin-bottom:8px; }')
+    document.setUndoRedoEnabled(False)
+    document.setHtml(''.join(bubbles) or '<p style="color:#61738c;">灯下尚无来信。写下第一句吧。</p>')
+    format_reading_document(document)
+    document.setTextWidth(width)
+    document.setLayoutEnabled(True)
+    document.size()
+    if stop.is_set():
+        return None
+    if not document.moveToThread(gui_thread):
+        raise RuntimeError('无法显示对话')
+    return data, document, errors
 
 
 def label(text, size=13, bold=False, color=None):
@@ -193,6 +229,8 @@ class Composer(QTextEdit):
 
 
 class MainWindow(QMainWindow):
+    history_ready = Signal(object, object)
+
     def __init__(self, shared):
         super().__init__()
         QApplication.instance().setStyle('Fusion')
@@ -223,7 +261,14 @@ class MainWindow(QMainWindow):
         self._rename_target = None
         self._project_directory = None
         self.notebook = None
-        self._conversation_signature = None
+        self._last_snapshot = {}
+        self._history_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='lanxi-history')
+        self._history_busy = False
+        self._history_repeat = False
+        self._history_cache = OrderedDict()
+        self._history_scroll = {}
+        self._visible_history = None
+        self.history_ready.connect(self.history_loaded, Qt.ConnectionType.QueuedConnection)
         self.setWindowTitle(WINDOW_TITLE)
         icon_path = Path(getattr(sys, '_MEIPASS', monitor.ROOT)) / 'app.ico'
         if icon_path.exists():
@@ -234,6 +279,8 @@ class MainWindow(QMainWindow):
         self.resize(min(1260, max(1020, available.width() - 40)) if available else 1260,
                     min(840, max(640, available.height() - 50)) if available else 840)
         self.build_ui()
+        self._history_placeholder = self.conversation.document()
+        self._history_placeholder.setParent(self)
         self.build_tray()
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refresh)
@@ -539,6 +586,7 @@ class MainWindow(QMainWindow):
             self.notebook.flush()
         self.stop.set()
         self.timer.stop()
+        self._history_pool.shutdown(wait=False, cancel_futures=True)
         if self.worker:
             self.worker.join(timeout=8)
         self.tray.hide()
@@ -576,7 +624,7 @@ class MainWindow(QMainWindow):
         tid = current.data(0, Qt.ItemDataRole.UserRole) if current else None
         if tid:
             self.change_task(self.client, tid)
-            self.refresh()
+            self.render_selection(self._last_snapshot)
 
     def change_task(self, client, tid):
         previous = (self.client, self.selected_thread)
@@ -585,7 +633,6 @@ class MainWindow(QMainWindow):
             self.task_drafts[previous] = self.message_edit.toPlainText()
             self.client, self.selected_thread = selected
             self.message_edit.setPlainText(self.task_drafts.get(selected, ''))
-            self._conversation_signature = None
 
     def focus_task(self, item, _column=0):
         if item is None:
@@ -724,6 +771,7 @@ class MainWindow(QMainWindow):
 
     def refresh(self):
         snap = monitor.client_snapshot(monitor.snapshot(), self.client)
+        self._last_snapshot = snap
         if self.client == 'codex':
             self.session_titles.refresh()
         connected = snap.get('connection') == 'connected'
@@ -745,18 +793,22 @@ class MainWindow(QMainWindow):
         self.stat_total.setText(str(len(projects)))
         self.stat_running.setText(str(len(running)))
         self.render_tasks(projects, threads, controls)
+        self.render_selection(snap)
+        self.render_guard_quota(snap)
+        self.refresh_approvals()
+
+    def render_selection(self, snap):
         if self._rename_target is not None and self._rename_target != (self.client, self.selected_thread):
             self.cancel_rename()
         task_title = self.task_title() or '未尽的话，可以接着说。'
         self.conversation_heading.setText(task_title)
         self.conversation_heading.setToolTip(f'{task_title}\n双击标题或按 F2 改名' if self.selected_thread else '')
         self.conversation_heading.setAccessibleDescription('双击标题或按 F2 改名' if self.selected_thread else '')
-        _, directory = projects.get(self.selected_thread, ('', ''))
+        item = self.task_items.get(self.selected_thread)
+        directory = item.data(0, TASK_DIRECTORY_ROLE) if item is not None else ''
         self._project_directory = Path(directory) if directory and Path(directory).is_absolute() else None
         self.render_controls(snap)
-        self.render_guard_quota(snap)
         self.refresh_conversation()
-        self.refresh_approvals()
 
     def begin_rename(self):
         if not self.selected_thread:
@@ -1032,38 +1084,87 @@ class MainWindow(QMainWindow):
         self.refresh()
 
     def refresh_conversation(self):
-        if not self.selected_thread:
-            self.conversation.setPlainText('未尽的话，可以接着说。选择一个任务查看对话。')
+        key = (self.client, self.selected_thread)
+        cached = self._history_cache.get(key)
+        if key != self._visible_history:
+            self.save_history_scroll()
+            self._visible_history = key
+            if cached:
+                self._history_cache.move_to_end(key)
+                self.show_history_document(cached[1])
+            else:
+                text = '正在读取对话…' if key[1] else '未尽的话，可以接着说。选择一个任务查看对话。'
+                self._history_placeholder.setPlainText(text)
+                self.conversation.setDocument(self._history_placeholder)
+        if not key[1] or self.stop.is_set():
             return
-        try:
-            data = monitor.conversation_for(self.selected_thread, self.client)
-            signature = json.dumps([self.client, self.selected_thread, data], ensure_ascii=False, sort_keys=True)
-            if signature == self._conversation_signature:
-                return
-            self._conversation_signature = signature
+        if self._history_busy:
+            self._history_repeat = True
+            return
+        self._history_busy = True
+        future = self._history_pool.submit(load_conversation, key, cached[0] if cached else None,
+                                           self._history_placeholder.defaultFont(),
+                                           self._history_placeholder.defaultTextOption(),
+                                           self.conversation.viewport().width(), self.thread(), self.stop)
+
+        def completed(result):
+            try:
+                self.history_ready.emit(key, result)
+            except RuntimeError:
+                pass  # The window was already destroyed.
+
+        future.add_done_callback(completed)
+
+    def save_history_scroll(self):
+        if self.conversation.document() is not self._history_placeholder:
             scroll = self.conversation.verticalScrollBar()
-            old_value = scroll.value()
-            at_bottom = old_value >= scroll.maximum() - 4
-            bubbles = []
-            for message in data.get('messages') or []:
-                assistant = message.get('role') == 'assistant'
-                role = ('Claude Code' if self.client == 'claude' else 'Codex') if assistant else '你'
-                bubbles.append(message_html(role, message.get('text', ''), assistant))
-            key = (self.client, self.selected_thread)
-            errors = {json.dumps(event, sort_keys=True, ensure_ascii=False) for event in data.get('events') or []
-                      if isinstance(event.get('status'), dict) and event['status'].get('error')}
-            previous = self._error_events.get(key)
-            if previous is not None:
-                for encoded in errors - previous:
-                    event = json.loads(encoded)
-                    self._popup('任务执行失败', str(event['status']['error']))
-            self._error_events[key] = errors
-            for encoded in sorted(errors):
-                bubbles.append(warning_html(display_text(json.loads(encoded)['status']['error'])))
-            set_reading_html(self.conversation, ''.join(bubbles) or '<p style="color:#61738c;">灯下尚无来信。写下第一句吧。</p>')
-            scroll.setValue(scroll.maximum() if at_bottom else min(old_value, scroll.maximum()))
-        except (OSError, ValueError, RuntimeError) as error:
-            self.conversation.setPlainText('暂时无法读取对话：' + str(error))
+            self._history_scroll[self._visible_history] = (scroll.value(), scroll.value() >= scroll.maximum() - 4)
+
+    def show_history_document(self, document):
+        self.conversation.setDocument(document)
+        scroll = self.conversation.verticalScrollBar()
+        value, at_bottom = self._history_scroll.get(self._visible_history, (0, True))
+        scroll.setValue(scroll.maximum() if at_bottom else min(value, scroll.maximum()))
+
+    def history_loaded(self, key, future):
+        self._history_busy = False
+        repeat, self._history_repeat = self._history_repeat, False
+        try:
+            result = future.result()
+        except Exception as error:
+            result = error
+        if self.stop.is_set() or key != (self.client, self.selected_thread):
+            if isinstance(result, tuple):
+                result[1].deleteLater()
+            if not self.stop.is_set():
+                self.refresh_conversation()
+            return
+        if isinstance(result, Exception):
+            if key not in self._history_cache:
+                self._history_placeholder.setPlainText('暂时无法读取对话：' + str(result))
+                self.conversation.setDocument(self._history_placeholder)
+            return
+        if repeat:
+            QTimer.singleShot(0, self.refresh_conversation)
+        if result is None:
+            return
+        data, document, errors = result
+        previous = self._error_events.get(key)
+        if previous is not None:
+            for encoded in errors - previous:
+                self._popup('任务执行失败', str(json.loads(encoded)['status']['error']))
+        self._error_events[key] = errors
+        self.save_history_scroll()
+        old = self._history_cache.pop(key, None)
+        document.setParent(self)
+        self._history_cache[key] = (data, document)
+        self.show_history_document(document)
+        if old:
+            old[1].deleteLater()
+        if len(self._history_cache) > 5:
+            dropped, (_, stale_document) = self._history_cache.popitem(last=False)
+            self._history_scroll.pop(dropped, None)
+            stale_document.deleteLater()
 
     @staticmethod
     def local_time(value):

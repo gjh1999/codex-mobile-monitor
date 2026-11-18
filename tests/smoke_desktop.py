@@ -62,6 +62,14 @@ class FakeControl:
         return request_id
 
 
+def wait_until(condition, seconds=2):
+    deadline = time.monotonic() + seconds
+    while not condition() and time.monotonic() < deadline:
+        QApplication.processEvents()
+        time.sleep(.005)
+    return condition()
+
+
 def check_client_switch(window, output):
     switch = window.client_switch
     codex, claude, notebook = switch.buttons.values()
@@ -403,9 +411,11 @@ def main():
             window.refresh()
             assert window.action_buttons['resume'].isEnabled()
             # New execution errors show a real popup; historical errors do not repeat.
+            assert wait_until(lambda: ('claude', CLAUDE) in window._error_events)
             data['events'] = [{'method': 'error', 'time': 100, 'status': {'error': 'Synthetic execution error ' + CLAUDE}}]
             window.refresh_conversation()
-            QTest.qWait(40)
+            assert wait_until(lambda: any('Synthetic execution error' in p.text()
+                                         for p in window.findChildren(QMessageBox) if p.isVisible()))
             popups = [p for p in window.findChildren(QMessageBox) if p.isVisible()]
             assert len(popups) == 1 and 'Synthetic execution error' in popups[0].text()
             assert CLAUDE not in window.conversation.toPlainText()

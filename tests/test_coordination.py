@@ -202,6 +202,26 @@ class CoordinationTests(unittest.TestCase):
         self.assertEqual(scheduler.tick(rpc, [task], 16), ['sent:thread'])
         self.assertEqual(sum(r.get('method') == 'turn/start' for r in rpc.sent), 1)
 
+    def test_personal_resume_honors_workspace_readiness_and_keeps_local_directory(self):
+        rpc = self.mock_rpc()
+        device = rpc.project_writes.client
+        local = str(self.path.parent / 'work')
+        rollout = str(self.path.parent / 'rollout.jsonl')
+        rpc.personal_session = lambda _thread: {'cwd': local, 'path': rollout}
+        with patch.object(device, 'restored_directory', side_effect=ControlDenied(detail='工作区正在切换')):
+            with self.assertRaises(ControlDenied):
+                rpc.call('thread/resume', {'threadId': 'thread'})
+        self.assertEqual(rpc.sent, [])
+        self.assertIsNone(self.db.status('vision')['writer'])
+        with patch.object(device, 'project_at', return_value=None):
+            with self.assertRaises(ControlDenied):
+                rpc.call('thread/resume', {'threadId': 'thread'})
+        self.assertEqual(rpc.sent, [])
+        with patch.object(device, 'restored_directory', return_value=str(self.path.parent)) as check:
+            rpc.call('thread/resume', {'threadId': 'thread'})
+        check.assert_called_once_with('vision', 'thread')
+        self.assertEqual(rpc.sent[-1]['params'], {'threadId': 'thread', 'cwd': local, 'path': rollout})
+
     def test_timeout_keeps_control_until_verified_and_threads_share_project(self):
         rpc = self.mock_rpc()
         rpc.call('thread/resume', {'threadId': 'thread'})

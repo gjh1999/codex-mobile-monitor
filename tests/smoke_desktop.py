@@ -601,6 +601,18 @@ def main():
                     window.refresh()
                     window.refresh()
                     launch.assert_called_once_with([str(editor),str(destination)])
+                    QTest.mouseClick(window.action_buttons['open_project'], Qt.MouseButton.LeftButton)
+                    del flow.projects[project]
+                    with patch.object(window, '_popup') as popup:
+                        window.refresh()
+                        window.refresh()
+                        popup.assert_called_once_with('无法启卷', '项目已移出本机同步清单。')
+                    assert window._pending_open is None and launch.call_count == 1
+                    flow.projects[project] = str(destination)
+                    flow.threads[CLAUDE] = {'project': project, 'cwd': str(destination)}
+                    window.switch_client('claude')
+                    assert window.selected_thread == CLAUDE and window._sync_project is None
+                    window.switch_client('codex')
                 window.refresh()
             assert not window.action_buttons['manage'].isEnabled()
             assert window.action_buttons['unmanage'].isEnabled()

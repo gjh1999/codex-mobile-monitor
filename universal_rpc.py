@@ -192,13 +192,14 @@ class CodexRPC(UniversalRPC):
 
     def __init__(self, approvals, journal=None, custom_process=None, coordination=None):
         self.approvals = approvals
-        self.project_writes = ProjectWrites(coordination) if coordination else None
+        self.project_writes = ProjectWrites(coordination) if coordination and coordination.paths else None
         self.loaded_threads = set()
         self.draining = False
         super().__init__('codex', journal=journal, custom_process=custom_process)
 
     def call(self, method, params, timeout=20):
-        if method == 'thread/resume' and not params.get('cwd') and getattr(self, 'personal_session', None):
+        automatic_resume = method == 'thread/resume' and not params.get('cwd')
+        if automatic_resume and getattr(self, 'personal_session', None):
             session = self.personal_session(params['threadId'])
             if session:
                 params = {**params, 'cwd': session['cwd'], 'path': session['path']}
@@ -237,9 +238,11 @@ class CodexRPC(UniversalRPC):
         accepted = False
         turn = None
         wired = {**params, '_sendGuard': guard}
-        if method == 'thread/resume' and not params.get('cwd'):
+        if automatic_resume:
             mapped = writes.client.restored_directory(project, thread)
-            if mapped:
+            if params.get('cwd') and writes.client.project_at(params['cwd']) != project:
+                raise ControlDenied(detail='个人会话目录与协调服务登记的项目不一致')
+            if mapped and not params.get('cwd'):
                 wired['cwd'] = mapped
         try:
             result = super().call(method, wired, timeout)

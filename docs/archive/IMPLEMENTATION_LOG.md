@@ -2,6 +2,25 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-19 三路代码集成审查
+
+以个人同步版 `c590e2b` 为基线，核对三个任务的交付记录、GitHub 引用和本机工作区。远端只有 `main`，查询时未发现 PR 引用。以下提交均已是该基线的祖先。
+
+| 来源 | 交付提交 | 集成复核 |
+|---|---|---|
+| 前端 | `36cf30f` | Codex、Claude 的 Markdown 对谈和已有 Qt 操作 |
+| 后端 | `144990b`，较早的产物传输为 `241605a` | 原生会话历史、协调项目接续和项目同步 |
+| 壁纸 | `b289163`，合并点 `a478b96` | 本机 macOS 图库、内置图库、轮换与固定模式 |
+
+- 用 `git worktree list --porcelain` 和 `git merge-base --is-ancestor` 核对了审查开始时的 20 个工作区。四个有未提交改动的目录是 R10 至 R13 的旧发布快照。在独立 Git 索引重建其工作区内容，分别与 `b4b65c6`、`9253b24`、`6f462d4`、`de12251` 三方试合并，所得目录树与各自已交付提交完全相同。两份壁纸 autostash 的代码和测试已进入主线，文档差异为旧版本交付措辞。另一份 stash 新增的原路径切换记录已逐行存在。原工作区与三份 stash 均保留。合并判定见 `build-exe/verification/three-agent-review-20261119/git-audit.json`。
+- 修正个人接续与项目交接同时启用时的次序。工作区正在切换或必需资源未就绪时沿用原有等待逻辑；核对通过后沿用 R18 映射到当前设备的会话目录。个人通道配置只有设备、没有受控项目时，原生续接直接使用已恢复的本机记录。桌面「启卷」等待期间移除项目会结束等待，Claude 的项目查找使用自己的目录，防止与同 ID 的 Codex 会话串到另一个项目。
+- 多版本共存时，登录启动脚本可通过 `-ExecutableName` 明确选择 R19。无参安装继续使用原来的默认包与源码回退顺序。用拦截 `New-ScheduledTaskAction` 的测试替身核对默认包、明确指定、缺包停止、源码回退四种结果。第一次测试替身的捕获结果停留在被调用脚本作用域，修正采集方式后全部通过。`verify-startup.ps1`、`startup.txt`、`startup-02.txt` 保存在本轮输出目录，未注册现场计划任务。
+- Windows、Python 3.14.7、Git 2.56.0.windows.4、Codex CLI 0.170.0；测试使用独立源码目录、临时项目和本机回环模型。执行 `python -B -m unittest tests.test_codex_history tests.test_coordination tests.test_personal_flow -v`，23 项通过，21.125 秒。执行 `python -B -m unittest discover -s tests -t . -p 'test_*.py' -v`，**231 项中 229 项通过、2 项跳过**，197.220 秒。跳过项为沙箱用户的 DPAPI 和可选钉钉 Stream SDK。增加目录归属断言后，协调专项 11 项再通过，0.839 秒。上一版 R18 的 230 项结果在下一节。
+- 执行 `python -B tests/smoke_desktop.py --output ../qt`，验证 Markdown、托盘、任务操作和「启卷」；`python -B -m tests.smoke_codex_history --output ../history` 验证三轮六条可见消息；`python -B -m tests.smoke_personal_flow --output ../native.json` 验证两套 Codex 主目录间三轮同线程续接、本机工作目录和写入锁。另在本轮源码目录以 Qt offscreen 运行主仓库既有的 `build-exe/verification/applewalls-r14-integrated/verify_rotation.py`，逐张解码现有 74 张壁纸和模糊层，循环回到 6016 × 3384 的 Mavericks。固定模式关闭计时器。轮换通过主动推进验证，没有等待 74 个半小时。
+- 使用与 `scripts/build-exe.ps1 -AppName Lanxi-Glass-R19-Integrated` 相同的 PyInstaller 参数构建隔离源码，发布到 `release/Lanxi-Glass-R19-Integrated.exe`。大小 61,598,364 字节，SHA-256 为 `910F4BA99E0A4ABF06D4E4C177278AAA5F75F838C3220C60EC292A2AE9D2A2C3`。执行 `python -B -m tests.smoke_personal_exe --exe ../package/Lanxi-Glass-R19-Integrated.exe --output ../exe-flow.json`，两个隔离 EXE 配置在 8.47 秒内完成后台克隆、项目记忆原相对目录恢复及修改回传。`python build-exe/verify-lanxi-launch.py Lanxi-Glass-R19-Integrated.exe` 在 1.52 秒内检测到独立副本的窗口和 SQLite。该轮验收没有切换日常运行实例，也未实测物理机间网络延迟。
+
+本轮独立输出在 `build-exe/verification/three-agent-review-20261119/`，包括 `targeted.txt`、`full.txt`、`coordination-final.txt`、`qt/`、`history/result.json`、`native.json`、`wallpapers.txt`、`package.txt` 和 `exe-flow.json`。
+
 ## 2026-11-19 个人后台同步与项目相对记忆目录
 
 - 基线 `0b07317` 的「启卷」只打开当前设备已有的项目目录。个人版增加后台发现项目、按大小过滤克隆、追随远端分支和自动发布已保存的代码。笔记、原生长期记忆记录和已完成会话按 GitHub 仓库标识和项目相对路径同步。全局规则保存在各机 Codex 主目录。 [操作与配置](../PERSONAL_SYNC.md)

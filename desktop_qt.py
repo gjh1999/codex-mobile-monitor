@@ -1157,7 +1157,10 @@ class MainWindow(QMainWindow):
                 snap['threads'] = list(threads.values())
             if self._pending_open:
                 project, epoch = self._pending_open
-                if view['completed'].get(project,0) > epoch or '配对' in view['status'] and project not in view['status']:
+                if project not in view['projects']:
+                    self._pending_open = None
+                    self._popup('无法启卷','项目已移出本机同步清单。')
+                elif view['completed'].get(project,0) > epoch or '配对' in view['status'] and project not in view['status']:
                     self._pending_open = None
                     status = view['status'].get(project,'项目尚未准备好')
                     if status == '已同步':
@@ -1208,7 +1211,8 @@ class MainWindow(QMainWindow):
         self._sync_project = None
         if monitor.personal_sync:
             remote = next((t.get('githubProject') for t in snap.get('threads',[]) if t['id']==self.selected_thread),None)
-            mapping = monitor.personal_sync.resolve(self.selected_thread,directory,remote)
+            codex_thread = self.selected_thread if self.client == 'codex' else None
+            mapping = monitor.personal_sync.resolve(codex_thread,directory,remote)
             if mapping:
                 self._sync_project,self._project_directory = mapping
         self.render_controls(snap)

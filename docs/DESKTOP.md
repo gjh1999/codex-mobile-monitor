@@ -30,6 +30,8 @@
 
 ## EXE 与数据
 
+当前个人版使用 `release/Lanxi-Glass-R19-Integrated.exe`。它包含下列历史版本的前端、后台和壁纸功能，并保留 R18 的项目代码与记忆同步。已配对设备沿用同一发布目录中的配置。
+
 包含本机 Codex 历史接续的构建为 `release/Lanxi-Glass-R17-History.exe`。
 
 带聊天 Markdown 渲染的毛玻璃版交付文件为 `release/Lanxi-Glass-R16-Markdown.exe`。默认构建名为 `release/Lanxi.exe`。
@@ -94,6 +96,6 @@ Claude 的“自动推进”由本监控定时器实现：默认关闭，手动�
 
 ## 登录启动与验收
 
-`scripts/install-startup.ps1` 优先将 `release/Lanxi.exe` 注册为当前用户登录入口，其次兼容旧桌面 EXE，最后使用源码方式启动。已有计划任务可按运行文档更新。
+登录时启动这一版可指定 `scripts/install-startup.ps1 -ExecutableName Lanxi-Glass-R19-Integrated.exe`。省略文件名时优先使用 `release/Lanxi.exe`，其次兼容旧桌面 EXE，最后使用源码方式启动。 [登录启动说明](RUNBOOK.md#windows-登录启动)
 
 Qt smoke 使用虚构会话核验界面按钮和显示。真实模型收发、工具审批往返、系统通知实际展示、重新登录和故障恢复需要在本机另行验收，不能从打包成功或 smoke 通过推断。

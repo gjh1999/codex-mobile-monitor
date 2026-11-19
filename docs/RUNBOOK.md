@@ -70,12 +70,12 @@ EXE 已包含 Python 界面依赖，仍需要对应本机 CLI。其运行状态�
 以下命令会注册或移除当前用户的计划任务，按需执行：
 
 ```powershell
-& './scripts/install-startup.ps1'
+& './scripts/install-startup.ps1' -ExecutableName 'Lanxi-Glass-R19-Integrated.exe'
 Get-ScheduledTask -TaskName CodexMobileMonitor | Select-Object TaskName, State, Actions
 & './scripts/install-startup.ps1' -Remove
 ```
 
-脚本优先选 `release/Lanxi.exe`，其次查找旧版 CodexMobileMonitor 桌面程序，最后回退到 `.venv/Scripts/pythonw.exe desktop_app.py`。使用普通用户权限，登录触发，配置失败重启和忽略重复实例。已有计划任务需重新运行脚本才会采用新入口。
+指定 `-ExecutableName` 时，脚本必须在 `release/` 找到该文件才会更新启动项。省略此参数时优先选 `release/Lanxi.exe`，其次查找旧版 CodexMobileMonitor 桌面程序，最后回退到 `.venv/Scripts/pythonw.exe desktop_app.py`。使用普通用户权限，登录触发，配置失败重启和忽略重复实例。已有计划任务需重新运行脚本才会采用新入口。
 
 从旧版本迁移后，检查已有计划任务的实际 `Actions`；入口不是当前桌面程序时，重新执行安装脚本更新它。注册成功不等于重新登录和故障重启已经实测。设置环境变量后应重启对应进程，使其继承新值。
 

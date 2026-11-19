@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 from automation import Approvals
 from code_sync import value as git
+from coordination_client import ControlClient
 from handoff import HandoffError, find_session, native_publication_lock, session_info
 from personal_memory import latest_session
 from personal_sync import PersonalSync
@@ -31,7 +32,8 @@ def verify_desktop_resume(exe, machine, thread, directory):
         text=True,
         encoding="utf-8",
     ) as process:
-        rpc = CodexRPC(Approvals(), custom_process=process)
+        relay_only = ControlClient({"url": "http://127.0.0.1", "device": "desktop", "projects": {}}, None)
+        rpc = CodexRPC(Approvals(), custom_process=process, coordination=relay_only)
         try:
             rpc.personal_session = machine.threads.get
             result = rpc.call("thread/resume", {"threadId": thread, "excludeTurns": True})

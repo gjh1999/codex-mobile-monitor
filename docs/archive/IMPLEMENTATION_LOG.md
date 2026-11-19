@@ -47,6 +47,10 @@
 - `python -B -m unittest -v tests.test_daemon_support tests.test_task_control tests.test_coordination tests.test_handoff tests.test_monitor tests.test_ide_activity tests.test_quota_recovery`。首轮 81 项，79 项通过、1 项失败、1 项跳过，29.247 秒。新增断言误将已接入会话的写入权视为可立即释放，改为验证消息未写出及空闲连接正常退出后释放。第二轮 82 项，81 项通过、1 项跳过，48.069 秒。记录为 `targeted-01.txt` 与 `targeted-02.txt`。增加接入前的传输检查后，`python -B -m unittest -q tests.test_task_control tests.test_auto_progress tests.test_coordination tests.test_daemon_support` 共 49 项通过，5.604 秒，见 `control-final.txt`。
 - 空闲通知轮询使用 2,000 条已通知的合成助手回复，每条正文由 `fixture reply ` 重复 12 次组成。预热后交替执行旧版全表读取及逐条去重、修复版本的空队列读取，各测 5 次。初版中位数分别为 69.683 和 0.100 毫秒。加入历史迁移期间的实时回复优先级后复测，分别为 37.153 和 0.113 毫秒。复现命令为 `python -B -m tests.bench_reply_notifications`，逐次读数见同目录 `idle-01.json`、`idle-02.json`。未控制并行测试负载，耗时仅涵盖本地通知轮询。真实模型收发、物理设备断网、系统弹窗与用户历史库未实测。
 
+- 首轮全量执行 `python -B -m unittest discover -s tests -t . -p 'test_*.py' -v`，218 项中 215 项通过、3 项跳过，214.218 秒，见 `full-01.txt`。独立工作树缺少适配器约定路径下的解释器，另外两项依赖当前 Windows 用户的 DPAPI 和可选钉钉 Stream SDK。
+- 集成 `144990b` 的本地会话历史读取后，回复库同时保留历史查询索引、按轮次结束事件的索引和通知队列。用仓库内的基准脚本再次测量，旧路径和新路径的空闲轮询中位数为 39.540 和 0.075 毫秒，原始五次读数见 `integrated-idle.json`。
+- 对集成版本 `283d957`，在独立工作树运行 `python -m venv --without-pip .venv` 为 PowerShell 适配器提供约定的解释器，再使用项目主虚拟环境执行相同的全量测试命令。222 项中 220 项通过、2 项跳过，耗时 173.410 秒。终端适配器与历史会话回归通过，跳过项为当前 Windows 用户的 DPAPI 和可选钉钉 Stream SDK。完整日志为 `integrated-01.txt`。
+
 ## 2026-11-19 对谈 Markdown 排版
 
 - 基线 `8f6d6de`，Windows 11 x64、Python 3.14.7、PySide6 6.12.0。在现有消息气泡内使用 [Qt Markdown 解析](https://doc.qt.io/qt-6.12/qtextdocument.html#setMarkdown)，复用后台排版和最近会话缓存。用虚构的中英文消息验证标题、加粗、嵌套列表、表格、引用、围栏代码和链接。代码保持缩进并随可用宽度换行。

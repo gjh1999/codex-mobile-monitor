@@ -14,6 +14,8 @@
 
 弹窗和下拉菜单沿用主界面的海蓝色系、字重及按钮层级。
 
+「灯下对谈」自动排版 Codex 和 Claude Code 回复中的 Markdown。标题、列表、引用和表格在原来的半透明气泡内显示，行内代码和代码块使用浅蓝底与等宽字体。长代码行随窗口宽度换行，可选中内容复制。点按网页链接会打开默认浏览器，外部图片显示描述文字。
+
 点击左侧任务即可接入，接入成功后会断开同一客户端中的其他任务。接入失败时保留原有连接。断开会停止澜汐对旧任务的控制和自动推进，其已启动的轮次继续执行。
 
 鼠标移入对谈标题区或键盘聚焦操作按钮，工具栏就会浮现。接入、暂停、继续依次叫「执舟」「暂泊」「续航」，自动推进用「扬帆」和「收帆」，移出和打开 VS Code 项目用「移离案头」和「启卷」。把鼠标停在按钮上可查看动作含义。双击对谈标题或聚焦后按 F2 就地改名，Enter 保存，Esc 取消。对话输入区用 Ctrl+Enter 发送。
@@ -26,7 +28,7 @@
 
 ## EXE 与数据
 
-带大模型归组的毛玻璃版交付文件为 `release/Lanxi-Glass-R15-ModelGroups.exe`。默认构建名为 `release/Lanxi.exe`。
+带聊天 Markdown 渲染的毛玻璃版交付文件为 `release/Lanxi-Glass-R16-Markdown.exe`。默认构建名为 `release/Lanxi.exe`。
 
 首页从 25 联唐诗里每小时轮换一句，并同步显示作者与篇名。重开窗口沿用当前小时的诗句，电脑唤醒后直接显示当时的一句。诗句可离线轮换，副标题沿用开发方案封面原文。选诗参考 [Wscats/poetry-skills](https://github.com/Wscats/poetry-skills) 使用的 [chinese-poetry《唐诗三百首》](https://github.com/chinese-poetry/chinese-poetry/blob/master/全唐诗/唐诗三百首.json)，并参考 [常建《题破山寺后禅院》](https://zh.wikisource.org/wiki/破山寺後禪院) 与 [钱起《省试湘灵鼓瑟》](https://ctext.org/text.pl?if=gb&node=153790) 的原文。
 

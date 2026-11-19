@@ -4,8 +4,8 @@ from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QRectF, QSignalBlocker, QSize, Qt, QTimer
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPalette, QPen
+from PySide6.QtCore import QEvent, QMimeData, QRectF, QSignalBlocker, QSize, Qt, QTimer
+from PySide6.QtGui import QColor, QDrag, QPainter, QPainterPath, QPalette, QPen
 from PySide6.QtWidgets import (
     QButtonGroup, QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
     QMenu, QMessageBox, QPushButton, QStyle, QStyledItemDelegate, QTextEdit, QVBoxLayout, QWidget,
@@ -19,6 +19,7 @@ INK = '#f3faff'
 MUTED = '#a9c8d7'
 CHECK_STATE = Qt.ItemDataRole.CheckStateRole
 ENTRY_ID = Qt.ItemDataRole.UserRole
+GROUP_HEADER = Qt.ItemDataRole.UserRole + 1
 
 
 class NotebookStore:
@@ -70,6 +71,13 @@ class EntryDelegate(QStyledItemDelegate):
 
     def paint(self, painter, option, index):
         rect = option.rect
+        if index.data(GROUP_HEADER) is not None:
+            painter.save()
+            painter.setFont(ui_font(9, True))
+            painter.setPen(QColor(MUTED))
+            painter.drawText(rect.adjusted(9, 0, -9, 0), Qt.AlignmentFlag.AlignVCenter, index.data())
+            painter.restore()
+            return
         selected = option.state & QStyle.StateFlag.State_Selected
         hovered = option.state & QStyle.StateFlag.State_MouseOver
         check = index.data(CHECK_STATE)
@@ -125,6 +133,46 @@ class EntryDelegate(QStyledItemDelegate):
         return model.setData(index, state.value, CHECK_STATE)
 
 
+class GroupList(QListWidget):
+    def __init__(self, drop_in_group):
+        super().__init__()
+        self.drop_in_group = drop_in_group
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+
+    def startDrag(self, _actions):
+        item = self.currentItem()
+        if item is None or item.data(ENTRY_ID) is None:
+            return
+        mime = QMimeData()
+        mime.setText(str(item.data(ENTRY_ID)))
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        drag.exec(Qt.DropAction.MoveAction)
+
+    def dragEnterEvent(self, event):
+        if event.source() is self:
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        item = self.itemAt(event.position().toPoint())
+        if event.source() is self and item is not None and item.data(GROUP_HEADER) is not None:
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        item = self.itemAt(event.position().toPoint())
+        if event.source() is self and item is not None and item.data(GROUP_HEADER) is not None:
+            self.drop_in_group(int(event.mimeData().text()), item.data(GROUP_HEADER))
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+
 def notebook_button(text, name, size):
     button = QPushButton(text)
     button.setObjectName(name)
@@ -134,9 +182,10 @@ def notebook_button(text, name, size):
 
 
 class NotebookWorkspace(QWidget):
-    def __init__(self, store, backdrop):
+    def __init__(self, store, backdrop, organizer=None):
         super().__init__()
         self.store = store
+        self.organizer = organizer
         self.kind = 'note'
         self.archived = False
         self.entry_id = None
@@ -195,7 +244,7 @@ class NotebookWorkspace(QWidget):
         self.empty.setFont(ui_font(9.5))
         self.empty.setContentsMargins(9, 5, 0, 0)
         navigation.addWidget(self.empty)
-        self.list = QListWidget()
+        self.list = GroupList(self.move_to_group)
         self.list.setObjectName('notebookList')
         self.list.setFont(ui_font(11))
         self.list.setMouseTracking(True)
@@ -279,20 +328,41 @@ class NotebookWorkspace(QWidget):
         self.items = {}
         scrollbar = self.list.verticalScrollBar()
         scroll = scrollbar.value()
+        grouped = {}
+        for row in rows:
+            entry_id, title, body, _filed, _updated_at = row
+            if self.organizer is not None and not self.archived:
+                self.organizer.observe(self.kind, entry_id, title, body)
+            name = self.organizer.label(self.kind, entry_id) if self.organizer is not None else ''
+            grouped.setdefault(name, []).append(row)
+        has_groups = any(grouped)
         with QSignalBlocker(self.list):
             self.list.clear()
-            for entry_id, title, body, filed, _updated_at in rows:
-                line = next((part.strip() for part in (title or body).splitlines() if part.strip()), '一笔未题')
-                item = QListWidgetItem(line, self.list)
-                item.setData(ENTRY_ID, entry_id)
-                if self.kind == 'todo':
-                    item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                    item.setCheckState(Qt.CheckState.Checked if filed else Qt.CheckState.Unchecked)
-                self.items[entry_id] = item
+            for name, entries in grouped.items():
+                if has_groups:
+                    header = QListWidgetItem(name or '未归组', self.list)
+                    header.setData(GROUP_HEADER, name)
+                    header.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsDropEnabled)
+                    header.setToolTip('可拖动条目到此组')
+                for entry_id, title, body, filed, _updated_at in entries:
+                    line = next((part.strip() for part in (title or body).splitlines() if part.strip()), '一笔未题')
+                    item = QListWidgetItem(line, self.list)
+                    item.setData(ENTRY_ID, entry_id)
+                    if self.kind == 'todo':
+                        item.setCheckState(Qt.CheckState.Checked if filed else Qt.CheckState.Unchecked)
+                    self.items[entry_id] = item
             self.list.setCurrentItem(self.items.get(self.entry_id))
         scrollbar.setValue(scroll)
         self.empty.setText('旧笺尚空。' if self.archived else '这一页尚空。')
         self.empty.setVisible(not rows)
+
+    def move_to_group(self, entry_id, name):
+        if self.organizer is None or entry_id not in self.records:
+            return
+        try:
+            self.organizer.assign(self.kind, entry_id, name)
+        except (OSError, sqlite3.Error):
+            QMessageBox.warning(self, '未能移入', '暂时无法保存分组，请稍后再试。')
 
     def set_entry(self, entry_id):
         self.entry_id = entry_id
@@ -373,7 +443,7 @@ class NotebookWorkspace(QWidget):
         return True
 
     def update_check(self, item):
-        if self.kind != 'todo':
+        if self.kind != 'todo' or item.data(ENTRY_ID) is None:
             return
         entry_id = item.data(ENTRY_ID)
         filed = item.checkState() == Qt.CheckState.Checked

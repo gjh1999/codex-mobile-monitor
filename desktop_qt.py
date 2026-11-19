@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QEasingCurve, QPoint, QPropertyAnimation, QRectF, QSharedMemory, QSignalBlocker, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QPainter, QPainterPath, QPen, QShortcut, QTextDocument
+from PySide6.QtGui import QColor, QCursor, QFont, QIcon, QKeySequence, QPainter, QPainterPath, QPen, QShortcut, QTextDocument
 from PySide6.QtWidgets import (
     QApplication, QCompleter, QDialog, QFrame, QGraphicsDropShadowEffect, QGraphicsOpacityEffect,
     QHBoxLayout, QLabel, QLineEdit, QTreeWidget, QTreeWidgetItem,
@@ -25,10 +25,12 @@ from PySide6.QtWidgets import (
 
 import monitor
 from desktop_glass import ClientSwitch, FrostedPanel, OceanBackdrop, motion_enabled
+from desktop_model_api import ModelApiDialog
 from desktop_notebook import NotebookStore, NotebookWorkspace
 from desktop_poetry import COVER_VERSES
 from desktop_projects import SessionTitles, folder_name, project_group
 from desktop_theme import SLASH_MENU_STYLE, STYLESHEET, configure_text, format_reading_document, message_html, ui_font, warning_html
+from model_groups import Organizer
 from rpc_errors import RPCError
 
 MUTED = '#24495f'
@@ -241,9 +243,11 @@ class EdgeMenu(QWidget):
     HEIGHT = 22
     HOT_ZONE = 4
 
-    def __init__(self, backdrop, show_details, show_approvals, hide_window):
+    def __init__(self, backdrop, menus):
         super().__init__(backdrop)
         self.revealed = False
+        self.active_menu = None
+        self.menus = {}
         self.panel = FrostedPanel(backdrop, radius=0, tint=QColor(13, 51, 69, 203), edge=QColor(205, 239, 250, 60))
         self.panel.setParent(self)
         self.panel.hide()
@@ -261,30 +265,39 @@ class EdgeMenu(QWidget):
         row = QHBoxLayout(self.panel)
         row.setContentsMargins(24, 0, 24, 0)
         row.setSpacing(5)
-        name = label(WINDOW_TITLE, 9.5, True, '#f3fbff')
-        name.setWordWrap(False)
-        row.addWidget(name)
-        row.addSpacing(12)
-        row.addWidget(self.button('运行与额度', show_details))
-        self.review = self.button('待你定夺', show_approvals)
-        self.review.setEnabled(False)
-        row.addWidget(self.review)
+        for title, entries in menus.items():
+            button = self.button(title)
+            menu = QMenu(button)
+            self.menus[title] = menu
+            for caption, callback in entries:
+                menu.addAction(caption, callback)
+            button.setMenu(menu)
+            menu.aboutToShow.connect(lambda menu=menu: self.menu_opened(menu))
+            menu.aboutToHide.connect(self.menu_closed)
+            row.addWidget(button)
         row.addStretch()
-        row.addWidget(self.button('收起', hide_window))
 
         self.resize(backdrop.width(), self.HOT_ZONE)
         backdrop.installEventFilter(self)
 
     @staticmethod
-    def button(text, callback):
+    def button(text):
         button = QPushButton(text)
         button.setObjectName('edgeMenuItem')
-        button.setFont(ui_font(9))
+        button.setFont(ui_font(9, text == WINDOW_TITLE))
         button.setFixedHeight(20)
         button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         button.setCursor(Qt.CursorShape.PointingHandCursor)
-        button.clicked.connect(callback)
         return button
+
+    def menu_opened(self, menu):
+        self.leave_delay.stop()
+        self.active_menu = menu
+
+    def menu_closed(self):
+        self.active_menu = None
+        if not self.rect().contains(self.mapFromGlobal(QCursor.pos())):
+            self.schedule_hide()
 
     def eventFilter(self, watched, event):
         if watched is self.parentWidget() and event.type() == QEvent.Type.Resize:
@@ -302,6 +315,10 @@ class EdgeMenu(QWidget):
 
     def leaveEvent(self, event):
         super().leaveEvent(event)
+        if self.active_menu is None:
+            self.schedule_hide()
+
+    def schedule_hide(self):
         if self.revealed:
             if motion_enabled():
                 self.leave_delay.start()
@@ -444,6 +461,7 @@ class Composer(QTextEdit):
 class MainWindow(QMainWindow):
     history_ready = Signal(object, object)
     codex_options_ready = Signal(object, object)
+    grouping_changed = Signal(str)
 
     def __init__(self, shared):
         super().__init__()
@@ -484,8 +502,10 @@ class MainWindow(QMainWindow):
         self._visible_history = None
         self._codex_request = None
         self._codex_menu = None
+        self.organizer = Organizer(monitor.ROOT, self.grouping_changed.emit)
         self.history_ready.connect(self.history_loaded, Qt.ConnectionType.QueuedConnection)
         self.codex_options_ready.connect(self.show_codex_options, Qt.ConnectionType.QueuedConnection)
+        self.grouping_changed.connect(self.refresh_grouping, Qt.ConnectionType.QueuedConnection)
         self.setWindowTitle(WINDOW_TITLE)
         icon_path = Path(getattr(sys, '_MEIPASS', monitor.ROOT)) / 'app.ico'
         if icon_path.exists():
@@ -732,6 +752,7 @@ class MainWindow(QMainWindow):
         task_header_area.addLayout(task_header)
 
         self.details_dialog = QDialog(self)
+        self.details_dialog.setObjectName('lanxiDialog')
         self.details_dialog.setWindowTitle('运行与额度')
         self.details_dialog.resize(520, 380)
         details = QVBoxLayout(self.details_dialog)
@@ -741,7 +762,46 @@ class MainWindow(QMainWindow):
             configure_text(content, 10, 4)
             setattr(self, attr, content)
             details.addWidget(content, 1)
-        self.edge_menu = EdgeMenu(root, self.show_details, lambda: self.offer_approval(force=True), self.close)
+        self.edge_menu = EdgeMenu(root, {
+            WINDOW_TITLE: [('关于澜汐', self.about_lanxi), ('退出程序', self.quit_app)],
+            '任务': [('执舟', self.action_buttons['attach'].click), ('暂泊', self.action_buttons['pause'].click),
+                   ('续航', self.action_buttons['resume'].click), ('待你定夺', lambda: self.offer_approval(force=True)),
+                   ('运行与额度', self.show_details)],
+            '显示': [('Codex', lambda: self.select_workspace('codex')), ('Claude Code', lambda: self.select_workspace('claude')),
+                   ('吉光片羽', self.open_notebook)],
+            '设置': [('大模型 API…', self.open_model_api)],
+            '窗口': [('最大化／还原', self.toggle_maximized), ('收起到托盘', self.close)],
+        })
+        task_menu = self.edge_menu.menus['任务']
+        task_menu.aboutToShow.connect(self.refresh_task_menu)
+
+    def refresh_task_menu(self):
+        attach, pause, resume, review, _details = self.edge_menu.menus['任务'].actions()
+        for action, key in zip((attach, pause, resume), ('attach', 'pause', 'resume')):
+            action.setEnabled(self.workspace_pages.currentWidget() is self.task_workspace
+                              and self.action_buttons[key].isEnabled())
+        review.setEnabled(bool(self._pending_approvals))
+
+    def about_lanxi(self):
+        self._popup('关于澜汐', '澜汐 · 开发工作台\n一处开始，处处继续。')
+
+    def toggle_maximized(self):
+        self.showNormal() if self.isMaximized() else self.showMaximized()
+
+    def open_model_api(self):
+        dialog = ModelApiDialog(self, self.organizer)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.refresh()
+            if self.notebook is not None:
+                self.notebook.load_list()
+
+    def refresh_grouping(self, scope):
+        if self.stop.is_set():
+            return
+        if scope == 'task:' + self.client:
+            self.refresh()
+        elif self.notebook is not None and scope == self.notebook.kind:
+            self.notebook.load_list()
 
     def build_task_actions(self):
         self.action_buttons = {}
@@ -807,6 +867,7 @@ class MainWindow(QMainWindow):
         if self.notebook is not None:
             self.notebook.flush()
         self.stop.set()
+        self.organizer.close()
         self.timer.stop()
         self._history_pool.shutdown(wait=True, cancel_futures=True)
         if self.worker:
@@ -827,7 +888,7 @@ class MainWindow(QMainWindow):
             if self.notebook is None:
                 try:
                     store = NotebookStore(monitor.ROOT / 'lanxi-notebook.sqlite3')
-                    self.notebook = NotebookWorkspace(store, self.centralWidget())
+                    self.notebook = NotebookWorkspace(store, self.centralWidget(), self.organizer)
                 except sqlite3.Error:
                     self.client_switch.select(self.client)
                     self._popup('吉光片羽暂未打开', '暂时无法读写本机笔记库。')
@@ -907,6 +968,10 @@ class MainWindow(QMainWindow):
         active_controls = {task.get('threadId'): task for task in controls.get('tasks') or []}
         attaching = {op.get('threadId') for op in controls.get('operations') or []
                      if op.get('action') in ('attach', 'focus') and op.get('status') in ('queued', 'running')}
+        projects_by_name = {}
+        for _title, directory in projects.values():
+            group = project_group(directory)
+            projects_by_name.setdefault(group[1].casefold(), set()).add(group)
         rows = []
         for tid, (title, directory) in projects.items():
             control = active_controls.get(tid) or {}
@@ -919,7 +984,12 @@ class MainWindow(QMainWindow):
                 caption = '暂泊中' if self.client == 'claude' and status == 'active' else '已暂泊 · 待续航'
             else:
                 caption = {'active': '行舟中', 'systemError': '执行异常'}.get(status, '已执舟')
-            rows.append((tid, title, caption, directory, project_group(directory)))
+            group = project_group(directory)
+            model_label = self.organizer.label('task:' + self.client, tid)
+            if model_label and model_label.casefold() != group[1].casefold():
+                matching = projects_by_name.get(model_label.casefold(), ())
+                group = next(iter(matching)) if len(matching) == 1 else ('model:' + model_label, model_label, '')
+            rows.append((tid, title, caption, directory, group))
         signature = (self.client, rows)
         if signature != self._task_signature:
             previous_scroll = self.task_choice.verticalScrollBar().value()
@@ -933,7 +1003,7 @@ class MainWindow(QMainWindow):
                 for tid, title, caption, directory, (key, group_name, workspace) in rows:
                     group = self.project_items.get(key)
                     if group is None:
-                        qualifier = folder_name(str(Path(workspace).parent))
+                        qualifier = folder_name(str(Path(workspace).parent)) if workspace else ''
                         caption_name = (f'{group_name} · {qualifier}' if qualifier and group_names[group_name.casefold()] > 1
                                         else group_name)
                         group = QTreeWidgetItem(self.task_choice, [caption_name])
@@ -1005,7 +1075,8 @@ class MainWindow(QMainWindow):
 
     def refresh(self):
         self.refresh_verse()
-        snap = monitor.client_snapshot(monitor.snapshot(), self.client)
+        snapshot = monitor.snapshot()
+        snap = monitor.client_snapshot(snapshot, self.client)
         self._last_snapshot = snap
         if self.client == 'codex':
             self.session_titles.refresh()
@@ -1018,6 +1089,11 @@ class MainWindow(QMainWindow):
         threads = snap.get('threads') or []
         controls = snap.get('controls') or {}
         projects = self.all_tasks(snap)
+        if self.organizer.settings.base_url:
+            for client in ('codex', 'claude'):
+                candidates = projects if client == self.client else self.all_tasks(monitor.client_snapshot(snapshot, client), client)
+                for key, (title, directory) in candidates.items():
+                    self.organizer.observe('task:' + client, key, title, project=project_group(directory)[1])
         running = {task.get('id') for task in threads if (task.get('status') or {}).get('type') == 'active'}
         for task in controls.get('tasks') or []:
             tid = task.get('threadId')
@@ -1089,6 +1165,7 @@ class MainWindow(QMainWindow):
 
     def _popup_now(self, title, message):
         box = QMessageBox(self)
+        box.setObjectName('lanxiDialog')
         box.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         box.setIcon(QMessageBox.Icon.Warning)
         box.setWindowTitle(title)
@@ -1311,7 +1388,6 @@ class MainWindow(QMainWindow):
         self._shown_approvals.intersection_update(self._pending_approvals)
         count = len(self._pending_approvals)
         self.stat_pending.setText(str(count))
-        self.edge_menu.review.setEnabled(count > 0)
         self.review_button.setVisible(count > 0)
         if self.approval_dialog is not None and self._review_token not in self._pending_approvals:
             self.approval_dialog.reject()

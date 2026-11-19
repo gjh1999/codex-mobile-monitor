@@ -98,6 +98,13 @@
 - `tests/smoke_desktop.py --output build-exe/verification/task-switch-desktop-smoke-02` 通过。全套 `.\.venv\Scripts\python.exe -m unittest discover -s tests -t . -p 'test_*.py' -v` 运行 147 项，146 项通过、1 项可选 Stream SDK 跳过，用时 37.993 秒，见 `build-exe/verification/task-switch-regression.txt`。
 - 运行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-exe.ps1 -AppName Lanxi-Glass-R8`，PyInstaller 完成构建约 40.89 秒。包位于 `release/Lanxi-Glass-R8.exe`，61,417,833 字节，同目录 R7 为 54,104,555 字节。归档核对包含新版桌面模块、交接后台和 Qt Windows 插件。切换测试执行的是源码窗口，新 EXE 的实机启动和操作耗时未测。
 
+## 2026-11-19 大模型 API 分组与统一弹窗
+
+- 以 `0e018a1` 的 R14 顶边菜单为基线。菜单按「澜汐、任务、显示、设置、窗口」组织，新增「设置 → 大模型 API」。设置、审批、额度及提示弹窗与主界面共用海蓝色、字重和控件样式。配置后对 Codex、Claude Code、拾得片羽和待理诸事分别自动分组，随记与待办支持拖到组名下，手动选择优先。自动分组以同一内容的缓存结果复用为先，每批最多 8 项，接口超时 12 秒，失败后间隔 60 秒再试。
+- Windows 11 x64、Python 3.14.7、PySide6 6.12.0。用虚构任务、随记和待办请求回环的 `/chat/completions`。运行 `python -m unittest -q tests.test_model_groups tests.test_desktop_projects tests.test_codex_desktop tests.test_claude tests.test_web`，42 项中 41 项通过，耗时 7.648 秒。隔离进程读取不到 DPAPI 用户配置，跳过 1 项。改用当前登录用户重跑 `python -m unittest -v tests.test_model_groups`，2 项通过，耗时 1.243 秒。覆盖手动分组优先、重启读回、API 密钥落盘保护，以及换地址时清除旧密钥。配置、临时文件及分组数据库通过 `git check-ignore` 检查。实际外部供应商接入及网络耗时未测。
+- 在 `build-exe/verification/lanxi-model-groups/worktree` 设置 `QT_QPA_PLATFORM=windows` 后执行 `python tests/smoke_desktop.py --output ../windows-verified`，完整原生窗口验收通过。用模拟拖放事件覆盖随记待办分组逻辑和待办勾选状态，核对案头自动分组、菜单和设置保存。历史轮次有一次斜杠菜单时序失败，另一次复用了已清理的测试数据库，修正夹具后独立复跑。截图位于 `windows-verified`。
+- 使用 PyInstaller 6.22.3 执行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-exe.ps1 -AppName Lanxi-Glass-R15-ModelGroups`，PyInstaller 构建约 49.72 秒。交付 `release/Lanxi-Glass-R15-ModelGroups.exe`，61,530,386 字节，复制前后 SHA-256 一致。执行 `python build-exe/verify-lanxi-launch.py Lanxi-Glass-R15-ModelGroups.exe`，于 1.53 秒在 `lanxi-folder-package-pdbr9caf` 验证原生窗口和 SQLite 启动。
+
 ## 2026-11-19 顶边淡入菜单栏
 
 - 基线为 R13。窗口内顶边保留 4 像素触发区，菜单栏使用原有顶部留白。指针进入后淡入 190 毫秒，离开等待 100 毫秒后淡出 210 毫秒。反向移动从当前透明度继续，系统关闭动画时立即切换。复用「运行与额度」、待审批和收起到托盘入口。

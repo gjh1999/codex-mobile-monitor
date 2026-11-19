@@ -8,11 +8,11 @@ import tempfile
 import time
 from contextlib import closing
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QTimer, Qt
+from PySide6.QtCore import QEvent, QMimeData, QPoint, QPointF, QRect, QTimer, Qt
 from PySide6.QtGui import QEnterEvent, QFontDatabase, QImage, QMouseEvent, QRawFont, QTextCursor, QTextDocument
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog, QFrame, QLabel, QMessageBox, QPushButton
@@ -20,10 +20,12 @@ from PySide6.QtWidgets import QApplication, QDialog, QFrame, QLabel, QMessageBox
 import monitor
 from automation import Approvals
 from desktop_glass import FrostedPanel, OceanBackdrop
-from desktop_notebook import NotebookStore
+from desktop_model_api import ModelApiDialog
+from desktop_notebook import GROUP_HEADER, NotebookStore
 from desktop_poetry import COVER_VERSES
 from desktop_qt import MainWindow
 from desktop_theme import configure_text, message_html, set_reading_html, ui_font
+from model_groups import Organizer, read_settings
 
 CODEX = '00000000-0000-4000-8000-000000000001'
 CLAUDE = '11111111-2222-4333-8444-555555555555'
@@ -109,14 +111,48 @@ def check_edge_menu(window, output):
     with patch('desktop_qt.motion_enabled', return_value=False):
         move(80, 1)
         assert wait_until(lambda: menu.opacity.opacity() == 1.0)
-        details = next(button for button in menu.panel.findChildren(QPushButton) if button.text() == '运行与额度')
-        QTest.mouseClick(details, Qt.MouseButton.LeftButton)
+        assert list(menu.menus) == ['澜汐', '任务', '显示', '设置', '窗口']
+        assert menu.menus['设置'].actions()[0].text() == '大模型 API…'
+        tasks = menu.menus['任务']
+        tasks.popup(menu.mapToGlobal(QPoint(80, menu.HEIGHT)))
+        details = next(action for action in tasks.actions() if action.text() == '运行与额度')
+        QTest.mouseClick(tasks, Qt.MouseButton.LeftButton, pos=tasks.actionGeometry(details).center())
         assert window.details_dialog.isVisible()
         window.details_dialog.hide()
         move(80, 90)
         assert wait_until(menu.panel.isHidden) and menu.height() == menu.HOT_ZONE
         assert window.client_switch.geometry() == geometry
         window.grab().save(str(output / 'top-menu-hidden.png'))
+
+
+def check_model_settings(window, output):
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        organizer = Organizer(root, lambda _scope: None)
+        seen = []
+
+        def fill(dialog):
+            dialog.show()
+            dialog.address.setText('http://127.0.0.1:9/v1')
+            dialog.model.setText('fixture-model')
+            dialog.grab().save(str(output / 'model-api-dialog.png'))
+            dialog.accept()
+            seen.append(dialog.isHidden())
+            return dialog.result()
+
+        try:
+            with patch.object(window, 'organizer', organizer), patch.object(window, 'notebook', None), \
+                 patch.object(ModelApiDialog, 'exec', fill):
+                window.edge_menu.menus['设置'].actions()[0].trigger()
+                tid = window.selected_thread
+                organizer.assign('task:' + window.client, tid, '发布准备')
+                window.refresh()
+                assert window.task_items[tid].parent().text(0) == '发布准备'
+            assert seen == [True] and read_settings(root).model == 'fixture-model'
+        finally:
+            organizer.close()
+            if organizer.worker:
+                organizer.worker.join(3)
 
 
 def check_client_switch(window, output):
@@ -285,6 +321,34 @@ def check_notebook(window, output):
         assert not workspace.isVisible() and window.task_workspace.isVisible()
         assert window.selected_thread == previous_task and window.message_edit.toPlainText() == original_draft
         assert store.entries('note')[0][1:3] == ('', '离开工作区时保存。')
+        organizer = Organizer(Path(directory), window.grouping_changed.emit)
+        original_organizer = workspace.organizer
+        workspace.organizer = organizer
+        try:
+            window.select_workspace('notebook')
+            workspace.select_kind('todo')
+            ids = [row[0] for row in store.entries('todo')]
+            organizer.assign('todo', ids[-1], '发布准备')
+            assert wait_until(lambda: any(workspace.list.item(i).data(GROUP_HEADER) == '发布准备'
+                                          for i in range(workspace.list.count())))
+            header = next(workspace.list.item(i) for i in range(workspace.list.count())
+                          if workspace.list.item(i).data(GROUP_HEADER) == '发布准备')
+            mime = QMimeData()
+            mime.setText(str(ids[0]))
+            drop = Mock()
+            drop.source.return_value = workspace.list
+            drop.position.return_value = QPointF(workspace.list.visualItemRect(header).center())
+            drop.mimeData.return_value = mime
+            workspace.list.dropEvent(drop)
+            drop.acceptProposedAction.assert_called_once()
+            assert organizer.label('todo', ids[0]) == '发布准备'
+            assert store.entries('todo')[-1][3] == 1
+            QApplication.processEvents()
+            window.grab().save(str(output / 'grouped-todo-desktop.png'))
+            window.select_workspace(previous_client)
+        finally:
+            workspace.organizer = original_organizer
+            organizer.close()
 
 
 def main():
@@ -751,6 +815,7 @@ def main():
             check_codex_slash(window, codex, args.output)
             check_notebook(window, args.output)
             check_edge_menu(window, args.output)
+            check_model_settings(window, args.output)
             print('Qt smoke passed: glass, rotation, hover/focus, approval, dual-client controls, drafts, rename, failure dialogs, Chinese glyphs, layout and tray.')
     finally:
         if window is not None:

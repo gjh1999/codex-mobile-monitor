@@ -1,5 +1,7 @@
 # Private configuration and local state
 local-config.json
+local-model-api.json
+local-model-api-*.tmp
 claude-drafts.json
 *.sqlite3
 *.sqlite3-*

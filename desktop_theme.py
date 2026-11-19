@@ -148,12 +148,22 @@ QPushButton#edgeMenuItem { background:transparent; border:0; border-radius:5px; 
 QPushButton#edgeMenuItem:hover { background:rgba(220,247,255,34); }
 QPushButton#edgeMenuItem:pressed { background:rgba(220,247,255,54); }
 QPushButton#edgeMenuItem:disabled { background:transparent; color:#b1ccd8; }
+QPushButton#edgeMenuItem::menu-indicator { image:none; width:0; }
 QPushButton#send, QPushButton#approvalAllow { background:#096cb9; color:white; border-color:#096cb9; }
 QPushButton#send { padding:0; border-radius:17px; font-size:18px; }
 QPushButton#send:hover, QPushButton#approvalAllow:hover { background:#055eaa; border-color:#055eaa; }
 QPushButton#send:pressed, QPushButton#approvalAllow:pressed { background:#044e90; }
 QPushButton:disabled, QPushButton#send:disabled, QPushButton#hoverAction:disabled, QPushButton#approvalAllow:disabled { background:rgba(234, 246, 252, 97); color:#507087; border-color:rgba(225, 245, 255, 80); }
-QDialog#approvalDialog { background:#d6eaf5; }
+QDialog#approvalDialog, QDialog#lanxiDialog, QMessageBox {
+    background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #eaf7fc,stop:1 #cee5f1);
+    color:#24344d;
+}
+QDialog#lanxiDialog QLineEdit {
+    background:rgba(249,253,255,218);
+    border:1px solid #bbd8e8;
+}
+QDialog#lanxiDialog QLineEdit:focus { border-color:#327fb2; }
+QDialog#lanxiDialog QLabel#dialogHint { color:#476477; }
 QTextBrowser#approvalDetails { background:#e6f2fb; border:1px solid #bfd9ea; border-radius:8px; }
 QScrollArea { border:0; background:transparent; }
 QScrollBar:vertical { background:transparent; width:7px; margin:3px 0; }
@@ -161,7 +171,7 @@ QScrollBar::handle:vertical { background:#d0dae9; border-radius:3px; min-height:
 QScrollBar::handle:vertical:hover { background:#afc0d8; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height:0; }
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background:transparent; }
-QMenu { background:#ffffff; color:#304664; border:1px solid #dce5f2; border-radius:8px; padding:5px; }
+QMenu { background:#eaf6fc; color:#254459; border:1px solid #c5dce9; border-radius:8px; padding:5px; }
 QMenu::item { padding:8px 20px; border-radius:5px; }
 QMenu::item:selected { background:#edf3ff; color:#275db5; }
 QToolTip { background:#1c3151; color:#ffffff; border:0; padding:7px; }

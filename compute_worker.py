@@ -13,7 +13,7 @@ import time
 import uuid
 from pathlib import Path
 
-from compute_queue import NAME
+from compute_queue import CANCEL_EXIT_CODE, NAME
 from coordination_client import ControlDenied, device_client
 from handoff import GIT_ID, file_hash, git, limited, local_path, require, sha
 from handoff_merge import check_checkout_paths, object_store, separate, worktree_root
@@ -25,6 +25,7 @@ from windows_job import WindowsJob
 LOG_LIMIT = 2 * 1024**2
 OUTPUT_LIMIT = 128 * 1024**2
 POLL_SECONDS = 5
+STOP_CHECK_SECONDS = 0.25
 WORKER_SCRIPT = Path(__file__).resolve()
 
 
@@ -97,7 +98,6 @@ def snapshot(repo, commit, attempt):
         git(scratch, 'read-tree', commit + '^{tree}', isolated=True)
         check_checkout_paths(scratch)
         git(scratch, 'checkout-index', '--all', '--prefix=' + work.as_posix() + '/', isolated=True)
-    return work
 
 
 def safe_env(temp, overrides=None):
@@ -122,8 +122,28 @@ def run_child(attempt):
         return 125
 
 
-def run_profile(attempt, timeout):
+def wait_profile(child, timeout, cancel_signal):
+    deadline = time.monotonic() + timeout
+    while True:
+        code = child.poll()
+        if code is not None:
+            return code, 'exited'
+        if cancel_signal.is_file():
+            return CANCEL_EXIT_CODE, 'canceled'
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return 124, 'timed_out'
+        try:
+            return child.wait(timeout=min(remaining, STOP_CHECK_SECONDS)), 'exited'
+        except subprocess.TimeoutExpired:
+            pass
+
+
+def run_profile(attempt, timeout, cancel_signal):
     """Release the launcher only after attaching its process tree to a Job Object."""
+    if cancel_signal.is_file():
+        (attempt / 'process.log').touch()
+        return CANCEL_EXIT_CODE, 'canceled', 0
     job = WindowsJob()
     reader = None
     failure = []
@@ -154,13 +174,12 @@ def run_profile(attempt, timeout):
 
         reader = threading.Thread(target=capture_log, daemon=True)
         reader.start()
-        child.stdin.write(b'1')
-        child.stdin.close()
-        try:
-            code = child.wait(timeout=timeout)
-            outcome = 'exited'
-        except subprocess.TimeoutExpired:
-            code, outcome = 124, 'timed_out'
+        if cancel_signal.is_file():
+            code, outcome = CANCEL_EXIT_CODE, 'canceled'
+        else:
+            child.stdin.write(b'1')
+            child.stdin.close()
+            code, outcome = wait_profile(child, timeout, cancel_signal)
     finally:
         try:
             if child is not None:
@@ -209,21 +228,23 @@ def supervise(attempt):
         write_record(started, {'pid': os.getpid()})
         manifest = {name: spec[name] for name in ('project', 'id', 'attempt', 'commit', 'name')}
         manifest.update(version=1, outputs=[], droppedLogBytes=0)
+        cancel_signal = attempt / 'cancel.json'
         try:
-            work = snapshot(Path(spec['repo']), spec['commit'], attempt)
-            (attempt / 'tmp').mkdir()
+            if not cancel_signal.is_file():
+                snapshot(Path(spec['repo']), spec['commit'], attempt)
+                (attempt / 'tmp').mkdir()
         except (OSError, ValueError) as error:
             (attempt / 'process.log').write_text(str(error)[:4096] + '\n', encoding='utf-8')
             manifest.update(exitCode=125, outcome='preparation_error')
         else:
             # An unexpected process-tree failure leaves the entered marker only.
-            code, outcome, dropped = run_profile(attempt, spec['profile']['timeoutSeconds'])
+            code, outcome, dropped = run_profile(attempt, spec['profile']['timeoutSeconds'], cancel_signal)
             manifest.update(exitCode=code, outcome=outcome, droppedLogBytes=dropped)
             if code == 0:
                 remaining = OUTPUT_LIMIT
                 try:
                     for name in spec['profile']['outputs']:
-                        item = artifact(work, name, remaining)
+                        item = artifact(attempt / 'work', name, remaining)
                         manifest['outputs'].append(item)
                         remaining -= item['bytes']
                 except (OSError, ValueError) as error:
@@ -247,7 +268,10 @@ def result_report(attempt, active):
     for item in result['outputs']:
         require(artifact(attempt / 'work', item['path'], remaining) == item, '计算产物校验失败')
         remaining -= item['bytes']
-    return dict(exitCode=result['exitCode'], resultSha256=sha(raw))
+    canceled = result['outcome'] == 'canceled'
+    if canceled:
+        require(result['exitCode'] == CANCEL_EXIT_CODE and (attempt / 'cancel.json').is_file(), '本机取消回执无效')
+    return ('canceled' if canceled else 'finished'), dict(exitCode=result['exitCode'], resultSha256=sha(raw))
 
 
 def supervisor_alive(attempt):
@@ -320,26 +344,31 @@ class Worker:
         attempt.mkdir(parents=True, exist_ok=True)
         try:
             if (attempt / 'result.json').exists() and not supervisor_alive(attempt):
-                report = result_report(attempt, active)
-                reply = self.event(active, 'finish', **report)
-                require(reply['status'] == 'finished' and all(reply[key] == value for key, value in report.items()),
-                        '协调服务的完成回执与本机不匹配')
+                final, report = result_report(attempt, active)
+                reply = self.event(active, 'canceled' if final == 'canceled' else 'finish', **report)
+                require(reply['status'] == final and all(reply[key] == value for key, value in report.items()),
+                        '协调服务的最终回执与本机不匹配')
                 if not (attempt / 'ack.json').exists():
                     write_record(attempt / 'ack.json', report)
                 self.active_file.unlink()
-                return 'finished'
+                self.supervisor = None
+                return final
             if active['phase'] == 'claimed':
                 write_record(attempt / 'launch.json', {key: value for key, value in active.items() if key not in ('ticket', 'phase')})
                 reply = self.event(active, 'start')
-                require(reply['status'] == 'running', '协调服务未确认开始')
+                require(reply['status'] == 'running' or (
+                    reply['status'] == 'uncertain' and reply.get('cancelRequestedAt') is not None), '协调服务未确认开始')
                 active['phase'] = 'authorized'
                 write_record(self.active_file, active)
-            if (attempt / 'entered.json').exists():
-                if supervisor_alive(attempt):
-                    self.event(active, 'renew')
-                    return 'running'
+            entered = (attempt / 'entered.json').exists()
+            if entered and not supervisor_alive(attempt):
                 return self.check_conflict(active, attempt)
-            self.event(active, 'renew')
+            reply = self.event(active, 'renew')
+            canceled_at = reply.get('cancelRequestedAt')
+            if canceled_at is not None and not (attempt / 'cancel.json').is_file():
+                write_record(attempt / 'cancel.json', {'requestedAt': canceled_at})
+            if entered:
+                return 'canceling' if canceled_at is not None else 'running'
             if self.supervisor is None or self.supervisor.poll() is not None:
                 self.supervisor = subprocess.Popen(
                     [sys.executable, '-E', '-s', str(WORKER_SCRIPT), '--supervise', str(attempt)],
@@ -352,12 +381,12 @@ class Worker:
             return self.check_conflict(active, attempt)
 
     def wait(self, outcome):
-        if outcome in ('running', 'starting') and self.supervisor is not None:
+        if outcome in ('running', 'starting', 'canceling') and self.supervisor is not None:
             try:
                 self.supervisor.wait(timeout=POLL_SECONDS)
             except subprocess.TimeoutExpired:
                 pass
-        elif outcome not in ('finished', 'released'):
+        elif outcome not in ('finished', 'canceled', 'released'):
             time.sleep(POLL_SECONDS)
 
 

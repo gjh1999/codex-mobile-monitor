@@ -8,6 +8,7 @@ from coordination import Conflict
 
 NAME = re.compile(r'[A-Za-z0-9_-]{1,80}')
 WINDOW = 30
+CANCEL_EXIT_CODE = 130
 
 
 def validate_config(config, devices):
@@ -39,7 +40,7 @@ class ComputeQueue:
                     submitter TEXT NOT NULL, session TEXT NOT NULL, profile TEXT NOT NULL, commit_id TEXT NOT NULL,
                     state TEXT NOT NULL DEFAULT 'queued', created REAL NOT NULL, attempt INTEGER NOT NULL DEFAULT 0,
                     worker TEXT, instance TEXT, ticket TEXT, deadline REAL, started REAL, finished REAL,
-                    exit_code INTEGER, result_sha256 TEXT, route TEXT,
+                    exit_code INTEGER, result_sha256 TEXT, route TEXT, cancel_requested REAL,
                     UNIQUE(project, id)
                 );
                 CREATE INDEX IF NOT EXISTS compute_pending ON compute_jobs(project, state, seq);
@@ -48,13 +49,17 @@ class ComputeQueue:
                 CREATE UNIQUE INDEX IF NOT EXISTS compute_worker_slot ON compute_jobs(worker)
                     WHERE state IN ('claimed', 'running', 'uncertain');
             ''')
+        # Serialize the additive migration for existing SQLite databases.
+        with ownership.transaction() as db:
+            if 'cancel_requested' not in {column['name'] for column in db.execute('PRAGMA table_info(compute_jobs)')}:
+                db.execute('ALTER TABLE compute_jobs ADD COLUMN cancel_requested REAL')
 
     @staticmethod
     def view(row):
         return dict(id=row['id'], submitter=row['submitter'], profile=row['profile'], commit=row['commit_id'],
                     status=row['state'], createdAt=row['created'], attempt=row['attempt'], worker=row['worker'],
                     route=row['route'], startedAt=row['started'], finishedAt=row['finished'],
-                    exitCode=row['exit_code'], resultSha256=row['result_sha256'])
+                    exitCode=row['exit_code'], resultSha256=row['result_sha256'], cancelRequestedAt=row['cancel_requested'])
 
     @staticmethod
     def find(db, project, job):
@@ -95,6 +100,25 @@ class ComputeQueue:
             if not row or device not in (row['submitter'], row['worker']):
                 return None
             return self.view(row)
+
+    def cancel(self, project, device, job):
+        with self.ownership.transaction() as db:
+            row = self.find(db, project, job)
+            if not row or row['submitter'] != device:
+                return None
+            now = self.ownership.clock()
+            self.expire(db, now, project)
+            row = self.find(db, project, job)
+            status = row['state']
+            if status in ('queued', 'claimed'):
+                db.execute("""UPDATE compute_jobs SET state='canceled',cancel_requested=?,finished=?,
+                              worker=NULL,instance=NULL,ticket=NULL,deadline=NULL,route=NULL WHERE seq=?""",
+                           (now, now, row['seq']))
+            elif status in ('running', 'uncertain') and row['cancel_requested'] is None:
+                db.execute('UPDATE compute_jobs SET cancel_requested=? WHERE seq=?', (now, row['seq']))
+            else:
+                return self.view(row)
+            return self.view(self.find(db, project, job))
 
     def heartbeat(self, project, device, instance, capabilities):
         if not set(capabilities['profiles']) <= self.config[project]['profiles'].keys():
@@ -181,6 +205,7 @@ class ComputeQueue:
                     or not compare_digest(row['ticket'] or '', ticket)):
                 raise Conflict('计算作业凭据无效或已过期')
             status = row['state']
+            cancel_requested = row['cancel_requested'] is not None
             if event == 'start' and status == 'claimed':
                 db.execute("UPDATE compute_jobs SET state='running',started=?,deadline=? WHERE seq=?",
                            (now, now + WINDOW, row['seq']))
@@ -188,11 +213,17 @@ class ComputeQueue:
                 return self.view(row)
             elif event == 'renew' and status == 'running':
                 db.execute('UPDATE compute_jobs SET deadline=? WHERE seq=?', (now + WINDOW, row['seq']))
-            elif event == 'finish' and status in ('running', 'uncertain'):
-                db.execute("""UPDATE compute_jobs SET state='finished',finished=?,exit_code=?,result_sha256=?
-                              WHERE seq=?""", (now, exit_code, result, row['seq']))
-            elif event == 'finish' and status == 'finished' and (row['exit_code'], row['result_sha256']) == (exit_code, result):
+            elif event in ('start', 'renew') and status == 'uncertain' and cancel_requested:
                 return self.view(row)
+            elif event in ('finish', 'canceled'):
+                if event == 'canceled' and (not cancel_requested or exit_code != CANCEL_EXIT_CODE):
+                    raise Conflict('计算作业没有有效的取消请求或退出码')
+                final = 'finished' if event == 'finish' else 'canceled'
+                if status in ('running', 'uncertain'):
+                    db.execute("""UPDATE compute_jobs SET state=?,finished=?,exit_code=?,result_sha256=?
+                                  WHERE seq=?""", (final, now, exit_code, result, row['seq']))
+                elif status != final or (row['exit_code'], row['result_sha256']) != (exit_code, result):
+                    raise Conflict('作业已有不同的最终状态或回执')
             else:
                 raise Conflict('计算作业已离开所需阶段')
             return self.view(self.find(db, project, job))

@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import uvicorn
 
-from compute_queue import WINDOW, ComputeQueue
+from compute_queue import CANCEL_EXIT_CODE, WINDOW, ComputeQueue
 from compute_worker import LOG_LIMIT, WORKER_SCRIPT, Worker, record, result_report, worker_projects, write_record
 from coordination import Ownership
 from coordination_client import ControlClient, ControlDenied
@@ -170,6 +170,79 @@ else:
         self.assertTrue((self.attempt / 'work' / 'ready').exists())
         time.sleep(2)
         self.assertFalse((self.attempt / 'work' / 'escaped').exists())
+
+    def test_remote_cancel_stops_tree_after_reconnect_and_retries_receipt(self):
+        worker = self.worker(mode='slow')
+        self.start(worker)
+        work = self.attempt / 'work'
+        deadline = time.monotonic() + 8
+        while not (work / 'ready').exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertTrue((work / 'ready').exists())
+        ready = time.monotonic()
+        config = self.state.parent / 'office.json'
+        write_record(config, {'coordination': dict(device='office', url=self.office.url,
+                                                  projects={'lab': {'path': str(self.repo)}})})
+        command = [sys.executable, str(WORKER_SCRIPT.with_name('compute_client.py')), '--config', str(config),
+                   '--project', 'lab', 'cancel', self.job]
+        response = subprocess.check_output(command, env=dict(os.environ, LANXI_DEVICE_TOKEN=self.office.token), timeout=10)
+        self.assertIn(b'"status": "running"', response)
+        with patch.object(self.home, 'request', side_effect=ControlDenied(detail='simulated disconnection')):
+            with self.assertRaises(ControlDenied):
+                worker.step()
+        self.assertFalse((self.attempt / 'cancel.json').exists())
+        self.now += WINDOW + 1
+        self.assertEqual(self.status()['status'], 'uncertain')
+        resumed = self.worker(mode='slow')
+        began = time.perf_counter()
+        self.assertEqual(resumed.step(), 'canceling')
+        self.assertEqual(worker.supervisor.wait(timeout=8), 0)
+        stopped = time.perf_counter()
+        manifest = record(self.attempt / 'result.json')
+        self.assertEqual((manifest['exitCode'], manifest['outcome'], manifest['outputs']), (CANCEL_EXIT_CODE, 'canceled', []))
+
+        request = self.home.request
+
+        def lost_ack(project, endpoint, body=None):
+            result = request(project, endpoint, body)
+            if body and body.get('event') == 'canceled':
+                raise ControlDenied(detail='simulated lost stop receipt')
+            return result
+
+        with patch.object(self.home, 'request', side_effect=lost_ack):
+            with self.assertRaises(ControlDenied):
+                resumed.step()
+        self.assertEqual(self.status()['status'], 'canceled')
+        self.assertEqual(resumed.step(), 'canceled')
+        reported = time.perf_counter()
+        self.assertEqual(self.status()['resultSha256'], record(self.attempt / 'ack.json')['resultSha256'])
+        self.assertFalse(resumed.active_file.exists())
+        time.sleep(max(0, ready + 4.25 - time.monotonic()))
+        self.assertFalse((work / 'escaped').exists())
+        if os.getenv('LANXI_MEASURE_COMPUTE_CANCEL'):
+            print(f'cancel_ms reconnect_to_stopped={(stopped-began)*1000:.2f}'
+                  f' stop_to_receipt_retry={(reported-stopped)*1000:.2f}', flush=True)
+
+    def test_cancel_before_local_launch_after_losing_start_response(self):
+        worker = self.worker()
+        request = self.home.request
+
+        def lost_start(project, endpoint, body=None):
+            result = request(project, endpoint, body)
+            if body and body.get('event') == 'start':
+                raise ControlDenied(detail='simulated lost start response')
+            return result
+
+        with patch.object(self.home, 'request', side_effect=lost_start):
+            with self.assertRaises(ControlDenied):
+                worker.step()
+        self.now += WINDOW + 1
+        self.office.request('lab', f'compute/jobs/{self.job}/cancel', {})
+        self.start(worker)
+        self.assertEqual(worker.supervisor.wait(timeout=10), 0)
+        self.assertEqual(worker.step(), 'canceled')
+        self.assertFalse((self.attempt / 'work').exists())
+        self.assertEqual(self.status()['exitCode'], CANCEL_EXIT_CODE)
 
     def test_does_not_replay_an_entered_attempt_without_result(self):
         worker = self.worker()

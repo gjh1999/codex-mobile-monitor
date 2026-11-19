@@ -2,6 +2,15 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-19 计算作业远程取消
+
+- 基线 `def5d64`，Windows 11 24H2、Python 3.14.7、SQLite 3.50.4、Git 2.56.0.windows.4。使用临时项目仓库、独立 SQLite 与回环协调服务。合成任务和子进程持续等待，子进程原计划在四秒后落盘；断线与租约到期用测试时钟模拟。取消沿用五秒续租，监督进程每 250 毫秒检查本机取消信号。
+- `python -m unittest -v tests.test_compute_worker tests.test_compute_queue tests.test_coordination`，26 项通过，19.158 秒。覆盖仅提交设备可取消、未开始立即释放、旧凭据拒绝、旧数据库升级、取消请求重放、自然完成与取消交错、失联期间保留执行槽、重连终止进程树及丢失回执重报。输出为 `build-exe/verification/compute-cancel-20261119/targeted-01.txt`。
+- 设 `LANXI_MEASURE_COMPUTE_CANCEL=1`，运行 `python -m unittest -v tests.test_compute_worker.WorkerTests.test_remote_cancel_stops_tree_after_reconnect_and_retries_receipt` 三次。开始重连处理到进程树退出并得到本地清单用时 82.98、60.63、77.96 毫秒，随后模拟丢失回执并成功重报用时 30.36、42.79、49.50 毫秒。原始数据为上述目录的 `cancel-timing-1.txt` 至 `cancel-timing-3.txt`。未测从用户发出取消到执行端下一轮续租的等待、真实网络、硬件 GPU 或峰值内存。
+- 在独立目录运行 `python -m tests.bench_compute_queue --output ../queue-bench-01`，从源码目录执行，以 0 条及 10,000 条历史与排队记录分别测 30 次。本机 SQLite 成功领取及无可领轮询中位数，空库为 8.088 和 1.312 毫秒，10,000 条时为 9.141 和 2.271 毫秒。旧版同口径为 9.569、1.562 和 12.510、3.194 毫秒。两轮为独立实测，未控制主机负载。结果为 `queue-bench-01/result.json`。
+- 在独立源码目录运行 `python -m unittest discover -s tests -t . -p 'test_*.py' -v`，208 项中 205 项通过、3 项跳过，196.690 秒。跳过项分别依赖工作区本地虚拟环境的 PowerShell 适配器、Windows 用户配置中的 DPAPI 和可选 Stream SDK。日志为 `build-exe/verification/compute-cancel-20261119/regression-01.txt`。
+- 本机验证了取消后的退出码和清单散列回执。产物回传、检查点、实际 GPU 使用和设备联调待完成。 [执行和取消命令](../PROJECT_CONTROL.md#硬件计算队列)
+
 ## 2026-11-19 桌面改动复核与壁纸解码耗时
 
 - Windows 11 24H2、Python 3.14.7、PySide6 6.12.0。复核主工作区 `e658b17` 加未提交的 R14 本地壁纸改动，以及独立工作区 `19a1f20` 所含的 `de12251` 顶部淡入菜单。设 `QT_QPA_PLATFORM=windows`，分别运行 `python tests/smoke_desktop.py --output <对应输出目录>`。主工作区 9.305 秒通过，独立工作区 10.261 秒通过。截图核对了待办和展开的顶部菜单。测试使用虚构会话，主工作区烟测替换了本地图库发现，未连接真实模型或提交审批。

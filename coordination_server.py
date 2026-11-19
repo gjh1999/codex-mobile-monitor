@@ -61,7 +61,7 @@ class ComputeHeartbeat(ComputeClaim):
 
 class ComputeEvent(ComputeClaim):
     ticket: str = Field(pattern=r'^[A-Za-z0-9_-]{43}$', max_length=43)
-    event: Literal['start', 'renew', 'finish']
+    event: Literal['start', 'renew', 'finish', 'canceled']
     exitCode: int | None = Field(default=None, ge=-(2**31), le=2**32 - 1, strict=True)
     resultSha256: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$', max_length=64)
 
@@ -131,6 +131,13 @@ def create_app(path, devices, clock=None, compute=None):
                 raise HTTPException(404, '作业不存在或当前设备不可见')
             return result
 
+        @app.post(prefix + '/compute/jobs/{job_id}/cancel')
+        def cancel_job(project: str, job_id: JobId, device=Depends(authorizes_compute)):
+            result = jobs.cancel(project, device, job_id)
+            if result is None:
+                raise HTTPException(404, '作业不存在或当前设备不可取消')
+            return result
+
         @app.post(prefix + '/compute/heartbeat')
         def compute_heartbeat(project: str, body: ComputeHeartbeat, device=Depends(authorizes_worker)):
             jobs.heartbeat(project, device, body.instance, body.model_dump(exclude={'instance'}))
@@ -143,9 +150,9 @@ def create_app(path, devices, clock=None, compute=None):
         @app.post(prefix + '/compute/jobs/{job_id}/events')
         def job_event(project: str, job_id: JobId, body: ComputeEvent, device=Depends(authorizes_worker)):
             result_fields = (body.exitCode is not None, body.resultSha256 is not None)
-            expected = (True, True) if body.event == 'finish' else (False, False)
+            expected = (True, True) if body.event in ('finish', 'canceled') else (False, False)
             if result_fields != expected:
-                raise HTTPException(422, '仅完成事件携带退出码和结果清单散列，两者均必需')
+                raise HTTPException(422, '完成和取消回执均需同时携带退出码和清单散列')
             return jobs.update(project, device, job_id, body.instance, body.ticket, body.event,
                                body.exitCode, body.resultSha256)
 

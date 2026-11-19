@@ -14,7 +14,7 @@ from pathlib import Path
 import uvicorn
 from fastapi.testclient import TestClient
 
-from compute_queue import ComputeQueue
+from compute_queue import CANCEL_EXIT_CODE, ComputeQueue
 from coordination import Conflict, Ownership
 from coordination_server import create_app
 
@@ -180,6 +180,68 @@ class ComputeTests(unittest.TestCase):
         self.assertEqual(self.transition('home', job, 'finish', exitCode=0, resultSha256='9' * 64).status_code, 409)
         self.heartbeat('home')
         self.assertEqual(self.claim('home')['id'], pending['id'])
+
+    def test_only_submitter_can_cancel_queued_or_unstarted_work(self):
+        queued = self.submit()
+        endpoint = f"compute/jobs/{queued['id']}/cancel"
+        self.assertEqual(self.request('laptop', endpoint, {}).status_code, 404)
+        self.assertEqual(self.request('office', endpoint, {}, project='other').status_code, 404)
+        canceled = self.request('office', endpoint, {}).json()
+        self.assertEqual((canceled['status'], canceled['attempt'], canceled['cancelRequestedAt']), ('canceled', 0, self.now))
+        self.now += 1
+        self.assertEqual(self.request('office', endpoint, {}).json(), canceled)
+        self.heartbeat('home')
+        self.assertIsNone(self.claim('home'))
+
+        claimed = self.submit()
+        lease = self.claim('home')
+        endpoint = f"compute/jobs/{claimed['id']}/cancel"
+        self.assertEqual(self.request('home', endpoint, {}).status_code, 404)
+        self.assertEqual(self.request('office', endpoint, {}).json()['status'], 'canceled')
+        self.assertEqual(self.transition('home', lease, 'start').status_code, 409)
+        pending = self.submit()
+        self.assertEqual(self.claim('home')['id'], pending['id'])
+
+    def test_cancellation_holds_the_slot_until_authenticated_stop_receipt(self):
+        running = self.submit()
+        pending = self.submit()
+        self.heartbeat('home')
+        lease = self.claim('home')
+        self.assertEqual(self.transition('home', lease, 'start').status_code, 200)
+        receipt = dict(exitCode=CANCEL_EXIT_CODE, resultSha256='9' * 64)
+        self.assertEqual(self.transition('home', lease, 'canceled', **receipt).status_code, 409)
+        endpoint = f"compute/jobs/{running['id']}/cancel"
+        requested = self.request('office', endpoint, {}).json()
+        self.assertEqual((requested['status'], requested['cancelRequestedAt']), ('running', self.now))
+        self.now += 31
+        self.api = self.server()
+        self.heartbeat('home')
+        self.assertEqual(self.claim('home')['id'], running['id'])
+        offline = self.transition('home', lease, 'renew').json()
+        self.assertEqual((offline['status'], offline['cancelRequestedAt']), ('uncertain', requested['cancelRequestedAt']))
+        self.assertEqual(self.transition('laptop', lease, 'canceled', **receipt).status_code, 403)
+        self.assertEqual(self.transition('home', dict(lease, ticket='x' * 43), 'canceled', **receipt).status_code, 409)
+        self.assertEqual(self.transition('home', lease, 'canceled', **dict(receipt, exitCode=0)).status_code, 409)
+        stopped = self.transition('home', lease, 'canceled', **receipt).json()
+        self.assertEqual((stopped['status'], stopped['resultSha256']), ('canceled', receipt['resultSha256']))
+        self.assertEqual(self.transition('home', lease, 'canceled', **receipt).json(), stopped)
+        self.assertEqual(self.transition('home', lease, 'canceled', **dict(receipt, resultSha256='8' * 64)).status_code, 409)
+        self.assertEqual(self.request('office', endpoint, {}).json(), stopped)
+        self.assertEqual(self.claim('home')['id'], pending['id'])
+
+    def test_migrated_running_job_can_finish_even_if_stop_was_requested(self):
+        job = self.submit()
+        self.heartbeat('home')
+        lease = self.claim('home')
+        self.assertEqual(self.transition('home', lease, 'start').status_code, 200)
+        with Ownership(self.database).transaction() as db:
+            db.execute('ALTER TABLE compute_jobs DROP COLUMN cancel_requested')
+        self.api = self.server()
+        endpoint = f"compute/jobs/{job['id']}/cancel"
+        self.assertEqual(self.request('office', endpoint, {}).json()['status'], 'running')
+        finished = self.transition('home', lease, 'finish', exitCode=0, resultSha256='f' * 64).json()
+        self.assertEqual(finished['status'], 'finished')
+        self.assertEqual(self.request('office', endpoint, {}).json(), finished)
 
     def test_cli_submits_and_reads_through_the_loopback_service(self):
         app = create_app(self.database, self.devices, lambda: self.now, compute={'vision': self.policy})

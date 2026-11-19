@@ -91,6 +91,7 @@ VS Code 在启动完成及工作区根目录变化时更新当前窗口各本地
 ```powershell
 .\.venv\Scripts\python.exe compute_client.py --project vision submit --body '.local\submit.json'
 .\.venv\Scripts\python.exe compute_client.py --project vision status '<作业UUID>'
+.\.venv\Scripts\python.exe compute_client.py --project vision cancel '<作业UUID>'
 ```
 
 计算端以持久化实例 UUID `instance` 上报 `profiles`、已准备好的 `commits`、可用 `cpu`、`memoryMiB` 和每张卡的 `gpuVramMiB` 数组。中心只选最近 30 秒有心跳、运行配置与提交匹配且资源充足的设备。CPU 作业优先发起设备，GPU 作业优先家庭设备。每台设备跨项目只占用一个计算执行槽。资料齐备的较新作业可以先于尚无合适设备的旧作业领取。
@@ -101,7 +102,10 @@ VS Code 在启动完成及工作区根目录变化时更新当前窗口各本地
 | --- | --- |
 | `POST heartbeat` | 上报执行实例、运行配置、已就绪提交及可用资源。 |
 | `POST claim` | 按 `instance` 领取作业，或取得该实例已有的领取结果。`{"job": null}` 表示暂无可领取作业。 |
-| `POST jobs/{id}/events` | 发送 `instance`、领取凭据 `ticket` 和 `event`。`start` 确认开始，`renew` 延长 30 秒有效期，`finish` 同时提交 `exitCode` 与 `resultSha256`。 |
+| `POST jobs/{id}/cancel` | 仅允许提交设备请求取消。可用相同作业 ID 安全重试。 |
+| `POST jobs/{id}/events` | 发送 `instance`、领取凭据 `ticket` 和 `event`。`start` 确认开始，`renew` 延长正在执行的租期并返回取消请求，`finish` 和 `canceled` 提交 `exitCode` 与 `resultSha256`。 |
+
+排队或已领取但尚未确认开始的作业立即进入 `canceled`，旧凭据同时失效。已经确认开始的作业先记录 `cancelRequestedAt`，状态保留为 `running` 或 `uncertain`，执行槽继续保留。执行端收到请求后在本机落盘，确认进程树退出才提交 `canceled` 回执，退出码为 130。如果命令在观察到取消前已退出，中心保留实际完成回执。运行中作业支持重连后继续处理取消。使用此功能前升级协调中心和 Windows 执行端。
 
 领取后一直未确认开始的作业，到期可重新分配，旧凭据失效。已开始的作业到期进入 `uncertain`，保留执行槽，原执行实例仍可提交最终结果。重复上传相同完成凭据和结果时返回原完成记录。若原实例无法恢复，先停止该设备的领取进程，再确认对应的执行进程及其子进程已经退出。中心管理员用以下命令释放执行槽，作业进入 `abandoned`。
 
@@ -148,11 +152,13 @@ VS Code 在启动完成及工作区根目录变化时更新当前窗口各本地
 
 状态目录需位于项目仓库外，由运行执行端的账户私有保存。重启时沿用同一个目录。执行端空闲时每 5 秒检查可用作业，运行时每 5 秒续租，当前进程可在监督进程退出时立即开始补报。`--once` 执行一次检查并返回状态，已启动的监督进程继续运行。
 
-执行端在独立目录内检出固定提交，只运行本地配置的绝对可执行文件和参数。提交端只能选择登记名称及提交标识。命令默认只继承 Windows 系统路径和专用临时目录，项目所需的额外环境由本机配置声明。请使用权限受限的 Windows 账户，且只审批可信项目代码及配置。Windows Job Object 管理进程树及超时退出，命令仍具有运行账户的文件和网络权限。当前检出仅支持普通 Git 文件，含子模块、链接或 LFS 过滤器的输入会在准备阶段报错。 [Windows Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)
+执行端在独立目录内检出固定提交，只运行本地配置的绝对可执行文件和参数。提交端只能选择登记名称及提交标识。命令默认只继承 Windows 系统路径和专用临时目录，项目所需的额外环境由本机配置声明。请使用权限受限的 Windows 账户，且只审批可信项目代码及配置。Windows Job Object 管理进程树、超时及远程取消，命令仍具有运行账户的文件和网络权限。当前检出仅支持普通 Git 文件，含子模块、链接或 LFS 过滤器的输入会在准备阶段报错。 [Windows Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)
+
+执行端用现有续租发现取消，通常每 5 秒检查一次。请求到达已运行的监督进程后，监督进程按 250 毫秒间隔检查本机信号。正在准备 Git 工作目录时，检出返回后再检查取消，已收到取消时跳过启动命令。取消后保留本机日志和清单。
 
 每次尝试在 `attempts/<项目>/<作业UUID>/<尝试编号>/` 下保留合并日志 `process.log`、结果清单 `result.json` 及中心回执 `ack.json`。日志最多 2 MiB，超出部分计数。成功产物按 `outputs` 配置读取，合计最多 128 MiB，记录文件大小和 SHA-256。执行端在报告前复验日志和产物，中心仅保存退出码与清单散列。断线期间结果留在本机，重连后可补报。已记录进入执行且缺少有效结果的尝试会保留待核对状态。确认中心已收到且本机产物已另行保存后，按需归档已完成的尝试目录。
 
-产物上传、远程取消、检查点、实际 GPU 探测及三台物理设备联调待完成。
+产物上传、检查点、实际 GPU 探测及三台物理设备联调待完成。
 
 ## 复验
 

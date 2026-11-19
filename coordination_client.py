@@ -69,6 +69,7 @@ class ControlClient:
             with self.opener.open(request, timeout=2) as response:
                 return json.load(response)
         except HTTPError as error:
+            error.close()
             message = '项目控制权已变更或存在未确认的活动' if error.code == 409 else '协调服务拒绝设备请求'
             raise ControlDenied(code=error.code, detail=message) from error
         except (URLError, OSError, ValueError) as error:

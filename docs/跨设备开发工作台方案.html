@@ -378,6 +378,7 @@ figcaption { color: var(--ink); font-weight: 650; margin-bottom: 15px; }
 </tbody></table></div><p>已有审批绑定原连接及请求 ID。新版本只审批仍有效的请求，记录项目、设备、时间和规则。用户在夜间打开 IDE、点击暂停或撤回托管，后台立即停止发出新的审批及调度动作。一次夜间工具审批不会替用户决定新的产品需求或扩大任务范围。</p></section>
 
 <section id="compute"><h2>硬件感知与家庭计算</h2><p>交互留在当前 IDE 和 CLI。需要 CUDA 的训练、推理、图像处理等项目命令，以及受本机资源持续限制的可迁移作业，由家里 worker 执行。Codex 通过在线模型服务生成回复；家庭显卡承担项目实际启动的本地计算程序。</p>
+<p><strong>当前进度</strong>　固定提交、CPU/GPU 路由、Windows 执行端、本机产物校验和断线补报已通过本机回环验证。产物回传、远程取消、检查点、运行时资源探测和真实设备联调待完成。 <a href="PROJECT_CONTROL.md#启动-windows-执行端">执行端配置</a> · <a href="DELIVERY_STATUS.md">里程碑状态</a></p>
 <div class="tbl"><table><thead><tr><th>判断时机</th><th>决策与动作</th></tr></thead><tbody>
 <tr><th>运行前</th><td>从项目已登记的运行配置、解释器、框架探测和历史峰值取得资源需求。需要 GPU 时优先选家里可用且环境匹配的 GPU。公司机只承担已验证能跑的任务；RTX 3050 按实际显存与用户策略作为可行的本地执行端。</td></tr>
 <tr><th>运行中</th><td>按作业采样进度、耗时、显存压力、可用内存、换页、CPU 和磁盘等待。资源不足错误可立即触发重新选址，持续低吞吐需结合历史基线及多个采样窗口判断。高 GPU 利用率本身可能是正常工作。</td></tr>

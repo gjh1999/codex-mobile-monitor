@@ -2,6 +2,13 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-19 Windows 计算执行与结果恢复
+
+- 基线 `a317cc9` 已提供持久化计算队列与领取协议。本轮用 Windows 11 24H2 x64、Python 3.14.7、Git 2.56.0.windows.4 和独立的回环协调服务，验证本地批准的程序在固定提交上执行。临时仓库包含两份普通文件，原工作区保留未提交修改。合成任务读取固定输入，计算约 3 MiB 数据的 SHA-256，写出 64 字节产物，并输出比 2 MiB 日志上限多 85 字节的内容。超时夹具实际启动子进程并设定 3 秒超时。
+- 运行 `python -m unittest -v tests.test_compute_worker tests.test_compute_queue`，首轮 12 项通过，12.079 秒。收到 HTTP 409 后出现未关闭返回体的警告，随后显式关闭响应。加入真实 `--once` CLI 进程退出后的补报测试后，再运行 `python -m unittest -v tests.test_compute_worker tests.test_compute_queue tests.test_coordination`，21 项通过，20.304 秒。已核对固定输入、令牌环境隔离、日志上限、产物损坏拦截、开始或完成回执丢失、超时子进程停止、过期领取与失败现场保留。日志为 `build-exe/verification/compute-worker-20261119-first.txt` 和 `compute-worker-20261119-targeted.txt`。
+- 设 `LANXI_MEASURE_COMPUTE_WORKER=1` 后，运行 `python -m unittest -v tests.test_compute_worker.WorkerTests.test_pins_input_caps_logs_and_retries_finish_after_restart` 三次。恢复启动请求到本机监督进程创建分别为 34.34、34.39、35.68 毫秒。监督进程检出 Git、运行任务和落盘分别为 657.54、636.31、711.50 毫秒。重启后复验本机日志、产物并重试回执分别为 13.27、12.21、36.40 毫秒。各次原始结果为 `build-exe/verification/compute-worker-20261119-timing-1.txt` 至 `compute-worker-20261119-timing-3.txt`。专项与全量并行时另一轮监督进程耗时 2623.99 毫秒。旧版 SQLite 领取基准未包含 HTTP、Git、进程启动或实际计算，口径不同。
+- 计算端目前以 5 秒间隔空闲检查和续租。已知监督进程退出时可立即处理结果。日志和产物存本机，中心保存散列及退出码。峰值内存、真实 GPU、跨设备网络和长时间作业未测。产物回传、远程取消、检查点和物理设备联调待完成。 [计算执行配置](../PROJECT_CONTROL.md#启动-windows-执行端)
+
 ## 2026-11-19 硬件调度队列与设备选择
 
 - 基线 `fedaeaf` 已有项目协调和设备认证。本轮在原协调数据库增加计算队列、执行心跳和按固定提交的 CPU/GPU 路由。作业以本机前台活动、登记运行配置和完整提交标识提交。环境为 Windows、Python 3.14.7、SQLite 3.50.4。设备、资源和提交均使用合成测试数据。

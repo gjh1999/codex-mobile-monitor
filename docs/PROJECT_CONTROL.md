@@ -93,7 +93,7 @@ VS Code 在启动完成及工作区根目录变化时更新当前窗口各本地
 .\.venv\Scripts\python.exe compute_client.py --project vision status '<作业UUID>'
 ```
 
-计算端以进程独有的 UUID `instance` 上报 `profiles`、已准备好的 `commits`、可用 `cpu`、`memoryMiB` 和每张卡的 `gpuVramMiB` 数组。中心只选最近 30 秒有心跳、运行配置与提交匹配且资源充足的设备。CPU 作业优先发起设备，GPU 作业优先家庭设备。每台设备跨项目只占用一个计算执行槽。资料齐备的较新作业可以先于尚无合适设备的旧作业领取。
+计算端以持久化实例 UUID `instance` 上报 `profiles`、已准备好的 `commits`、可用 `cpu`、`memoryMiB` 和每张卡的 `gpuVramMiB` 数组。中心只选最近 30 秒有心跳、运行配置与提交匹配且资源充足的设备。CPU 作业优先发起设备，GPU 作业优先家庭设备。每台设备跨项目只占用一个计算执行槽。资料齐备的较新作业可以先于尚无合适设备的旧作业领取。
 
 以下接口位于 `/api/v1/projects/{project}/compute/`，可用 `compute_client.py` 的对应子命令和 JSON 文件调用。
 
@@ -103,20 +103,62 @@ VS Code 在启动完成及工作区根目录变化时更新当前窗口各本地
 | `POST claim` | 按 `instance` 领取作业，或取得该实例已有的领取结果。`{"job": null}` 表示暂无可领取作业。 |
 | `POST jobs/{id}/events` | 发送 `instance`、领取凭据 `ticket` 和 `event`。`start` 确认开始，`renew` 延长 30 秒有效期，`finish` 同时提交 `exitCode` 与 `resultSha256`。 |
 
-领取后一直未确认开始的作业，到期可重新分配，旧凭据失效。已开始的作业到期进入 `uncertain`，保留执行槽，原执行实例仍可提交最终结果。重复上传相同完成凭据和结果时返回原完成记录。若原实例已丢失，经中心管理员确认进程确实停止后，可用以下命令释放执行槽，作业进入 `abandoned`。
+领取后一直未确认开始的作业，到期可重新分配，旧凭据失效。已开始的作业到期进入 `uncertain`，保留执行槽，原执行实例仍可提交最终结果。重复上传相同完成凭据和结果时返回原完成记录。若原实例无法恢复，先停止该设备的领取进程，再确认对应的执行进程及其子进程已经退出。中心管理员用以下命令释放执行槽，作业进入 `abandoned`。
 
 ```powershell
 .\.venv\Scripts\python.exe coordination_server.py --database '.local\coordination.sqlite3' `
   --confirm-compute-stopped vision '<作业UUID>' 1 home
 ```
 
-当前已实现路由、队列和结果回执。家庭端的真实命令执行、日志、取消、检查点以及结果文件校验和回传仍待接入。
+### 启动 Windows 执行端
+
+在执行设备上准备项目仓库及可信提交，配置设备令牌 `LANXI_DEVICE_TOKEN`。在该机 `local-config.json` 中登记 `coordination` 和 `computeWorker`。将示例 `commits` 的值替换为本机已审核且存在的完整 Git 提交。资源值由本机管理员按可用容量填写，GPU 数组每项对应一张卡。
+
+```json
+{
+  "coordination": {
+    "url": "https://coordination.example.com",
+    "device": "home",
+    "projects": {"vision": {"path": "D:\\Projects\\vision"}}
+  },
+  "computeWorker": {
+    "projects": {
+      "vision": {
+        "commits": ["0123456789abcdef0123456789abcdef01234567"],
+        "cpu": 8,
+        "memoryMiB": 16384,
+        "gpuVramMiB": [8192],
+        "profiles": {
+          "train": {
+            "command": ["D:\\Envs\\vision\\Scripts\\python.exe", "train.py"],
+            "timeoutSeconds": 7200,
+            "outputs": ["reports/metrics.json"],
+            "environment": {"PYTHONUTF8": "1"}
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+```powershell
+.\.venv\Scripts\python.exe compute_worker.py --config local-config.json --state-dir 'D:\ComputeState\lanxi'
+```
+
+状态目录需位于项目仓库外，由运行执行端的账户私有保存。重启时沿用同一个目录。执行端空闲时每 5 秒检查可用作业，运行时每 5 秒续租，当前进程可在监督进程退出时立即开始补报。`--once` 执行一次检查并返回状态，已启动的监督进程继续运行。
+
+执行端在独立目录内检出固定提交，只运行本地配置的绝对可执行文件和参数。提交端只能选择登记名称及提交标识。命令默认只继承 Windows 系统路径和专用临时目录，项目所需的额外环境由本机配置声明。请使用权限受限的 Windows 账户，且只审批可信项目代码及配置。Windows Job Object 管理进程树及超时退出，命令仍具有运行账户的文件和网络权限。当前检出仅支持普通 Git 文件，含子模块、链接或 LFS 过滤器的输入会在准备阶段报错。 [Windows Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)
+
+每次尝试在 `attempts/<项目>/<作业UUID>/<尝试编号>/` 下保留合并日志 `process.log`、结果清单 `result.json` 及中心回执 `ack.json`。日志最多 2 MiB，超出部分计数。成功产物按 `outputs` 配置读取，合计最多 128 MiB，记录文件大小和 SHA-256。执行端在报告前复验日志和产物，中心仅保存退出码与清单散列。断线期间结果留在本机，重连后可补报。已记录进入执行且缺少有效结果的尝试会保留待核对状态。确认中心已收到且本机产物已另行保存后，按需归档已完成的尝试目录。
+
+产物上传、远程取消、检查点、实际 GPU 探测及三台物理设备联调待完成。
 
 ## 复验
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest -v tests.test_ide_activity tests.test_coordination tests.test_web
-.\.venv\Scripts\python.exe -m unittest -v tests.test_compute_queue
+.\.venv\Scripts\python.exe -m unittest -v tests.test_compute_queue tests.test_compute_worker
 .\.venv\Scripts\python.exe -m tests.bench_compute_queue --output build-exe/verification/compute-queue-repeat
 node --test tests/test_vscode_activity.cjs
 .\.venv\Scripts\python.exe tests/smoke_handoff.py --output build-exe/verification/coordination-input

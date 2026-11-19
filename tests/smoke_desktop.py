@@ -74,6 +74,51 @@ def wait_until(condition, seconds=2):
     return condition()
 
 
+def check_edge_menu(window, output):
+    root, menu = window.centralWidget(), window.edge_menu
+    geometry = window.client_switch.geometry()
+
+    def move(x, y):
+        QTest.mouseMove(window.windowHandle(), root.mapTo(window, QPoint(x, y)))
+
+    move(80, 90)
+    assert menu.panel.isHidden() and menu.height() == menu.HOT_ZONE
+    assert menu.width() == root.width()
+    assert root.childAt(QPoint(80, 1)) is menu
+    with patch('desktop_qt.motion_enabled', return_value=True):
+        move(80, 1)
+        assert wait_until(lambda: menu.revealed and menu.fade.state() == menu.fade.State.Running)
+        menu.fade.setCurrentTime(65)
+        assert 0.0 < menu.opacity.opacity() < 1.0
+        move(90, 12)
+        assert wait_until(lambda: menu.opacity.opacity() == 1.0)
+        assert menu.revealed and not menu.leave_delay.isActive()
+        assert window.client_switch.geometry() == geometry
+        window.grab().save(str(output / 'top-menu-open.png'))
+        move(80, 90)
+        assert wait_until(lambda: not menu.revealed and not menu.panel.isHidden())
+        menu.fade.setCurrentTime(50)
+        partial = menu.opacity.opacity()
+        assert 0.0 < partial < 1.0
+        move(80, 1)
+        assert wait_until(lambda: menu.revealed)
+        assert 0.0 < menu.fade.startValue() <= partial
+        assert wait_until(lambda: menu.opacity.opacity() == 1.0)
+        move(80, 90)
+        assert wait_until(menu.panel.isHidden)
+    with patch('desktop_qt.motion_enabled', return_value=False):
+        move(80, 1)
+        assert wait_until(lambda: menu.opacity.opacity() == 1.0)
+        details = next(button for button in menu.panel.findChildren(QPushButton) if button.text() == '运行与额度')
+        QTest.mouseClick(details, Qt.MouseButton.LeftButton)
+        assert window.details_dialog.isVisible()
+        window.details_dialog.hide()
+        move(80, 90)
+        assert wait_until(menu.panel.isHidden) and menu.height() == menu.HOT_ZONE
+        assert window.client_switch.geometry() == geometry
+        window.grab().save(str(output / 'top-menu-hidden.png'))
+
+
 def check_client_switch(window, output):
     switch = window.client_switch
     codex, claude, notebook = switch.buttons.values()
@@ -705,6 +750,7 @@ def main():
             assert window.isVisible(), 'The tray action must reopen the workspace'
             check_codex_slash(window, codex, args.output)
             check_notebook(window, args.output)
+            check_edge_menu(window, args.output)
             print('Qt smoke passed: glass, rotation, hover/focus, approval, dual-client controls, drafts, rename, failure dialogs, Chinese glyphs, layout and tray.')
     finally:
         if window is not None:

@@ -13,7 +13,7 @@ from collections import Counter, OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from PySide6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, QRectF, QSharedMemory, QSignalBlocker, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QEasingCurve, QPoint, QPropertyAnimation, QRectF, QSharedMemory, QSignalBlocker, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QPainter, QPainterPath, QPen, QShortcut, QTextDocument
 from PySide6.QtWidgets import (
     QApplication, QCompleter, QDialog, QFrame, QGraphicsDropShadowEffect, QGraphicsOpacityEffect,
@@ -237,6 +237,110 @@ class ActionHeader(QFrame):
         self.sync_actions()
 
 
+class EdgeMenu(QWidget):
+    HEIGHT = 22
+    HOT_ZONE = 4
+
+    def __init__(self, backdrop, show_details, show_approvals, hide_window):
+        super().__init__(backdrop)
+        self.revealed = False
+        self.panel = FrostedPanel(backdrop, radius=0, tint=QColor(13, 51, 69, 203), edge=QColor(205, 239, 250, 60))
+        self.panel.setParent(self)
+        self.panel.hide()
+        self.opacity = QGraphicsOpacityEffect(self.panel)
+        self.opacity.setOpacity(0.0)
+        self.panel.setGraphicsEffect(self.opacity)
+        self.fade = QPropertyAnimation(self.opacity, b'opacity', self)
+        self.fade.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.fade.finished.connect(self.finish_fade)
+        self.leave_delay = QTimer(self)
+        self.leave_delay.setSingleShot(True)
+        self.leave_delay.setInterval(100)
+        self.leave_delay.timeout.connect(lambda: self.reveal(False))
+
+        row = QHBoxLayout(self.panel)
+        row.setContentsMargins(24, 0, 24, 0)
+        row.setSpacing(5)
+        name = label(WINDOW_TITLE, 9.5, True, '#f3fbff')
+        name.setWordWrap(False)
+        row.addWidget(name)
+        row.addSpacing(12)
+        row.addWidget(self.button('运行与额度', show_details))
+        self.review = self.button('待你定夺', show_approvals)
+        self.review.setEnabled(False)
+        row.addWidget(self.review)
+        row.addStretch()
+        row.addWidget(self.button('收起', hide_window))
+
+        self.resize(backdrop.width(), self.HOT_ZONE)
+        backdrop.installEventFilter(self)
+
+    @staticmethod
+    def button(text, callback):
+        button = QPushButton(text)
+        button.setObjectName('edgeMenuItem')
+        button.setFont(ui_font(9))
+        button.setFixedHeight(20)
+        button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.clicked.connect(callback)
+        return button
+
+    def eventFilter(self, watched, event):
+        if watched is self.parentWidget() and event.type() == QEvent.Type.Resize:
+            self.resize(event.size().width(), self.height())
+        return super().eventFilter(watched, event)
+
+    def resizeEvent(self, event):
+        self.panel.resize(event.size().width(), self.HEIGHT)
+        super().resizeEvent(event)
+
+    def enterEvent(self, event):
+        super().enterEvent(event)
+        self.leave_delay.stop()
+        self.reveal(True)
+
+    def leaveEvent(self, event):
+        super().leaveEvent(event)
+        if self.revealed:
+            if motion_enabled():
+                self.leave_delay.start()
+            else:
+                self.reveal(False)
+
+    def reveal(self, value):
+        if not self.isVisible() or self.revealed == value:
+            return
+        self.revealed = value
+        self.fade.stop()
+        if value:
+            self.raise_()
+            self.resize(self.width(), self.HEIGHT)
+            self.panel.show()
+        end = float(value)
+        if motion_enabled():
+            self.fade.setDuration(190 if value else 210)
+            self.fade.setStartValue(self.opacity.opacity())
+            self.fade.setEndValue(end)
+            self.fade.start()
+        else:
+            self.opacity.setOpacity(end)
+            self.finish_fade()
+
+    def finish_fade(self):
+        if not self.revealed:
+            self.panel.hide()
+            self.resize(self.width(), self.HOT_ZONE)
+
+    def hideEvent(self, event):
+        self.leave_delay.stop()
+        self.fade.stop()
+        self.revealed = False
+        self.opacity.setOpacity(0.0)
+        self.finish_fade()
+        super().hideEvent(event)
+
+
 class ActionButton(QPushButton):
     """160ms hover/press elevation, without moving or resizing the hit target."""
     def __init__(self, text, parent=None):
@@ -410,7 +514,7 @@ class MainWindow(QMainWindow):
         root = OceanBackdrop(Path(getattr(sys, '_MEIPASS', monitor.ROOT)), minutes)
         self.setCentralWidget(root)
         page = QVBoxLayout(root)
-        page.setContentsMargins(24, 22, 24, 24)
+        page.setContentsMargins(24, EdgeMenu.HEIGHT, 24, 24)
         page.setSpacing(16)
 
         self.client_switch = ClientSwitch(root, self.select_workspace)
@@ -637,6 +741,7 @@ class MainWindow(QMainWindow):
             configure_text(content, 10, 4)
             setattr(self, attr, content)
             details.addWidget(content, 1)
+        self.edge_menu = EdgeMenu(root, self.show_details, lambda: self.offer_approval(force=True), self.close)
 
     def build_task_actions(self):
         self.action_buttons = {}
@@ -1206,6 +1311,7 @@ class MainWindow(QMainWindow):
         self._shown_approvals.intersection_update(self._pending_approvals)
         count = len(self._pending_approvals)
         self.stat_pending.setText(str(count))
+        self.edge_menu.review.setEnabled(count > 0)
         self.review_button.setVisible(count > 0)
         if self.approval_dialog is not None and self._review_token not in self._pending_approvals:
             self.approval_dialog.reject()

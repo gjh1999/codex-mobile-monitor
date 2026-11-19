@@ -90,6 +90,13 @@
 - `tests/smoke_desktop.py --output build-exe/verification/task-switch-desktop-smoke-02` 通过。全套 `.\.venv\Scripts\python.exe -m unittest discover -s tests -t . -p 'test_*.py' -v` 运行 147 项，146 项通过、1 项可选 Stream SDK 跳过，用时 37.993 秒，见 `build-exe/verification/task-switch-regression.txt`。
 - 运行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-exe.ps1 -AppName Lanxi-Glass-R8`，PyInstaller 完成构建约 40.89 秒。包位于 `release/Lanxi-Glass-R8.exe`，61,417,833 字节，同目录 R7 为 54,104,555 字节。归档核对包含新版桌面模块、交接后台和 Qt Windows 插件。切换测试执行的是源码窗口，新 EXE 的实机启动和操作耗时未测。
 
+## 2026-11-19 顶边淡入菜单栏
+
+- 基线为 R13。窗口内顶边保留 4 像素触发区，菜单栏使用原有顶部留白。指针进入后淡入 190 毫秒，离开等待 100 毫秒后淡出 210 毫秒。反向移动从当前透明度继续，系统关闭动画时立即切换。复用「运行与额度」、待审批和收起到托盘入口。
+- Windows 11 x64、Python 3.14.7、PySide6 6.12.0。用虚构会话在 `build-exe/verification/lanxi-upper-menu/r13-release` 设置 `QT_QPA_PLATFORM=windows` 后执行 `python tests/smoke_desktop.py --output ../windows-release`。首轮直接向中央控件注入移动，未命中实际顶边层，改从原生窗口派发。第二轮的顶边测试通过，但打开详情抢占了后续焦点测试所需的活动窗口，将顶边检查放到最后。再次运行时既有斜杠菜单一度未弹出，完整复跑通过。已核对顶边命中、透明度反向、留在栏内继续显示、关闭系统动画后的切换，以及滑块几何位置保持一致。
+- 设置 `QT_QPA_PLATFORM=offscreen` 运行 `python -m unittest -q tests.test_codex_desktop tests.test_claude tests.test_desktop_projects`，32 项通过，5.382 秒。HTML 解析检查核对了开发方案的 17 个 ID 与 18 个页内链接。
+- 使用 PyInstaller 6.22.3 执行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-exe.ps1 -AppName Lanxi-Glass-R14`，约 60.51 秒。现有 R14 文件名已被并行构建使用，交付另存为 `release/Lanxi-Glass-R14-TopMenu.exe`，61,446,468 字节，复制前后 SHA-256 一致。使用 `python build-exe/verify-lanxi-launch.py Lanxi-Glass-R14-TopMenu.exe`，在 `lanxi-folder-package-82rp78sd` 于 1.32 秒验证原生窗口和 SQLite。菜单交互使用原生源码窗口验收。
+
 ## 2026-11-19 Codex 斜杠模型与权限
 
 - 基线 R12 的输入框仅发送普通消息。增设 `/` 弹出 `/model` 和 `/permissions`。从当前 Codex 连接读取模型、权限档位与现有值，把用户选择通过控制队列交给 `thread/settings/update`。权限选择沿用当前审批策略，设置面向所选会话的后续轮次。已有 IDE 写入权与托管限制仍由现有控制链检查。

@@ -10,6 +10,8 @@
 
 顶部滑块可点击或拖动，按下时立即变亮，拖动时跟随指针，释放后以弹簧曲线停靠。再次切换时会从当前位置继续。系统关闭动画效果时立即切换。
 
+鼠标碰到窗口内顶边时，菜单栏淡入，离开菜单栏后淡出。可打开「运行与额度」、查看「待你定夺」或把窗口「收起」到托盘。
+
 点击左侧任务即可接入，接入成功后会断开同一客户端中的其他任务。接入失败时保留原有连接。断开会停止澜汐对旧任务的控制和自动推进，其已启动的轮次继续执行。
 
 鼠标移入对谈标题区或键盘聚焦操作按钮，工具栏就会浮现。接入、暂停、继续依次叫「执舟」「暂泊」「续航」，自动推进用「扬帆」和「收帆」，移出和打开 VS Code 项目用「移离案头」和「启卷」。把鼠标停在按钮上可查看动作含义。双击对谈标题或聚焦后按 F2 就地改名，Enter 保存，Esc 取消。对话输入区用 Ctrl+Enter 发送。
@@ -22,7 +24,7 @@
 
 ## EXE 与数据
 
-本轮毛玻璃版交付文件为 `release/Lanxi-Glass-R13.exe`。默认构建名为 `release/Lanxi.exe`。
+带顶部菜单栏的毛玻璃版交付文件为 `release/Lanxi-Glass-R14-TopMenu.exe`。默认构建名为 `release/Lanxi.exe`。
 
 首页从 25 联唐诗里每小时轮换一句，并同步显示作者与篇名。重开窗口沿用当前小时的诗句，电脑唤醒后直接显示当时的一句。诗句可离线轮换，副标题沿用开发方案封面原文。选诗参考 [Wscats/poetry-skills](https://github.com/Wscats/poetry-skills) 使用的 [chinese-poetry《唐诗三百首》](https://github.com/chinese-poetry/chinese-poetry/blob/master/全唐诗/唐诗三百首.json)，并参考 [常建《题破山寺后禅院》](https://zh.wikisource.org/wiki/破山寺後禪院) 与 [钱起《省试湘灵鼓瑟》](https://ctext.org/text.pl?if=gb&node=153790) 的原文。
 

@@ -1,0 +1,40 @@
+name: lanxi-coordinator
+services:
+  coordinator:
+    build:
+      context: ../..
+      dockerfile: deploy/coordinator/Dockerfile
+    restart: unless-stopped
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - coordinator-data:/var/lib/lanxi
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8770/healthz', timeout=3).close()"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  https:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      coordinator:
+        condition: service_healthy
+    environment:
+      LANXI_DOMAIN: "${LANXI_DOMAIN:?设置 LANXI_DOMAIN 为协调服务域名}"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  coordinator-data:
+  caddy-data:
+  caddy-config:

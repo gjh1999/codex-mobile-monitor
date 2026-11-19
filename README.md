@@ -25,6 +25,7 @@ Windows 原生桌面软件，用于集中查看和控制本机 Codex / Claude Co
 | 要做的事 | 文档 |
 |---|---|
 | 查找全部说明 | [文档索引](docs/README.md) |
+| 在云服务器运行设备配对和记忆同步 | [澜汐云协调服务](docs/CLOUD_COORDINATOR.md) |
 | 启动、安装依赖、打包、测试、登录启动 | [运行与维护](docs/RUNBOOK.md) |
 | 配置键、默认值、环境变量和数据位置 | [配置说明](docs/CONFIGURATION.md) |
 | 了解模块职责和后台处理流程 | [架构与文件说明](docs/ARCHITECTURE.md) |

@@ -2,6 +2,14 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-19 云协调服务与 HTTPS 部署
+
+- 基线 `70e320a` 已包含 R20 的个人同步协议和协调接口。本轮增加云端独立构建、Caddy HTTPS、设备登记工具、健康检查和持久卷。已有 Windows 客户端沿用 HTTPS 设备配置。服务启动默认沿用原本机地址。Compose 的 Python 实例在内部网络监听，并将并发请求上限设为 24。设备令牌由管理命令生成，首次登记失败或重复登记时保留已存在的设备文件。 [部署和验收说明](../CLOUD_COORDINATOR.md)
+- Windows 11、Python 3.14.7、Git 2.56.0.windows.4。输入为合成设备、临时证书、临时 SQLite、一个普通 Git 大文件夹具、两个不同的 Windows Codex 主目录。执行 `python -B -m tests.smoke_cloud_coordinator --output build-exe/verification/cloud-coordinator-20261119/windows-https.json`，8.82 秒通过。验证错误令牌与不同空间隔离、旧版本写入拒绝、服务重启后读取旧记录、两客户端项目自动发现、克隆、代码和相对目录记忆回传，以及同一个 Codex 会话记录恢复。10 MiB 减 1 字节的记录可双端读写，达到 10 MiB 回应 HTTP 413。
+- Ubuntu WSL、Python 3.14.4。使用 `python3 -m pip install --target build-exe/verification/cloud-coordinator-20261119/linux-deps -r requirements-web.txt` 安装到独立输出目录。用相同测试分别验证源码后端与解包后的后端，耗时 3.47 和 3.88 秒。Linux 验收覆盖服务端协议，原生 Windows 会话恢复由上一项验证。运行 `python -B -m unittest -v tests.test_coordination tests.test_personal_flow tests.test_compute_queue tests.test_compute_worker`，40 项通过，44.643 秒。
+- 沙箱内首次查看 WSL 被 Windows 拒绝，授权后复验成功。获取上游 Compose 和 Caddy 验收工具的 GitHub 附件超时，随后用 Ubuntu 软件包下载并解包到输出目录。复制发行包后用 Docker Compose 2.40.3 的 `config --quiet` 和 Caddy 2.6.2 的 `validate --adapter caddyfile` 验证生产配置。未启动 Docker 容器，未向公网申请证书，未接入真实阿里云服务器。
+- 发布包为 `release/Lanxi-Server-HTTPS.zip`，包含 22 个部署源文件，SHA-256 为 `5977eb8f7fe7e014eaf65dc44f3a3aa6eeb2d033140994d43dd9e3e60a70413f`。本轮输出位于 `build-exe/verification/cloud-coordinator-20261119/`，核心证据包括 `windows-https.json`、`linux-https.json`、`packaged-linux-https.json` 和 `regression.txt`。
+
 ## 2026-11-19 R20 便携分发与会话 ID
 
 - 从主线 `94da2b2` 增加 Windows 便携分发和验收入口。在「案头诸事」右键点击任一 Codex 会话，可查看完整 ID 并复制。本地及已同步到本机的会话适用同一入口。实际续接使用 `codex resume -C "本机项目路径" "会话 ID"`。 [使用和验收](../PORTABLE_CHECK.md)

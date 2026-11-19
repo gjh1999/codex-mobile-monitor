@@ -110,6 +110,11 @@ def create_app(path, devices, clock=None, compute=None, artifact_dir=None):
             raise ValueError('启用产物目录需要计算队列')
         artifacts = ArtifactStore(artifact_dir)
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+
+    @app.get('/healthz')
+    def health():
+        return JSONResponse({'status': 'ready'}, headers={'Cache-Control': 'no-store'})
+
     if any(entry.get('personalSpace') for entry in devices.values()):
         from personal_relay import install_routes
         install_routes(app, path, devices)
@@ -245,6 +250,10 @@ if __name__ == '__main__':
     parser.add_argument('--artifact-dir', type=Path)
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', type=int, default=8770)
+    parser.add_argument('--tls-cert', type=Path)
+    parser.add_argument('--tls-key', type=Path)
+    parser.add_argument('--no-access-log', action='store_true')
+    parser.add_argument('--limit-concurrency', type=int)
     action = parser.add_mutually_exclusive_group()
     action.add_argument('--inspect', metavar='PROJECT')
     action.add_argument('--release-confirmed', nargs=4, metavar=('PROJECT', 'VERSION', 'DEVICE', 'THREAD'))
@@ -267,7 +276,12 @@ if __name__ == '__main__':
     else:
         if not args.devices:
             parser.error('启动服务时需要 --devices')
+        if bool(args.tls_cert) != bool(args.tls_key):
+            parser.error('--tls-cert 和 --tls-key 必须一起提供')
+        if args.limit_concurrency is not None and args.limit_concurrency < 2:
+            parser.error('--limit-concurrency 至少为 2')
         devices = json.loads(args.devices.read_text(encoding='utf-8-sig'))
         compute = json.loads(args.compute.read_text(encoding='utf-8-sig')) if args.compute else None
         uvicorn.run(create_app(args.database, devices, compute=compute, artifact_dir=args.artifact_dir),
-                    host=args.host, port=args.port)
+                    host=args.host, port=args.port, access_log=not args.no_access_log,
+                    limit_concurrency=args.limit_concurrency, ssl_certfile=args.tls_cert, ssl_keyfile=args.tls_key)

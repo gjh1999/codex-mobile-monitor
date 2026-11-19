@@ -1,0 +1,16 @@
+**
+!requirements-web.txt
+!coordination_server.py
+!coordination.py
+!compute_queue.py
+!compute_artifacts.py
+!personal_relay.py
+!handoff.py
+!handoff_sync.py
+!lfs_assets.py
+!service_lock.py
+!coordination_client.py
+!rpc_errors.py
+!deploy/
+!deploy/coordinator/
+!deploy/coordinator/cloud_admin.py

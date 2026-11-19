@@ -1,0 +1,3 @@
+{$LANXI_DOMAIN} {
+	reverse_proxy coordinator:8770
+}

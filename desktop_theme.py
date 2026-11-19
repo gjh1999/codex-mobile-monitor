@@ -144,6 +144,10 @@ QPushButton:focus { border-color:#7399db; }
 QPushButton#hoverAction { background:rgba(225, 247, 255, 154); color:#153b53; border-color:rgba(226, 245, 255, 138); padding:5px 8px; }
 QPushButton#hoverAction:hover, QPushButton#hoverAction:focus { background:#d4efff; border-color:#70a8cc; }
 QPushButton#hoverAction:pressed { background:#acd8f1; }
+QPushButton#edgeMenuItem { background:transparent; border:0; border-radius:5px; color:#f3fbff; padding:0 8px; }
+QPushButton#edgeMenuItem:hover { background:rgba(220,247,255,34); }
+QPushButton#edgeMenuItem:pressed { background:rgba(220,247,255,54); }
+QPushButton#edgeMenuItem:disabled { background:transparent; color:#b1ccd8; }
 QPushButton#send, QPushButton#approvalAllow { background:#096cb9; color:white; border-color:#096cb9; }
 QPushButton#send { padding:0; border-radius:17px; font-size:18px; }
 QPushButton#send:hover, QPushButton#approvalAllow:hover { background:#055eaa; border-color:#055eaa; }

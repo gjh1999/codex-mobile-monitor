@@ -2,6 +2,13 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-19 桌面改动复核与壁纸解码耗时
+
+- Windows 11 24H2、Python 3.14.7、PySide6 6.12.0。复核主工作区 `e658b17` 加未提交的 R14 本地壁纸改动，以及独立工作区 `19a1f20` 所含的 `de12251` 顶部淡入菜单。设 `QT_QPA_PLATFORM=windows`，分别运行 `python tests/smoke_desktop.py --output <对应输出目录>`。主工作区 9.305 秒通过，独立工作区 10.261 秒通过。截图核对了待办和展开的顶部菜单。测试使用虚构会话，主工作区烟测替换了本地图库发现，未连接真实模型或提交审批。
+- 主工作区设 `QT_QPA_PLATFORM=offscreen`，运行 `python tests/bench_task_switch.py --output build-exe/verification/desktop-review-20261119/task-switch`。35 条长消息、首次读取模拟等待 140 毫秒，连续切换 6 次。主线程事件循环等待中位数 1.57 毫秒，上次同口径为 1.62 毫秒。两次冷读耗时 176.25 和 176.68 毫秒，四次缓存命中为 7.14 至 9.40 毫秒。全 6 次历史显示中位数 8.56 毫秒，上次为 13.47 毫秒。未测真实大型会话库、实际接入延时或 EXE 性能。
+- 同一主工作区和 Qt offscreen 下运行 `python build-exe/verification/desktop-review-20261119/wallpaper_probe.py`。空测试图库使用应用内置图片，和临时图库中的两张 7680×4320 合成 PNG 分别测 5 次。`OceanBackdrop` 初始化中位数为 22.72 和 134.78 毫秒，界面线程进入轮换到返回分别为 37.92 和 112.53 毫秒。渐变期间四张解码图像合计占 41,022,400 和 265,465,600 字节，未测进程总内存、绘制帧率和真实照片。当前图像解码与轮换在 GUI 线程同步执行。
+- 运行输出与复现脚本位于 `build-exe/verification/desktop-review-20261119/`，含 `smoke/`、`remote-smoke/`、`task-switch/result.json`、`wallpaper_probe.py` 和 `wallpaper.txt`。这次复核只更新验收记录。
+
 ## 2026-11-19 Windows 计算执行与结果恢复
 
 - 基线 `a317cc9` 已提供持久化计算队列与领取协议。本轮用 Windows 11 24H2 x64、Python 3.14.7、Git 2.56.0.windows.4 和独立的回环协调服务，验证本地批准的程序在固定提交上执行。临时仓库包含两份普通文件，原工作区保留未提交修改。合成任务读取固定输入，计算约 3 MiB 数据的 SHA-256，写出 64 字节产物，并输出比 2 MiB 日志上限多 85 字节的内容。超时夹具实际启动子进程并设定 3 秒超时。

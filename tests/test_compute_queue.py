@@ -14,9 +14,11 @@ from pathlib import Path
 import uvicorn
 from fastapi.testclient import TestClient
 
+from compute_artifacts import MANIFEST_LIMIT
 from compute_queue import CANCEL_EXIT_CODE, ComputeQueue
 from coordination import Conflict, Ownership
 from coordination_server import create_app
+from handoff import sha
 
 
 COMMIT = '1' * 40
@@ -42,7 +44,8 @@ class ComputeTests(unittest.TestCase):
 
     def server(self):
         client = TestClient(create_app(self.database, self.devices, lambda: self.now,
-                                       compute={'vision': self.policy, 'other': self.policy}))
+                                       compute={'vision': self.policy, 'other': self.policy},
+                                       artifact_dir=self.database.parent / 'artifacts'))
         self.addCleanup(client.close)
         return client
 
@@ -242,6 +245,57 @@ class ComputeTests(unittest.TestCase):
         finished = self.transition('home', lease, 'finish', exitCode=0, resultSha256='f' * 64).json()
         self.assertEqual(finished['status'], 'finished')
         self.assertEqual(self.request('office', endpoint, {}).json(), finished)
+
+    def test_artifacts_require_the_claim_and_matching_finished_receipt(self):
+        submitted = self.submit('render')
+        self.heartbeat('home')
+        lease = self.claim('home')
+        self.assertEqual(self.transition('home', lease, 'start').status_code, 200)
+        target = f"/api/v1/projects/vision/compute/jobs/{submitted['id']}/artifacts"
+        headers = {'Authorization': 'Bearer ' + self.devices['home']['token'], 'X-Lanxi-Device': 'home',
+                   'X-Lanxi-Instance': self.instances['home'], 'X-Lanxi-Ticket': lease['ticket']}
+        office = {'Authorization': 'Bearer ' + self.devices['office']['token'], 'X-Lanxi-Device': 'office'}
+        data = dict(version=1, project='vision', id=lease['id'], attempt=lease['attempt'], commit=COMMIT,
+                    name='render', exitCode=0, outcome='exited')
+        content = b'abc'
+        entry = dict(path='report.txt', bytes=len(content), sha256=sha(content))
+        encode = lambda outputs: json.dumps(dict(data, outputs=outputs)).encode()
+        raw = encode([entry])
+        rejected = dict(headers, **{'X-Lanxi-Ticket': 'z' * 43})
+        self.assertEqual(self.api.post(target, headers=rejected, content=raw).status_code, 404)
+        self.assertEqual(self.api.post(target, headers=headers, content=b'x' * (MANIFEST_LIMIT + 1)).status_code, 413)
+        self.assertEqual(self.api.post(target, headers=headers, content=encode([dict(entry, path='../escape')])).status_code, 422)
+        self.assertEqual(self.api.post(target, headers=headers, content=encode([entry, dict(entry, path='REPORT.TXT')])).status_code, 422)
+        first = self.api.post(target, headers=headers, content=raw)
+        self.assertEqual(first.json(), {'sha256': sha(raw), 'offsets': [0]})
+        self.assertEqual(self.api.post(target, headers=headers, content=raw + b' ').status_code, 409)
+        self.assertEqual(self.api.put(target + '/0?offset=1', headers=headers, content=b'bc').status_code, 409)
+        self.assertEqual(self.api.put(target + '/0?offset=0', headers=headers, content=b'bad').status_code, 422)
+        complete = self.api.put(target + '/0?offset=0', headers=headers, content=content)
+        self.assertEqual(complete.json(), {'offset': len(content)})
+        self.assertEqual(self.api.put(target + '/0?offset=0', headers=headers, content=content).json(), complete.json())
+        self.assertEqual(self.api.get(target, headers=office).status_code, 404)
+        self.api = self.server()
+        self.assertEqual(self.transition('home', lease, 'finish', exitCode=0, resultSha256=sha(raw)).status_code, 200)
+        self.assertEqual(self.api.get(target, headers=headers).status_code, 404)
+        self.assertEqual(self.api.get(target, headers=office).content, raw)
+        response = self.api.get(target + '/0?offset=1', headers=office)
+        self.assertEqual((response.content, response.headers['Cache-Control']), (b'bc', 'no-store'))
+
+    def test_finished_artifacts_are_hidden_if_receipt_digest_differs(self):
+        self.submit('render')
+        self.heartbeat('home')
+        lease = self.claim('home')
+        self.transition('home', lease, 'start')
+        target = f"/api/v1/projects/vision/compute/jobs/{lease['id']}/artifacts"
+        headers = {'Authorization': 'Bearer ' + self.devices['home']['token'], 'X-Lanxi-Device': 'home',
+                   'X-Lanxi-Instance': self.instances['home'], 'X-Lanxi-Ticket': lease['ticket']}
+        raw = json.dumps(dict(version=1, project='vision', id=lease['id'], attempt=lease['attempt'], commit=COMMIT,
+                              name='render', exitCode=0, outcome='exited',
+                              outputs=[dict(path='empty.txt', bytes=0, sha256=sha(b''))])).encode()
+        self.assertEqual(self.api.post(target, headers=headers, content=raw).status_code, 200)
+        self.transition('home', lease, 'finish', exitCode=0, resultSha256='9' * 64)
+        self.assertEqual(self.request('office', f"compute/jobs/{lease['id']}/artifacts").status_code, 404)
 
     def test_cli_submits_and_reads_through_the_loopback_service(self):
         app = create_app(self.database, self.devices, lambda: self.now, compute={'vision': self.policy})

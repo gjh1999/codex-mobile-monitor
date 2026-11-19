@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import socket
@@ -8,12 +9,15 @@ import threading
 import time
 import unittest
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
 import uvicorn
 
+from compute_artifacts import CHUNK
 from compute_queue import CANCEL_EXIT_CODE, WINDOW, ComputeQueue
+from compute_transfer import download_outputs
 from compute_worker import LOG_LIMIT, WORKER_SCRIPT, Worker, record, result_report, worker_projects, write_record
 from coordination import Ownership
 from coordination_client import ControlClient, ControlDenied
@@ -43,6 +47,10 @@ if sys.argv[1] == 'slow':
     subprocess.Popen([sys.executable, '-I', '-c',
         "from pathlib import Path; import time; Path('ready').touch(); time.sleep(4); Path('escaped').touch()"])
     time.sleep(30)
+elif sys.argv[1] == 'transfer':
+    Path('exports').mkdir()
+    Path('exports/result.bin').write_bytes(bytes(range(256)) * (9 * 4096))
+    Path('exports/empty.txt').touch()
 else:
     result = hashlib.sha256(Path('sample.txt').read_bytes() * (2 ** 19)).hexdigest().encode()
     Path('result.txt').write_bytes(result)
@@ -59,7 +67,8 @@ else:
         devices = {'office': dict(token='o' * 32, projects=['lab']),
                    'home': dict(token='h' * 32, projects=['lab'])}
         policy = dict(workers={'home': 'home'}, profiles=dict(run=dict(cpu=1, memoryMiB=128, vramMiB=0)))
-        app = create_app(self.database, devices, lambda: self.now, compute={'lab': policy})
+        self.artifacts = root / 'artifacts'
+        app = create_app(self.database, devices, lambda: self.now, compute={'lab': policy}, artifact_dir=self.artifacts)
         endpoint = self.enterContext(socket.socket())
         endpoint.bind(('127.0.0.1', 0))
         options = dict(url=f'http://127.0.0.1:{endpoint.getsockname()[1]}', projects={'lab': {'path': str(self.repo)}})
@@ -83,12 +92,13 @@ else:
         thread.join(10)
 
     def local_settings(self, mode='run', timeout=10):
-        profile = dict(command=[sys.executable, '-I', 'task.py', mode], outputs=['result.txt'], timeoutSeconds=timeout)
+        outputs = ['exports/result.bin', 'exports/empty.txt'] if mode == 'transfer' else ['result.txt']
+        profile = dict(command=[sys.executable, '-I', 'task.py', mode], outputs=outputs, timeoutSeconds=timeout)
         return dict(projects={'lab': dict(commits=[self.commit], profiles={'run': profile}, cpu=2, memoryMiB=512)})
 
-    def worker(self, mode='run', timeout=10):
+    def worker(self, mode='run', timeout=10, upload=False):
         projects = worker_projects(self.home, self.local_settings(mode, timeout), self.state)
-        return Worker(self.home, projects, self.state)
+        return Worker(self.home, projects, self.state, upload_artifacts=upload)
 
     def start(self, worker):
         with patch.dict(os.environ, LANXI_DEVICE_TOKEN=self.home.token):
@@ -243,6 +253,84 @@ else:
         self.assertEqual(worker.step(), 'canceled')
         self.assertFalse((self.attempt / 'work').exists())
         self.assertEqual(self.status()['exitCode'], CANCEL_EXIT_CODE)
+
+    def test_artifacts_resume_upload_and_download_through_the_http_service(self):
+        worker = self.worker(mode='transfer', upload=True)
+        self.start(worker)
+        self.assertEqual(worker.supervisor.wait(timeout=15), 0)
+        open_upload = self.home.open
+        sent = []
+
+        @contextmanager
+        def interrupted_upload(project, endpoint, **options):
+            with open_upload(project, endpoint, **options) as response:
+                if options.get('method') == 'PUT':
+                    sent.append(int(endpoint.rsplit('=', 1)[1]))
+                    if len(sent) == 1:
+                        raise ControlDenied(detail='simulated interruption after saving a chunk')
+                yield response
+
+        with patch.object(self.home, 'open', side_effect=interrupted_upload):
+            with self.assertRaises(ControlDenied):
+                worker.step()
+            self.assertEqual(self.status()['status'], 'running')
+            self.assertEqual(next(self.artifacts.rglob('0.part')).stat().st_size, CHUNK)
+            self.now += WINDOW + 1
+            resumed = self.worker(mode='transfer', upload=True)
+            started = time.perf_counter()
+            self.assertEqual(resumed.step(), 'finished')
+            uploaded = time.perf_counter()
+        self.assertEqual(sent, [0, CHUNK, 2 * CHUNK])
+
+        destination = self.state.parent / 'received'
+        open_download = self.office.open
+        received = []
+
+        @contextmanager
+        def interrupted_download(project, endpoint, **options):
+            if '?offset=' in endpoint:
+                received.append(int(endpoint.rsplit('=', 1)[1]))
+                if len(received) == 2:
+                    raise ControlDenied(detail='simulated interruption during download')
+            with open_download(project, endpoint, **options) as response:
+                yield response
+
+        with patch.object(self.office, 'open', side_effect=interrupted_download):
+            with self.assertRaises(ControlDenied):
+                download_outputs(self.office, 'lab', self.job, destination)
+            self.assertFalse((destination / 'exports' / 'result.bin').exists())
+            download_started = time.perf_counter()
+            self.assertEqual(download_outputs(self.office, 'lab', self.job, destination)['files'], 2)
+            downloaded = time.perf_counter()
+        self.assertEqual(received, [0, CHUNK, CHUNK, 2 * CHUNK])
+        output = destination / 'exports' / 'result.bin'
+        self.assertEqual(sha(output.read_bytes()), sha(bytes(range(256)) * (9 * 4096)))
+        self.assertEqual((destination / 'exports' / 'empty.txt').stat().st_size, 0)
+
+        config = self.state.parent / 'office.json'
+        write_record(config, {'coordination': dict(device='office', url=self.office.url,
+                                                  projects={'lab': {'path': str(self.repo)}})})
+        command = [sys.executable, str(WORKER_SCRIPT.with_name('compute_client.py')), '--config', str(config),
+                   '--project', 'lab', 'download', self.job, '--output', str(destination)]
+        response = subprocess.check_output(command, env=dict(os.environ, LANXI_DEVICE_TOKEN=self.office.token), timeout=10)
+        self.assertEqual(json.loads(response)['status'], 'downloaded')
+
+        output.write_bytes(b'user file')
+        with self.assertRaises(ValueError):
+            download_outputs(self.office, 'lab', self.job, destination)
+        self.assertEqual(output.read_bytes(), b'user file')
+        with self.assertRaises(ValueError):
+            download_outputs(self.office, 'lab', self.job, self.repo / 'received')
+        center_copy = next(self.artifacts.rglob('0.output'))
+        with center_copy.open('r+b') as stream:
+            stream.write(b'X')
+        damaged = self.state.parent / 'corrupt'
+        with self.assertRaisesRegex(ValueError, 'SHA-256'):
+            download_outputs(self.office, 'lab', self.job, damaged)
+        self.assertFalse((damaged / 'exports' / 'result.bin').exists())
+        if os.getenv('LANXI_MEASURE_COMPUTE_ARTIFACTS'):
+            print(f'artifact_ms upload_remaining_5_mib_and_finish={(uploaded-started)*1000:.2f}'
+                  f' download_remaining_5_mib={(downloaded-download_started)*1000:.2f}', flush=True)
 
     def test_does_not_replay_an_entered_attempt_without_result(self):
         worker = self.worker()

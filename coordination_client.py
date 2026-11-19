@@ -8,9 +8,11 @@ import subprocess
 import sys
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
+from http.client import HTTPException
 from pathlib import Path
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
@@ -56,23 +58,28 @@ class ControlClient:
                 self.threads[thread] = project
 
     def request(self, project, endpoint, body=None):
+        with self.open(project, endpoint, data=None if body is None else json.dumps(body).encode(),
+                       headers={'Content-Type': 'application/json'}) as response:
+            return json.load(response)
+
+    @contextmanager
+    def open(self, project, endpoint, *, data=None, method=None, headers=None, timeout=2):
         if project not in self.paths.values():
             raise ControlDenied(detail='此设备尚未配置该项目')
         if not self.token:
             raise ControlDenied(detail='设备尚未配置 LANXI_DEVICE_TOKEN')
         url = f'{self.url}/api/v1/projects/{project}/{endpoint}'
-        request = Request(url, data=None if body is None else json.dumps(body).encode(), headers={
-            'Authorization': f'Bearer {self.token}', 'X-Lanxi-Device': self.device,
-            'Content-Type': 'application/json',
+        request = Request(url, data=data, method=method, headers={
+            **(headers or {}), 'Authorization': f'Bearer {self.token}', 'X-Lanxi-Device': self.device,
         })
         try:
-            with self.opener.open(request, timeout=2) as response:
-                return json.load(response)
+            with self.opener.open(request, timeout=timeout) as response:
+                yield response
         except HTTPError as error:
             error.close()
             message = '项目控制权已变更或存在未确认的活动' if error.code == 409 else '协调服务拒绝设备请求'
             raise ControlDenied(code=error.code, detail=message) from error
-        except (URLError, OSError, ValueError) as error:
+        except (OSError, ValueError, HTTPException) as error:
             raise ControlDenied(detail='项目协调服务暂不可用') from error
 
     def project_at(self, cwd):

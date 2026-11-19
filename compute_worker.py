@@ -13,7 +13,9 @@ import time
 import uuid
 from pathlib import Path
 
+from compute_artifacts import MANIFEST_LIMIT, OUTPUT_COUNT, OUTPUT_LIMIT
 from compute_queue import CANCEL_EXIT_CODE, NAME
+from compute_transfer import upload_outputs
 from coordination_client import ControlDenied, device_client
 from handoff import GIT_ID, file_hash, git, limited, local_path, require, sha
 from handoff_merge import check_checkout_paths, object_store, separate, worktree_root
@@ -23,7 +25,6 @@ from service_lock import ServiceLock
 from windows_job import WindowsJob
 
 LOG_LIMIT = 2 * 1024**2
-OUTPUT_LIMIT = 128 * 1024**2
 POLL_SECONDS = 5
 STOP_CHECK_SECONDS = 0.25
 WORKER_SCRIPT = Path(__file__).resolve()
@@ -48,7 +49,7 @@ def profile_config(config):
     program = absolute(command[0])
     require(program.suffix.lower() == '.exe' and program.is_file(), '计算命令需要本机绝对路径下的 Windows 可执行文件')
     outputs = config.get('outputs', [])
-    require(isinstance(outputs, list) and len(outputs) <= 128 and all(isinstance(name, str) for name in outputs),
+    require(isinstance(outputs, list) and len(outputs) <= OUTPUT_COUNT and all(isinstance(name, str) for name in outputs),
             '计算输出需要登记的相对文件列表')
     timeout = config.get('timeoutSeconds', 900)
     require(bounded_number(timeout, 1, 86400), '计算超时需在 1 到 86400 秒之间')
@@ -257,7 +258,7 @@ def supervise(attempt):
 
 def result_report(attempt, active):
     path = attempt / 'result.json'
-    raw = limited(path, 2 * 1024**2)
+    raw = limited(path, MANIFEST_LIMIT)
     result = json.loads(raw)
     require(result['version'] == 1 and all(result[key] == active[key] for key in ('project', 'id', 'attempt', 'commit', 'name'))
             and bounded_number(result['exitCode'], -(2**31), 2**32 - 1), '计算回执与执行记录不一致')
@@ -271,7 +272,7 @@ def result_report(attempt, active):
     canceled = result['outcome'] == 'canceled'
     if canceled:
         require(result['exitCode'] == CANCEL_EXIT_CODE and (attempt / 'cancel.json').is_file(), '本机取消回执无效')
-    return ('canceled' if canceled else 'finished'), dict(exitCode=result['exitCode'], resultSha256=sha(raw))
+    return ('canceled' if canceled else 'finished'), result, raw
 
 
 def supervisor_alive(attempt):
@@ -284,8 +285,9 @@ def supervisor_alive(attempt):
 
 
 class Worker:
-    def __init__(self, client, projects, state_dir):
+    def __init__(self, client, projects, state_dir, upload_artifacts=False):
         self.client, self.projects, self.state_dir = client, projects, state_dir
+        self.upload_artifacts = upload_artifacts
         self.active_file = state_dir / 'active.json'
         self.supervisor = None
         self.supervisor_env = safe_env(state_dir)
@@ -344,7 +346,10 @@ class Worker:
         attempt.mkdir(parents=True, exist_ok=True)
         try:
             if (attempt / 'result.json').exists() and not supervisor_alive(attempt):
-                final, report = result_report(attempt, active)
+                final, result, raw = result_report(attempt, active)
+                report = dict(exitCode=result['exitCode'], resultSha256=sha(raw))
+                if self.upload_artifacts and result['outputs']:
+                    upload_outputs(self.client, active, self.instance, attempt, raw, result['outputs'])
                 reply = self.event(active, 'canceled' if final == 'canceled' else 'finish', **report)
                 require(reply['status'] == final and all(reply[key] == value for key, value in report.items()),
                         '协调服务的最终回执与本机不匹配')
@@ -414,11 +419,14 @@ def main():
         config = record(args.config)
         client = device_client(config)
         require(client and client.token, '计算端需要设备协调配置和令牌')
-        projects = worker_projects(client, config['computeWorker'], state)
+        worker_config = config['computeWorker']
+        upload_artifacts = worker_config.get('uploadArtifacts', False)
+        require(type(upload_artifacts) is bool, 'uploadArtifacts 需要布尔值')
+        projects = worker_projects(client, worker_config, state)
         state.mkdir(parents=True, exist_ok=True)
         lock = ServiceLock(state / 'worker.lockfile')
         try:
-            worker = Worker(client, projects, state)
+            worker = Worker(client, projects, state, upload_artifacts)
             previous = None
             while True:
                 try:

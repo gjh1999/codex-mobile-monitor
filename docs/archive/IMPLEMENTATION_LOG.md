@@ -2,6 +2,13 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-19 计算产物回传与断点续传
+
+- 基线 `8f6d6de` 只上报退出码与清单散列。环境为 Windows 11 24H2、Python 3.14.7、SQLite 3.50.4 与 Git 2.56.0.windows.4。测试使用虚构设备、独立 Git 仓库和回环协调服务。任务在独立工作目录生成可复现的 9 MiB 二进制文件及一个零字节文件。上传先落盘 4 MiB，模拟协调中心回包丢失，执行端重启后只上传余下 5 MiB。下载落盘 4 MiB 后模拟中断，复跑只取余下 5 MiB。
+- `python -m unittest -v tests.test_compute_worker tests.test_compute_queue tests.test_coordination` 首轮 29 项通过，22.603 秒。覆盖执行凭据、只有原提交设备能下载、回执散列匹配、清单与分块大小、越界路径、大小写冲突、重复分块、错误散列及中心重启。开始时一条 PowerShell 内联建库命令因引号解析未运行成功，后续回环测试正常创建实例。原始日志为 `build-exe/verification/compute-artifacts-20261119/targeted-01.txt`。
+- 设 `LANXI_MEASURE_COMPUTE_ARTIFACTS=1` 后运行三次 `python -m unittest -v tests.test_compute_worker.WorkerTests.test_artifacts_resume_upload_and_download_through_the_http_service`。复测也从 CLI 下载入口读取同一结果，并通过改动协调中心测试文件验证同长度数据损坏会被拦截。剩余 5 MiB 上传与完成回执分别用时 107.73、67.50 和 113.11 毫秒，下载与落盘分别为 74.77、66.40 和 38.05 毫秒。复用的 4 MiB 未再次传输。日志为同目录的 `artifact-timing-1.txt` 至 `artifact-timing-3.txt`。旧版没有对应的产物网络传输基线。未测真实网络、并发吞吐、峰值内存或 128 MiB 完整作业。
+- 回传只处理成功作业已登记的产物，下载到独立目录，失败和取消依旧保留本机日志。自动按版本写回原工作树、检查点、实际 GPU 探测及物理设备联调待完成。 [回传和下载配置](../PROJECT_CONTROL.md#回传成功作业的文件)
+
 ## 2026-11-19 计算作业远程取消
 
 - 基线 `def5d64`，Windows 11 24H2、Python 3.14.7、SQLite 3.50.4、Git 2.56.0.windows.4。使用临时项目仓库、独立 SQLite 与回环协调服务。合成任务和子进程持续等待，子进程原计划在四秒后落盘；断线与租约到期用测试时钟模拟。取消沿用五秒续租，监督进程每 250 毫秒检查本机取消信号。

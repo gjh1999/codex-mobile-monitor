@@ -5,10 +5,13 @@ import secrets
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import Depends, FastAPI, Header, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.concurrency import run_in_threadpool
+from starlette.requests import ClientDisconnect
 
+from compute_artifacts import CHUNK, MANIFEST_LIMIT, OUTPUT_COUNT, OUTPUT_LIMIT, ArtifactStore
 from compute_queue import ComputeQueue, validate_config
 from coordination import Conflict, Ownership
 
@@ -34,6 +37,9 @@ class Release(BaseModel):
 JobId = Annotated[str, Field(pattern=r'^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$', max_length=36)]
 Commit = Annotated[str, Field(pattern=r'^(?:[0-9a-f]{40}|[0-9a-f]{64})$', max_length=64)]
 Profile = Annotated[str, Field(pattern=r'^[A-Za-z0-9_-]{1,80}$', max_length=80)]
+Ticket = Annotated[str, Field(pattern=r'^[A-Za-z0-9_-]{43}$', max_length=43)]
+ArtifactIndex = Annotated[int, Field(ge=0, lt=OUTPUT_COUNT)]
+ArtifactOffset = Annotated[int, Field(ge=0, le=OUTPUT_LIMIT)]
 
 
 class ComputeInput(BaseModel):
@@ -60,13 +66,38 @@ class ComputeHeartbeat(ComputeClaim):
 
 
 class ComputeEvent(ComputeClaim):
-    ticket: str = Field(pattern=r'^[A-Za-z0-9_-]{43}$', max_length=43)
+    ticket: Ticket
     event: Literal['start', 'renew', 'finish', 'canceled']
     exitCode: int | None = Field(default=None, ge=-(2**31), le=2**32 - 1, strict=True)
     resultSha256: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$', max_length=64)
 
 
-def create_app(path, devices, clock=None, compute=None):
+async def artifact_body(request, limit):
+    data = bytearray()
+    try:
+        async for chunk in request.stream():
+            if len(data) + len(chunk) > limit:
+                raise HTTPException(413, '产物请求超出分块大小限制')
+            data.extend(chunk)
+    except ClientDisconnect as error:
+        raise HTTPException(400, '产物请求意外断开') from error
+    return bytes(data)
+
+
+def artifact_operation(operation, *args):
+    try:
+        return operation(*args)
+    except Conflict:
+        raise
+    except FileNotFoundError as error:
+        raise HTTPException(404, '所需作业产物不存在') from error
+    except (ValueError, RecursionError) as error:
+        raise HTTPException(422, '产物清单或分块校验失败') from error
+    except OSError as error:
+        raise HTTPException(503, '产物暂时无法读写') from error
+
+
+def create_app(path, devices, clock=None, compute=None, artifact_dir=None):
     tokens = [entry['token'].encode() for entry in devices.values()]
     if any(len(token) < 32 for token in tokens) or len(set(tokens)) != len(tokens):
         raise ValueError('每台设备需要独立的随机令牌，至少 32 字节')
@@ -74,6 +105,10 @@ def create_app(path, devices, clock=None, compute=None):
     if compute is not None:
         validate_config(compute, devices)
         jobs = ComputeQueue(store, compute)
+    if artifact_dir is not None:
+        if compute is None:
+            raise ValueError('启用产物目录需要计算队列')
+        artifacts = ArtifactStore(artifact_dir)
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.exception_handler(Conflict)
@@ -156,6 +191,44 @@ def create_app(path, devices, clock=None, compute=None):
             return jobs.update(project, device, job_id, body.instance, body.ticket, body.event,
                                body.exitCode, body.resultSha256)
 
+        if artifact_dir is not None:
+            def upload_job(project: str, job_id: JobId, x_lanxi_instance: Annotated[JobId, Header()],
+                           x_lanxi_ticket: Annotated[Ticket, Header()], device=Depends(authorizes_worker)):
+                result = jobs.artifact_job(project, device, job_id, x_lanxi_instance, x_lanxi_ticket)
+                if result is None:
+                    raise HTTPException(404, '当前计算尝试不可上传')
+                return result
+
+            def download_job(project: str, job_id: JobId, device=Depends(authorizes_compute)):
+                result = jobs.artifact_job(project, device, job_id)
+                if result is None:
+                    raise HTTPException(404, '当前设备暂无可领取的作业产物')
+                return result
+
+            target = prefix + '/compute/jobs/{job_id}/artifacts'
+            private = {'Cache-Control': 'no-store'}
+
+            @app.post(target)
+            async def stage_outputs(project: str, request: Request, job=Depends(upload_job)):
+                raw = await artifact_body(request, MANIFEST_LIMIT)
+                return await run_in_threadpool(artifact_operation, artifacts.stage, project, job, raw)
+
+            @app.put(target + '/{index}')
+            async def upload_output(project: str, index: ArtifactIndex, offset: ArtifactOffset, request: Request,
+                                    job=Depends(upload_job)):
+                data = await artifact_body(request, CHUNK)
+                return await run_in_threadpool(artifact_operation, artifacts.upload, project, job, index, offset, data)
+
+            @app.get(target)
+            def output_manifest(project: str, job=Depends(download_job)):
+                raw = artifact_operation(artifacts.download_manifest, project, job)
+                return Response(raw, media_type='application/json', headers=private)
+
+            @app.get(target + '/{index}')
+            def download_output(project: str, index: ArtifactIndex, offset: ArtifactOffset, job=Depends(download_job)):
+                data = artifact_operation(artifacts.download, project, job, index, offset)
+                return Response(data, media_type='application/octet-stream', headers=private)
+
     return app
 
 
@@ -166,6 +239,7 @@ if __name__ == '__main__':
     parser.add_argument('--devices', type=Path)
     parser.add_argument('--database', type=Path, required=True)
     parser.add_argument('--compute', type=Path)
+    parser.add_argument('--artifact-dir', type=Path)
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', type=int, default=8770)
     action = parser.add_mutually_exclusive_group()
@@ -192,4 +266,5 @@ if __name__ == '__main__':
             parser.error('启动服务时需要 --devices')
         devices = json.loads(args.devices.read_text(encoding='utf-8-sig'))
         compute = json.loads(args.compute.read_text(encoding='utf-8-sig')) if args.compute else None
-        uvicorn.run(create_app(args.database, devices, compute=compute), host=args.host, port=args.port)
+        uvicorn.run(create_app(args.database, devices, compute=compute, artifact_dir=args.artifact_dir),
+                    host=args.host, port=args.port)

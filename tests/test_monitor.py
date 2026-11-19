@@ -64,7 +64,7 @@ class Tests(unittest.TestCase):
    def conversation(self, thread_id):return {'messages': [{'text': 'Claude reply', 'role': 'assistant'}], 'events': []}
   with patch.object(monitor, 'controller', codex), patch.object(monitor, 'claude_controller', claude), \
        patch.object(monitor, 'claude_rpc', ClaudeHistory()), \
-       patch.object(monitor, 'read_conversation', return_value={'messages': [{'text': 'Codex reply'}], 'events': []}) as reader:
+       patch.object(monitor, 'read_codex_conversation', return_value={'messages': [{'text': 'Codex reply'}], 'events': []}) as reader:
    operation = monitor.get_controller('claude').submit(tid, 'message', 'queued only', 'client-route')
    self.assertEqual(operation, 'client-route')
    self.assertFalse(codex.snapshot()['operations'])

@@ -45,8 +45,9 @@ class WebTests(unittest.TestCase):
         self.login()
         with patch('monitor.snapshot', return_value={'threads':[]}), patch('monitor.conversation_for', return_value={'messages':[]}) as history:
             self.assertEqual(self.client.get('/api/state?client=codex').status_code,200)
-            self.assertEqual(self.client.get('/api/conversation/test?client=claude').json(),{'messages':[]})
-            history.assert_called_once_with('test','claude')
+            for client in ('codex', 'claude'):
+                self.assertEqual(self.client.get(f'/api/conversation/test?client={client}').json(),{'messages':[]})
+                history.assert_called_with('test',client,local_history=False)
         self.assertEqual(self.client.get('/api/state?client=invalid').status_code,422)
 
     def test_handoff_receipts_require_login_and_read_local_mapping(self):

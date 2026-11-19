@@ -6,8 +6,10 @@ class ReplyLog:
   self.lock=threading.Lock()
   self.db=sqlite3.connect(path,check_same_thread=False)
   self.db.execute('CREATE TABLE IF NOT EXISTS replies(thread TEXT, turn TEXT, item TEXT, kind TEXT, text TEXT, received REAL, PRIMARY KEY(thread,turn,item))')
+  self.db.execute('CREATE TABLE IF NOT EXISTS task_events(thread TEXT, turn TEXT, method TEXT, status TEXT, received REAL)')
+  self.db.execute('CREATE INDEX IF NOT EXISTS replies_recent ON replies(thread,received)')
+  self.db.execute('CREATE INDEX IF NOT EXISTS task_events_recent ON task_events(thread,received)')
   self.db.commit()
-  self.db.execute('CREATE TABLE IF NOT EXISTS task_events(thread TEXT, turn TEXT, method TEXT, status TEXT, received REAL)');self.db.commit()
  def record(self,event,owned):
   p=event.get('params',{});tid=p.get('threadId');item=p.get('item',{})
   if tid not in owned:return False

@@ -28,6 +28,8 @@
 
 ## EXE 与数据
 
+包含本机 Codex 历史接续的构建为 `release/Lanxi-Glass-R17-History.exe`。
+
 带聊天 Markdown 渲染的毛玻璃版交付文件为 `release/Lanxi-Glass-R16-Markdown.exe`。默认构建名为 `release/Lanxi.exe`。
 
 本次壁纸版交付文件为 `release/Lanxi-Glass-R14.exe`，基于 `def5d64` 构建，包含顶部菜单和大模型归组。
@@ -45,6 +47,8 @@ EXE 的 `local-config.json`、任务数据库、回复记录和草稿位于 EXE 
 正式使用前应检查源码与 EXE 使用的数据根目录。构建预览版时可指定不同文件名。完整步骤见 [运行与维护](RUNBOOK.md)。
 
 ## 任务操作
+
+在「案头诸事」选中同一条 Codex 会话后，「灯下对谈」会补显示 VS Code 终端里已落盘的消息。两端使用同一个本机 Codex 数据目录。终端占用期间可查看历史，释放写入权后可从澜汐继续该会话。 [桌面与 VS Code 终端续接](MULTI_CLIENT.md#codex-桌面与-vs-code-终端续接)
 
 在已执舟的 Codex 会话里，在空输入框键入 `/`，上下键或鼠标选择 `/model` 和 `/permissions`。回车打开选项，Esc 收起菜单。模型和权限档位来自当前 Codex，受限制的档位显示为不可选。
 

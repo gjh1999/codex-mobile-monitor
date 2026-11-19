@@ -412,7 +412,8 @@ def main():
                    controls=codex.snapshot(), claude={'connection': 'connected', 'threads': [
                        {'id': CLAUDE, 'title': 'Claude 运行测试', 'status': {'type': 'active'}}], 'controls': claude.snapshot()})
     try:
-        with patch.object(monitor, 'approvals', approvals), patch.object(monitor, 'controller', codex), patch.object(monitor, 'claude_controller', claude), \
+        with patch('desktop_glass.local_wallpapers', return_value=[]), \
+             patch.object(monitor, 'approvals', approvals), patch.object(monitor, 'controller', codex), patch.object(monitor, 'claude_controller', claude), \
              patch.object(monitor, 'conversation_for', side_effect=lambda *_: copy.deepcopy(data)), \
              patch.object(monitor, 'start_background_service', side_effect=lambda stop: (stop, NoWorkers())):
             window = MainWindow(Shared())

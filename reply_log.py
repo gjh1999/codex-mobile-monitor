@@ -15,6 +15,8 @@ class ReplyLog:
             self.db.execute('BEGIN IMMEDIATE')
             self.db.execute('CREATE TABLE IF NOT EXISTS replies(thread TEXT, turn TEXT, item TEXT, kind TEXT, text TEXT, received REAL, PRIMARY KEY(thread,turn,item))')
             self.db.execute('CREATE TABLE IF NOT EXISTS task_events(thread TEXT, turn TEXT, method TEXT, status TEXT, received REAL)')
+            self.db.execute('CREATE INDEX IF NOT EXISTS replies_recent ON replies(thread,received)')
+            self.db.execute('CREATE INDEX IF NOT EXISTS task_events_recent ON task_events(thread,received)')
             self.db.execute("CREATE INDEX IF NOT EXISTS completed_turns ON task_events(thread,turn) WHERE method='turn/completed'")
             if not self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pending_reply_notifications'").fetchone():
                 self.db.execute('CREATE TABLE pending_reply_notifications(thread TEXT, turn TEXT, item TEXT, legacy INTEGER DEFAULT 0, PRIMARY KEY(thread,turn,item))')

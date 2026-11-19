@@ -126,7 +126,7 @@ def create_app(start_workers=True):
 
     @app.get('/api/conversation/{thread}', dependencies=[Depends(auth)])
     def conversation(thread: str, client: Literal['codex', 'claude'] = 'codex'):
-        return monitor.conversation_for(thread, client)
+        return monitor.conversation_for(thread, client, local_history=False)
 
     class Operation(BaseModel):
         client: Literal['codex', 'claude']

@@ -6,7 +6,7 @@ Windows 原生桌面软件，用于集中查看和控制本机 Codex / Claude Co
 
 ## 快速开始
 
-在 Windows 上双击桌面包打开澜汐原生窗口。默认构建名为 `release/Lanxi.exe`，并列发布的毛玻璃版为 `release/Lanxi-Glass.exe`。关闭窗口后程序留在系统托盘，从托盘选择“退出程序”即可停止后台。独立 Web 工作台的运行与 iPhone 局域网调试见 [Web 工作台说明](docs/WEB.md)。
+在 Windows 上双击桌面包打开澜汐原生窗口。默认构建名为 `release/Lanxi.exe`，支持本地壁纸库的毛玻璃版为 `release/Lanxi-Glass-R14.exe`。把 JPG 或 PNG 原图放进 Windows「图片」下的 `澜汐/macOS`，下次启动就会轮换其中的横版和方形壁纸。关闭窗口后程序留在系统托盘，从托盘选择“退出程序”即可停止后台。独立 Web 工作台的运行与 iPhone 局域网调试见 [Web 工作台说明](docs/WEB.md)。
 
 在 PowerShell 中从项目根目录启动：
 

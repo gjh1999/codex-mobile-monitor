@@ -1,6 +1,7 @@
 """In-process desktop workers. No task ownership is inferred from configuration."""
 import json, os, sqlite3, threading, time, sys
 from conversation import read_conversation
+from codex_history import read_codex_conversation
 from pathlib import Path
 from automation import Approvals, Scheduler
 from channels_dingtalk import DingTalkWebhook
@@ -44,11 +45,12 @@ def get_controller(client='codex'):
  if client not in ('codex','claude'):raise ValueError('无效客户端。')
  return claude_controller if client=='claude' else controller
 
-def conversation_for(thread_id,client='codex'):
+def conversation_for(thread_id,client='codex',*,local_history=True):
  if client not in ('codex','claude'):raise ValueError('无效客户端。')
  if client=='claude':
   return claude_rpc.conversation(thread_id) if claude_rpc else {'messages':[],'events':[]}
- return read_conversation(ROOT/'replies.sqlite3',thread_id)
+ reader=read_codex_conversation if local_history else read_conversation
+ return reader(ROOT/'replies.sqlite3',thread_id)
 def snapshot():
  with state_lock:result=json.loads(json.dumps(state))
  # Control intent and fast interrupts can change between polling rounds. Read the

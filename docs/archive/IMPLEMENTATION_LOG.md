@@ -2,6 +2,22 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-19 澜汐与 Codex 终端历史接续
+
+- 基线 `d127e44` 的桌面对谈只显示 `replies.sqlite3`，集成底座为含本地壁纸轮换的 `a478b96`。环境为 Windows 11 24H2、Python 3.14.7、Codex CLI 0.170.0、PySide6 6.12.0。桌面读取相同 `CODEX_HOME` 的原生可见消息，与 SQLite 实时记录按轮次及消息 ID 去重。参考旧版可见事件字段，并核对真实本地测试会话的已完成消息格式。 [Codex 旧版事件协议](https://github.com/openai/codex/blob/rust-v0.100.0/codex-rs/protocol/src/protocol.rs)
+- `python -m unittest -v tests.test_codex_history tests.test_conversation tests.test_monitor tests.test_web` 首轮 19 项、2 项失败，1.475 秒。合成 JSON 行超过缩小版测试上限，且 SQLite 夹具使用实际时间，与固定的原生事件时钟不一致。修正夹具后，同命令加入 `tests.test_task_control tests.test_claude`，68 项通过，8.656 秒。覆盖身份校验、错误和内部上下文过滤、未写完整的行、原地替换、旧版事件、回退轮次以及 Web 对话权限范围。日志在 `build-exe/verification/codex-history-20261119/targeted-01.txt` 和 `targeted-02.txt`。
+- 在独立源码目录先后执行 `python -m tests.smoke_codex_history --output ../native-01` 和 `python -m tests.smoke_codex_history --output ../native-02`。真实 CLI 通过回环模型夹具开同一会话，澜汐的 App Server 接续一次，最终 CLI 读到澜汐回复上下文后再追加一轮。桌面正常读取入口显示三轮六条消息，并核对仅桌面轮次进入运行日志。未调用真实模型或读取用户会话。合成长日志有 64 段各 512 KiB 的工具数据与 50 条可见消息，共 33,576,591 字节。每轮各测 5 次，16 MiB 窗口冷读、缓存命中及追加一条的中位数依次为 50.226、0.232、6.580 毫秒，复验为 43.765、0.240、5.441 毫秒。旧版只读 SQLite，未测同口径原生读取。各轮结果在上述输出中的 `result.json`。未测用户实际历史库规模与峰值内存。
+- 设置 `QT_QPA_PLATFORM=windows` 运行 `python tests/smoke_desktop.py --output ../desktop-smoke`，10.745 秒通过。用 PyInstaller 6.22.3 执行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-exe.ps1 -AppName Lanxi-Glass-R17-History`，构建用时 45.807 秒。检查归档确认 `codex_history`、`desktop_qt` 及 `desktop_glass` 均内置，输出复制前后 SHA-256 一致。发布文件为 `release/Lanxi-Glass-R17-History.exe`，61,545,474 字节。桌面功能测试使用源码入口，未切换现有运行实例。 [本机会话使用说明](../MULTI_CLIENT.md#codex-桌面与-vs-code-终端续接)
+- 在同一独立源码目录使用主项目虚拟环境运行 `python -m unittest discover -s tests -t . -p 'test_*.py' -v`，215 项中 213 项通过，224.488 秒。DPAPI 测试因沙箱用户配置不可用跳过，另有 1 项可选 Stream SDK 跳过。继续保留 `regression-01.txt` 原始日志。
+
+## 2026-11-19 macOS 高清壁纸库与 R14 实机切换
+
+- Windows 11、Python 3.14.7、PySide6 6.12.0。基线有三张内置背景。本次核对 AppleWalls 的 16 个合集、89 个条目。下载按钮成功返回 20 张后报告当日限额已达。从独立档案取得 56 张对应画面，来源为 512 Pixels（47）、iDownloadBlog（4）、Basic Apple Guy（4）和 iClarified（1）。保留发布方文件，逐图解码，核对宽高与来源并计算 SHA-256。独立版本的文件格式或分辨率可与 AppleWalls 不同。
+- 当次验收保存了 76 张，共 746,602,598 字节。74 张用于桌面，另有 2 张竖版。图片位于 Windows「图片」的 `澜汐/macOS`，同目录的 `下载清单.csv` 记录每项来源、尺寸、字节数和待续传状态。还有 Mac OS 9 的 Sage Foam 及 macOS 27 Beta 6 的 12 项待补。已登记 Windows 任务 `Lanxi-AppleWalls-20261119`，首次触发时间为本地 11 月 20 日 00:05，按服务端 Retry-After 续传，全部保存后自动注销。后续实际完成时间以清单为准。
+- 在应用内沿用 30 分钟轮换和 0 分钟固定 Mavericks 的设置。运行 `python tests/smoke_desktop.py --output build-exe/verification/applewalls-r14-integrated`，Windows Qt 桌面回归通过。用 Qt offscreen 运行 `python build-exe/verification/applewalls-r14-integrated/verify_rotation.py`，手动触发完整一轮，74 张原图和模糊层均加载，回到首张 6016×3384 Mavericks，固定模式计时器关闭。结果见同目录 `local-library.json`。未等待真实的 30 分钟间隔。
+- 在 `def5d64` 和本次壁纸改动上运行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-exe.ps1 -AppName Lanxi-Glass-R14`，生成 61,531,754 字节的 `release/Lanxi-Glass-R14.exe`。切换时未检测到 R13 进程。首次从临时命令启动后进程退出，随后通过资源管理器启动，独立复核了 R14 的实际进程路径、窗口标题「澜汐」和响应状态。
+- 两次短启动后未检测到持续运行的窗口，Windows 应用错误日志中未发现 R14 崩溃条目。最后通过当前登录用户的交互会话独立启动，确认窗口标题、响应状态与会话 ID。该启动项随程序退出自动注销。
+
 ## 2026-11-19 计算产物回传与断点续传
 
 - 基线 `8f6d6de` 只上报退出码与清单散列。环境为 Windows 11 24H2、Python 3.14.7、SQLite 3.50.4 与 Git 2.56.0.windows.4。测试使用虚构设备、独立 Git 仓库和回环协调服务。任务在独立工作目录生成可复现的 9 MiB 二进制文件及一个零字节文件。上传先落盘 4 MiB，模拟协调中心回包丢失，执行端重启后只上传余下 5 MiB。下载落盘 4 MiB 后模拟中断，复跑只取余下 5 MiB。

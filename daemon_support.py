@@ -9,6 +9,7 @@ class ScopedPolicy:
   if tid not in rpc.owned_threads:return False
   # Permission expansion and file changes without concrete, verifiable payloads remain manual.
   if request.get('method')!='item/commandExecution/requestApproval':return False
+  if p.get('kind','command')!='command' or p.get('networkApprovalContext') is not None:return False
   command=p.get('command');cwd=p.get('cwd')
   if not isinstance(command,str) or not cwd:return False
   directory=Path(cwd).resolve()

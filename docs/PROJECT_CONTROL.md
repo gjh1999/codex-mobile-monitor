@@ -53,7 +53,7 @@ VS Code 在启动完成及工作区根目录变化时更新当前窗口各本地
 
 ## 人工活动与失败恢复
 
-- 加载 `scripts/lanxi-terminal.ps1` 后，在登记目录执行裸命令 `codex`。适配器先上报人工占用，等后台退出原生连接后再启动 CLI。同一项目同时允许一个登记的 CLI 会话和多个 IDE 窗口。CLI 正常退出时会关闭活动记录。
+- 加载 `scripts/lanxi-terminal.ps1` 后，在登记目录执行裸命令 `codex`。适配器先上报人工占用，等后台退出原生连接后再启动 CLI。同一项目同时允许一个登记的 CLI 会话和多个 IDE 窗口。CLI 正常退出时将关闭事件保存到配置目录下的 `.local/ide-close.sqlite3` 并立即上报。断网时保留事件，由后台或下一次登记的终端启动时重发。
 - IDE 上报端用 `POST /api/v1/projects/{project}/activity` 发送 `session`、`source`、`sequence`、`event`。每个窗口与工作区组合使用唯一会话 ID，`source` 为 `vscode` 或 `pycharm`，序号递增，依次使用 `open`、`heartbeat` 和 `close`。多根工作区对各登记项目分别上报。请求头为 `X-Lanxi-Device` 与 `Authorization: Bearer <设备令牌>`。通过命令行上报可用 `coordination_client.py activity vision vscode <会话ID> <序号> <事件>`。
 - 失联 30 秒的窗口显示为 `stale`，仍保留人工占用。确认窗口及其终端实际退出后，从同一设备以更高序号上报 `close`。后台发送结果未知时保留写入记录。协调机可用 `--database <路径> --inspect <项目>` 查询。确认旧后台及相关执行已经退出后，再使用 `--release-confirmed <项目> <版本> <设备> <线程>` 解除对应记录。
 - 设备上报在中心事务中撤销后续自动写入许可。已取得发送许可的请求由旧连接继续核对，终端会等待后台退出。若同一后台连接还持有其他活动任务，也会一并等待。挂起的审批可拒绝，或由操作者暂停旧轮次。

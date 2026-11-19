@@ -218,7 +218,7 @@ class HandoffTests(unittest.TestCase):
 
     def test_staged_terminal_uses_registered_thread_to_claim_project(self):
         self.unpack(self.pack())
-        client = Mock(paths={self.seed: 'alpha'}, threads={})
+        client = Mock(paths={self.seed: 'alpha'}, threads={}, url='http://localhost', device='home')
         client.project_at.return_value = None
         client.event.return_value = {'writer': None}
         with self.assertRaises(ControlDenied) as error:
@@ -231,7 +231,7 @@ class HandoffTests(unittest.TestCase):
         with patch.dict(os.environ, {'CODEX_HOME': str(self.home_b)}), \
                 patch('handoff.resume_context', return_value=receipt), \
                 patch('coordination_client.subprocess.Popen', return_value=Mock(poll=lambda: 0, returncode=0)) as spawn:
-            self.assertEqual(terminal(client, self.dest, ['codex.exe'], resume=True), 0)
+            self.assertEqual(terminal(client, self.dest, ['codex.exe'], resume=True, outbox=self.home_b / 'close.db'), 0)
         self.assertEqual([call.args[-1] for call in client.event.call_args_list], ['open', 'close'])
         self.assertEqual(client.event.call_args.args[0], 'alpha')
         spawn.assert_called_once_with(['codex.exe', 'resume', '--cd', str(self.dest), self.thread], cwd=self.dest)

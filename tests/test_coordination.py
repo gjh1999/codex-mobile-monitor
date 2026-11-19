@@ -113,6 +113,9 @@ class CoordinationTests(unittest.TestCase):
 
         class Device:
             threads = {'thread': 'vision'}
+            url = 'http://localhost'
+            device = name
+            paths = {self.path.parent: 'vision'}
 
             def project_at(self, cwd):
                 return 'vision' if cwd else None
@@ -238,8 +241,34 @@ class CoordinationTests(unittest.TestCase):
 
         with patch('coordination_client.time.sleep', side_effect=drain_and_check_wait), \
              patch('coordination_client.subprocess.Popen', side_effect=start):
-            self.assertEqual(terminal(client, self.path.parent, ['codex']), 0)
+            self.assertEqual(terminal(client, self.path.parent, ['codex'], outbox=self.path.parent / 'close.db'), 0)
         self.assertEqual(self.db.status('vision')['humans'], [])
+
+    def test_next_terminal_replays_offline_close_before_open(self):
+        client = self.device('B')
+        outbox = self.path.parent / 'close.db'
+        report = client.event
+        def offline_on_close(*args):
+            if args[-1] == 'close':
+                raise ControlDenied()
+            return report(*args)
+        child = SimpleNamespace(poll=lambda: 0, returncode=0)
+        with patch('coordination_client.subprocess.Popen', return_value=child):
+            with patch.object(client, 'event', side_effect=offline_on_close):
+                self.assertEqual(terminal(client, self.path.parent, ['codex'], outbox=outbox), 0)
+            self.assertEqual(len(self.db.status('vision')['humans']), 1)
+            self.assertEqual(terminal(client, self.path.parent, ['codex'], outbox=outbox), 0)
+        self.assertEqual(self.db.status('vision')['humans'], [])
+
+    def test_stop_during_project_reservation_prevents_transport_write(self):
+        rpc = self.mock_rpc()
+        permitted = iter([True, False])
+        from rpc_errors import RPCError
+        with self.assertRaises(RPCError):
+            rpc.call('turn/start', {'threadId': 'thread', '_sendGuard': lambda: next(permitted)})
+        self.assertFalse(any(packet['method'] == 'turn/start' for packet in rpc.sent))
+        self.assertTrue(rpc.reconcile_writes(shutdown=True))
+        self.assertIsNone(self.db.status('vision')['writer'])
 
 
 if __name__ == '__main__':

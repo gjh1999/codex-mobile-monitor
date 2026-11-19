@@ -143,11 +143,8 @@ def poll(stop):
        details=value['request'].get('params',{})
        operation=str(details.get('command') or details.get('reason') or value['request'].get('method','权限请求'))
        update(windowsNotification=native.notify('approval:'+token,'Codex：需要你审批',' '.join(operation.split())[:160]+' | 请在桌面软件中核对详情后批准或拒绝'))
-    with journal.lock:
-     replies=journal.db.execute("SELECT thread,turn,item,text FROM replies WHERE kind='agentMessage'").fetchall()
-    for tid,turn,item,reply in replies:
-     excerpt=' '.join(reply.split())[:160]
-     update(windowsNotification=native.notify('reply:'+tid+':'+turn+':'+item,'Codex 回复',excerpt+' | 完整回复保存在 replies.sqlite3'))
+    delivery=journal.notify_replies(native,'Codex 回复',' | 完整回复保存在 replies.sqlite3')
+    if delivery is not None:update(windowsNotification=delivery)
     for result in snapshot().get('schedule',[]):
      if result.startswith(('backoff:','blocked:goal')):
       native.notify(result+':'+str(int(time.time()//3600)),'Codex task waiting',result)
@@ -195,10 +192,7 @@ def poll_claude(stop):
     for a in approvals.public():
      if a.get('client')=='claude' and a['decision'] is None:
       native.notify('approval:'+a['token'],'Claude Code：需要你审批',a['details'].get('reason','请在监控中查看工具申请。'))
-    with claude_journal.lock:
-     replies=claude_journal.db.execute("SELECT thread,turn,item,text FROM replies WHERE kind='agentMessage'").fetchall()
-    for tid,turn,item,reply in replies:
-     native.notify('reply:'+tid+':'+turn+':'+item,'Claude Code 回复',' '.join(reply.split())[:160])
+    claude_journal.notify_replies(native,'Claude Code 回复')
     update(claude={'connection':'connected','updated':int(time.time()),'threads':threads,'controls':controls,'attachments':controls['tasks'],
                    'quota':None,'quotaStatus':'unknown: Claude Code CLI does not expose official quota','schedule':schedule,
                    'capabilities':{'automaticContinue':True},'serviceStatus':'','notification':'local'})

@@ -39,7 +39,7 @@
 
 界面接入的 Codex 任务默认开启“自动推进”，使用固定 3600 秒周期；“关闭自动推进”保留手动控制，“暂停”阻止调度并在有控制权时请求中断。没有 active goal 的 Codex 测试任务不会自动续跑。Claude 自动推进默认关闭，须显式开启；其本地定时记录、revision 去重和发送前预留保存在 `claude-task-control.sqlite3` 的 `auto_progress` 表。首次等待 3600 秒，忙碌、失去控制权或待审批时延后检查；暂停任务不发送，未知送达关闭开关并禁止自动重放。Claude 没有原生 goal 完成接口，完成任务后应手动关闭此开关。
 
-`autoApprovalRules` 每项包含 `threadId`、`cwd` 和完整 `command`。只对本 Codex 连接拥有的任务做精确匹配，目录须位于 `ROOT.parent` 内，并经过命令限制检查。默认没有规则。文件变更、权限扩展和 Claude 工具申请走人工处理。
+`autoApprovalRules` 每项包含 `threadId`、`cwd` 和完整 `command`。只对本 Codex 连接拥有的任务做精确匹配，目录须位于 `ROOT.parent` 内，并经过命令限制检查。规则适用于普通命令审批，旧协议省略 `kind` 时按普通命令处理。带网络上下文的请求、终端输入、强制人工确认和未知类型均交给人工审批。默认没有规则。文件变更、权限扩展和 Claude 工具申请走人工处理。
 
 ## 环境变量
 

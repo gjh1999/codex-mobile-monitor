@@ -1,5 +1,6 @@
 """Persistent task controls; observing a session never grants write access."""
 import json
+import queue
 import re
 import sqlite3
 import threading
@@ -80,6 +81,9 @@ class TaskControl:
             if action in ('pause', 'detach'):
                 self.db.execute("UPDATE operations SET status='cancelled',result='任务已暂停或移出，未发送这条指令。' WHERE thread=? AND action IN ('message','resume') AND status='queued'", (thread,))
             if action == 'detach':
+                self.db.execute('UPDATE targets SET enabled=0 WHERE id=?', (thread,))
+                self.db.execute("UPDATE operations SET status='cancelled',result='任务已移出，已取消接入。' "
+                                "WHERE thread=? AND action IN ('attach','focus') AND status IN ('queued','running')", (thread,))
                 self.db.execute("UPDATE operations SET status='cancelled',result='任务已移出，未修改设置。' "
                                 "WHERE thread=? AND action='codex_settings' AND status='queued'", (thread,))
             if action == 'focus':
@@ -109,13 +113,22 @@ class TaskControl:
         except RPCError:
             return {}
 
-    def _load(self, rpc, tid):
+    def _load(self, rpc, tid, operation=None):
         try:
-            response = rpc.call('thread/resume', {'threadId': tid, 'excludeTurns': True})
+            params = {'threadId': tid, 'excludeTurns': True}
+            if operation is not None:
+                params['_sendGuard'] = lambda: not self._connection_cancelled(operation)
+            response = rpc.call('thread/resume', params)
             thread = response.get('thread', {})
             if thread.get('id') != tid:
                 raise ValueError('后台返回任务标识不一致。')
             rpc.owned_threads.add(tid)
+            journal = getattr(rpc, 'journal', None)
+            if journal and getattr(rpc, 'client_type', 'codex') == 'codex' and (thread.get('status') or {}).get('type') == 'active':
+                try:
+                    journal.track_turn(tid, self._active_turn(rpc, tid))
+                except (RPCError, queue.Empty, TimeoutError):
+                    pass  # Subsequent live events can still identify the turn.
             return dict(threadId=tid, mode='control', status='attached', message='已接入控制，可暂停或发送消息。', canControl=True,
                         threadStatus=thread.get('status'), title=thread.get('name') or thread.get('title'), cwd=thread.get('cwd'),
                         goalStatus=self._goal(rpc, tid).get('status'), retryAt=time.time() + 3600,
@@ -228,9 +241,11 @@ class TaskControl:
 
     def _focus(self, rpc, tid, operation):
         with self.lock:
+            if self._connection_cancelled(operation):
+                return '任务已移出，已取消接入。'
             current = self.runtime.get(tid)
         owned = tid in rpc.owned_threads
-        target = current if owned and current and current.get('canControl') else self._load(rpc, tid)
+        target = current if owned and current and current.get('canControl') else self._load(rpc, tid, operation)
         if not target.get('canControl'):
             raise ValueError(target.get('message') or '任务暂时无法接入。')
         with self.lock:
@@ -238,6 +253,9 @@ class TaskControl:
                 "SELECT 1 FROM operations WHERE action='focus' AND status='queued' "
                 "AND rowid>(SELECT rowid FROM operations WHERE id=?) LIMIT 1", (operation,),
             ).fetchone()
+            if self._connection_cancelled(operation):
+                rpc.owned_threads.discard(tid)
+                return '任务已移出，已取消接入。'
             if newer:
                 if not owned:
                     rpc.owned_threads.discard(tid)
@@ -264,6 +282,10 @@ class TaskControl:
                 rpc.owned_threads.discard(previous)
             self.runtime[tid] = target
         return '已接入当前任务，其他任务已断开。' if others else '已接入当前任务。'
+
+    def _connection_cancelled(self, operation):
+        with self.lock:
+            return self.db.execute("SELECT status='cancelled' FROM operations WHERE id=?", (operation,)).fetchone()[0]
 
     def _perform(self, rpc, tid, action, text, operation):
         is_claude = getattr(rpc, 'client_type', 'codex') == 'claude'
@@ -294,14 +316,25 @@ class TaskControl:
             return '已创建独立测试任务，请选择它发送消息。'
         if action == 'attach':
             update = 'enabled=1' if is_claude else 'enabled=1,managed=excluded.managed'
-            self._execute('INSERT INTO targets(id,enabled,paused,managed) VALUES(?,1,0,?) ON CONFLICT(id) DO UPDATE SET ' + update, (tid, int(not is_claude)))
-            loaded = self._load(rpc, tid)
             with self.lock:
+                if self._connection_cancelled(operation):
+                    return '任务已移出，已取消接入。'
+                self._execute('INSERT INTO targets(id,enabled,paused,managed) VALUES(?,1,0,?) ON CONFLICT(id) DO UPDATE SET ' + update, (tid, int(not is_claude)))
+            loaded = self._load(rpc, tid, operation)
+            with self.lock:
+                if self._connection_cancelled(operation):
+                    rpc.owned_threads.discard(tid)
+                    return '任务已移出，已取消接入。'
                 self.runtime[tid] = loaded
             return loaded['message']
         if action == 'detach':
-            self._execute('UPDATE targets SET enabled=0 WHERE id=?', (tid,))
             with self.lock:
+                # Also settle requests queued by older versions before a restart.
+                with self.db:
+                    self.db.execute('UPDATE targets SET enabled=0 WHERE id=?', (tid,))
+                    self.db.execute("UPDATE operations SET status='cancelled',result='任务已移出，已取消接入。' "
+                                    "WHERE thread=? AND action IN ('attach','focus') AND status='queued' "
+                                    "AND rowid<(SELECT rowid FROM operations WHERE id=?)", (tid, operation))
                 self.runtime.pop(tid, None)
             rpc.owned_threads.discard(tid)
             return '已移出监控；未删除任务，也未中断其当前工作。'
@@ -370,8 +403,7 @@ class TaskControl:
         if not self._send_allowed(tid, operation, action):
             raise ValueError('任务已暂停或移出，没有发送这条指令。')
         params = {'threadId': tid, 'input': [{'type': 'text', 'text': text}], 'clientUserMessageId': operation}
-        if is_claude:
-            params['_sendGuard'] = lambda: self._send_allowed(tid, operation, action)
+        params['_sendGuard'] = lambda: self._send_allowed(tid, operation, action)
         if active:
             params['expectedTurnId'] = active
             rpc.call('turn/steer', params)
@@ -404,7 +436,7 @@ class TaskControl:
             except Exception:
                 result = '操作结果不确定，请核查任务；不会自动重发。'
                 status = 'unknown'
-            self._execute('UPDATE operations SET status=?,result=? WHERE id=?', (status, result, key))
+            self._execute("UPDATE operations SET status=?,result=? WHERE id=? AND status='running'", (status, result, key))
 
     def tick_auto_progress(self, rpc, now=None):
         """Local Claude scheduling, separate from the unchanged manual RPC path.

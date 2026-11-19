@@ -35,6 +35,66 @@ class Tests(unittest.TestCase):
   c.submit(TARGET,'message','do work','send1');c.tick(r)
   self.assertEqual(c.snapshot()['operations'][0]['status'],'failed')
   self.assertNotIn('turn/start',[m for m,p in r.calls])
+ def test_latest_detach_supersedes_queued_and_inflight_connection(self):
+  for action in ('attach','focus'):
+   for inflight in (False,True):
+    with self.subTest(action=action,inflight=inflight):
+     control=self.make();rpc=Mock()
+     control.seed([OTHER]);control.tick(rpc)
+     original=rpc.call
+     def call(method,params):
+      if method=='thread/resume' and params['threadId']==TARGET:
+       control.submit(TARGET,'detach')
+      return original(method,params)
+     key=control.submit(TARGET,action)
+     if inflight:rpc.call=call
+     else:control.submit(TARGET,'detach')
+     control.tick(rpc)
+     self.assertEqual({t['threadId'] for t in control.snapshot()['tasks']},{OTHER})
+     self.assertNotIn(TARGET,rpc.owned_threads)
+     self.assertEqual(next(o['status'] for o in control.snapshot()['operations'] if o['id']==key),'cancelled')
+     rpc.call=original
+     control.submit(TARGET,'attach')
+     control.tick(rpc)
+     self.assertIn(TARGET,rpc.owned_threads)
+
+ def test_late_stop_blocks_codex_start_steer_and_resume(self):
+  for action,active in [('message',False),('message',True),('resume',False)]:
+   for stop in ('pause','detach'):
+    with self.subTest(action=action,active=active,stop=stop):
+     control=self.make();rpc=Mock();rpc.active=active
+     control.seed([TARGET]);control.tick(rpc)
+     original=rpc.call
+     def call(method,params):
+      if method in ('turn/start','turn/steer'):
+       control.submit(TARGET,stop)
+       if not params['_sendGuard']():
+        raise RPCError(detail='stopped')
+      return original(method,params)
+     rpc.call=call
+     key=control.submit(TARGET,action,'continue')
+     control.tick(rpc)
+     self.assertEqual(next(o['status'] for o in control.snapshot()['operations'] if o['id']==key),'failed')
+     self.assertFalse(any(m in ('turn/start','turn/steer') for m,_ in rpc.calls))
+
+ def test_running_turn_remains_readable_after_focus_switch(self):
+  from reply_log import ReplyLog
+  control=self.make();rpc=Mock();rpc.active=True
+  rpc.journal=ReplyLog(':memory:');self.addCleanup(rpc.journal.db.close)
+  control.seed([TARGET]);control.tick(rpc)
+  control.submit(OTHER,'focus');control.tick(rpc)
+  self.assertEqual(rpc.owned_threads,{OTHER})
+  def record(method,**params):
+   return rpc.journal.record({'method':method,'params':{'threadId':TARGET,**params}},rpc.owned_threads)
+  item={'type':'agentMessage','id':'a','text':'final reply'}
+  self.assertTrue(record('item/completed',turnId='turn-1',item=item))
+  self.assertFalse(record('item/completed',turnId='another',item=item))
+  record('turn/completed',turn={'id':'turn-1','status':'completed'})
+  rpc.journal.track_turn(TARGET,'turn-1')
+  self.assertFalse(record('item/completed',turnId='turn-1',item={**item,'id':'late'}))
+  record('turn/started',turn={'id':'unowned'})
+  self.assertFalse(record('item/completed',turnId='unowned',item=item))
+  self.assertEqual(rpc.journal.db.execute('SELECT text FROM replies').fetchall(),[('final reply',)])
  def test_codex_choices_and_settings_are_scoped_to_the_owned_thread(self):
   control=self.make()
   rpc=Mock()

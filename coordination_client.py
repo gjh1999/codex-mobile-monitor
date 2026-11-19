@@ -254,8 +254,9 @@ def device_client(config):
     return ControlClient(config['coordination'], os.environ.get('LANXI_DEVICE_TOKEN')) if 'coordination' in config else None
 
 
-def terminal(client, cwd, args, resume=False):
+def terminal(client, cwd, args, resume=False, *, outbox=None):
     from handoff import install_resume, resume_context
+    from ide_activity import close_queue, enqueue_close, flush_closes
 
     project = client.project_at(cwd) if client else None
     context = resume_context(cwd) if resume and project is None else None
@@ -284,6 +285,9 @@ def terminal(client, cwd, args, resume=False):
 
     if project is None:
         return launch().wait()
+    if outbox is None:
+        outbox = close_queue(Path(__file__).resolve().parent)
+    flush_closes(outbox, client)
     session, sequence = str(uuid.uuid4()), 1
     child = None
     try:
@@ -307,10 +311,8 @@ def terminal(client, cwd, args, resume=False):
         return child.returncode
     finally:
         if child is None or child.poll() is not None:
-            try:
-                client.event(project, session, 'cli', sequence + 1, 'close')
-            except ControlDenied:
-                pass
+            enqueue_close(outbox, client, project, session, 'cli', sequence + 1)
+            flush_closes(outbox, client)
 
 
 def main():
@@ -335,7 +337,8 @@ def main():
             argv = options.args[1:] if options.args[:1] == ['--'] else options.args
             if not argv:
                 parser.error('需要原生 CLI 可执行文件')
-            return terminal(client, options.cwd, argv, options.resume)
+            from ide_activity import close_queue
+            return terminal(client, options.cwd, argv, options.resume, outbox=close_queue(options.config.resolve().parent))
         if client is None:
             raise ValueError('此设备尚未配置协调服务')
         print(json.dumps(client.event(options.project, options.session, options.source,

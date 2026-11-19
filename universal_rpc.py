@@ -103,7 +103,7 @@ class UniversalRPC:
         """Recheck local stop intent after acquiring the transport write lock."""
         with self.write_lock:
             if guard is not None and not guard():
-                raise RPCError(detail='任务已暂停、移出或关闭自动推进，未发送自动指令。')
+                raise RPCError(detail='任务状态已变化，未发送指令。')
             if self.closed:
                 raise ConnectionError('RPC disconnected')
             self.p.stdin.write(json.dumps(x) + '\n')
@@ -177,7 +177,10 @@ class UniversalRPC:
                     code=error.get('code'),
                     detail=str(error.get('message', ''))[:500]
                 )
-            return x.get('result', {})
+            result = x.get('result', {})
+            if method == 'turn/start' and getattr(self, 'journal', None):
+                self.journal.track_turn(params['threadId'], (result.get('turn') or {}).get('id'))
+            return result
         finally:
             with self.lock:
                 self.pending.pop(i, None)
@@ -224,7 +227,7 @@ class CodexRPC(UniversalRPC):
                 if method == 'thread/resume':
                     raise ControlDenied(detail='active writer: ' + error.detail) from error
                 raise
-            return True
+            return previous_guard is None or previous_guard()
 
         confirmed = False
         accepted = False

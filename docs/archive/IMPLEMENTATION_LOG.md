@@ -10,6 +10,27 @@
 - 运行 `python -m unittest discover -s tests -t . -p 'test_*.py' -v`，211 项中 208 项通过，3 项分别因独立目录无本地适配器虚拟环境、DPAPI 用户配置不可用及缺少可选 Stream SDK 跳过，耗时 178.982 秒。合入前端的 Markdown 提交 `36cf30f` 后，专项 29 项再通过，21.553 秒。设 `QT_QPA_PLATFORM=windows` 后运行 `python tests/smoke_desktop.py --output ../integrated-smoke`，10.760 秒通过。输出位于上述目录的 `regression-01.txt`、`integrated-targeted.txt` 和 `integrated-smoke.txt`。
 - 回传只处理成功作业已登记的产物，下载到独立目录，失败和取消依旧保留本机日志。自动按版本写回原工作树、检查点、实际 GPU 探测及物理设备联调待完成。 [回传和下载配置](../PROJECT_CONTROL.md#回传成功作业的文件)
 
+## 2026-11-19 个人版 Python 后端审查
+
+审查基线为 `b3f7e9f`。当时已有的 131 项定向回归通过。下列问题来自对实际调用路径的检查。
+
+| 优先级 | 位置 | 触发条件与后果 |
+|---|---|---|
+| P1 | `ScopedPolicy.allows` | 匹配命令白名单时忽略审批类型和网络上下文，可能自动批准需要人工决定的请求。 |
+| P1 | `TaskControl.submit / _drain` | 同一轮先接入后移出时，优先执行的移出会被旧接入覆盖。 |
+| P1 | `TaskControl._perform` | Codex 手动消息或继续操作等待写锁期间，用户新提交的暂停或移出可能晚于最后一次发送检查。 |
+| P2 | `ReplyLog.record` | 切换任务后旧线程失去控制权，已启动轮次的最终回复也被日志过滤。 |
+| P2 | `coordination_client.terminal` | 子进程结束时遇到断网，关闭事件丢失，协调中心持续保留 CLI 占用。 |
+| P2 | `monitor.poll / poll_claude` | 每轮都读取全部历史助手回复并逐条检查通知去重，轮询成本随历史增长。 |
+
+**修复与复核**
+
+- 实施基线 `d127e44`。普通命令审批同时核对审批类型与网络上下文。两个客户端的任务队列在移出时取消旧接入，执行中的接入也要核对最新意图。Codex 手动消息、插队及继续在传输写锁内复核停止意图，跨机项目在取得写入许可后再检查一次。
+- 回复日志按线程和轮次识别尚未结束的工作，已启动轮次切换后仍可记录回复。CLI 与 IDE 复用持久关闭队列，正常退出先落盘，后台或下次登记的终端启动时补发。两端的回复通知均按每批 64 条处理，旧库首次登记历史回复，实时回复优先，重启沿用既有通知去重键。
+- 环境为 Windows x64、Python 3.14.7、SQLite 3.50.4。使用临时 SQLite、虚构会话、模拟 RPC 和本机回环协调服务。原始结果放在项目的 `build-exe/verification/python-backend-review-20261119/`，以下命令从项目源码根目录执行。
+- `python -B -m unittest -v tests.test_daemon_support tests.test_task_control tests.test_coordination tests.test_handoff tests.test_monitor tests.test_ide_activity tests.test_quota_recovery`。首轮 81 项，79 项通过、1 项失败、1 项跳过，29.247 秒。新增断言误将已接入会话的写入权视为可立即释放，改为验证消息未写出及空闲连接正常退出后释放。第二轮 82 项，81 项通过、1 项跳过，48.069 秒。记录为 `targeted-01.txt` 与 `targeted-02.txt`。增加接入前的传输检查后，`python -B -m unittest -q tests.test_task_control tests.test_auto_progress tests.test_coordination tests.test_daemon_support` 共 49 项通过，5.604 秒，见 `control-final.txt`。
+- 空闲通知轮询使用 2,000 条已通知的合成助手回复，每条正文由 `fixture reply ` 重复 12 次组成。预热后交替执行旧版全表读取及逐条去重、修复版本的空队列读取，各测 5 次。初版中位数分别为 69.683 和 0.100 毫秒。加入历史迁移期间的实时回复优先级后复测，分别为 37.153 和 0.113 毫秒。复现命令为 `python -B -m tests.bench_reply_notifications`，逐次读数见同目录 `idle-01.json`、`idle-02.json`。未控制并行测试负载，耗时仅涵盖本地通知轮询。真实模型收发、物理设备断网、系统弹窗与用户历史库未实测。
+
 ## 2026-11-19 对谈 Markdown 排版
 
 - 基线 `8f6d6de`，Windows 11 x64、Python 3.14.7、PySide6 6.12.0。在现有消息气泡内使用 [Qt Markdown 解析](https://doc.qt.io/qt-6.12/qtextdocument.html#setMarkdown)，复用后台排版和最近会话缓存。用虚构的中英文消息验证标题、加粗、嵌套列表、表格、引用、围栏代码和链接。代码保持缩进并随可用宽度换行。

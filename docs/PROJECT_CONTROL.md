@@ -65,10 +65,59 @@ VS Code 在启动完成及工作区根目录变化时更新当前窗口各本地
 
 在安装 Web 依赖的源码环境中设置 `MONITOR_EMBED_WEB=1` 及既有的 `MONITOR_PASSWORD`，再启动 `desktop_app.py`。托盘、桌面和 Web 共用一个工作进程及其状态。Web 默认监听 `127.0.0.1:8765`，端口可用 `MONITOR_PORT` 修改。桌面退出时一并停止 Web 服务。前端登录后可调用 `GET /api/v1/project-control` 查询各登记项目的版本、后台持有者和人工占用。
 
+## 硬件计算队列
+
+协调中心可用 `--compute` 读取本机管理的项目计算配置。运行配置以名称登记，包含 CPU 核数、内存和单卡显存需求。内存和显存单位为 MiB。设备还需在原有设备文件登记该项目。下面的示例为 `vision` 登记一个 CPU 配置和一个 GPU 配置。
+
+```json
+{
+  "vision": {
+    "workers": {"office": "local", "home": "home"},
+    "profiles": {
+      "render": {"cpu": 2, "memoryMiB": 2048, "vramMiB": 0},
+      "train": {"cpu": 4, "memoryMiB": 8192, "vramMiB": 6144}
+    }
+  }
+}
+```
+
+```powershell
+.\.venv\Scripts\python.exe coordination_server.py --devices '.local\devices.json' `
+  --database '.local\coordination.sqlite3' --compute '.local\compute.json'
+```
+
+提交端沿用设备认证。作业请求提供唯一 UUID `id`、本设备仍在线的前台活动 `session`、登记的 `profile` 和完整 Git 对象 ID `commit`。同一个 UUID 和请求内容重试时返回同一作业。查询可见范围为提交设备和作业当前执行设备。请求只接受这些结构化字段。
+
+```powershell
+.\.venv\Scripts\python.exe compute_client.py --project vision submit --body '.local\submit.json'
+.\.venv\Scripts\python.exe compute_client.py --project vision status '<作业UUID>'
+```
+
+计算端以进程独有的 UUID `instance` 上报 `profiles`、已准备好的 `commits`、可用 `cpu`、`memoryMiB` 和每张卡的 `gpuVramMiB` 数组。中心只选最近 30 秒有心跳、运行配置与提交匹配且资源充足的设备。CPU 作业优先发起设备，GPU 作业优先家庭设备。每台设备跨项目只占用一个计算执行槽。资料齐备的较新作业可以先于尚无合适设备的旧作业领取。
+
+以下接口位于 `/api/v1/projects/{project}/compute/`，可用 `compute_client.py` 的对应子命令和 JSON 文件调用。
+
+| 方法与路径 | 用途 |
+| --- | --- |
+| `POST heartbeat` | 上报执行实例、运行配置、已就绪提交及可用资源。 |
+| `POST claim` | 按 `instance` 领取作业，或取得该实例已有的领取结果。`{"job": null}` 表示暂无可领取作业。 |
+| `POST jobs/{id}/events` | 发送 `instance`、领取凭据 `ticket` 和 `event`。`start` 确认开始，`renew` 延长 30 秒有效期，`finish` 同时提交 `exitCode` 与 `resultSha256`。 |
+
+领取后一直未确认开始的作业，到期可重新分配，旧凭据失效。已开始的作业到期进入 `uncertain`，保留执行槽，原执行实例仍可提交最终结果。重复上传相同完成凭据和结果时返回原完成记录。若原实例已丢失，经中心管理员确认进程确实停止后，可用以下命令释放执行槽，作业进入 `abandoned`。
+
+```powershell
+.\.venv\Scripts\python.exe coordination_server.py --database '.local\coordination.sqlite3' `
+  --confirm-compute-stopped vision '<作业UUID>' 1 home
+```
+
+当前已实现路由、队列和结果回执。家庭端的真实命令执行、日志、取消、检查点以及结果文件校验和回传仍待接入。
+
 ## 复验
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest -v tests.test_ide_activity tests.test_coordination tests.test_web
+.\.venv\Scripts\python.exe -m unittest -v tests.test_compute_queue
+.\.venv\Scripts\python.exe -m tests.bench_compute_queue --output build-exe/verification/compute-queue-repeat
 node --test tests/test_vscode_activity.cjs
 .\.venv\Scripts\python.exe tests/smoke_handoff.py --output build-exe/verification/coordination-input
 .\.venv\Scripts\python.exe tests/smoke_coordination.py --fixture build-exe/verification/coordination-input --output build-exe/verification/coordination-local

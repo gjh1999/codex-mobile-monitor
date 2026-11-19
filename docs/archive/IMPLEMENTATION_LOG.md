@@ -2,6 +2,15 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-19 硬件调度队列与设备选择
+
+- 基线 `fedaeaf` 已有项目协调和设备认证。本轮在原协调数据库增加计算队列、执行心跳和按固定提交的 CPU/GPU 路由。作业以本机前台活动、登记运行配置和完整提交标识提交。环境为 Windows、Python 3.14.7、SQLite 3.50.4。设备、资源和提交均使用合成测试数据。
+- `.\.venv\Scripts\python.exe -m unittest -v tests.test_compute_queue tests.test_coordination` 首轮 14 项通过，1.727 秒。加上已确认停止的作业恢复后，15 项通过，1.916 秒。覆盖项目与设备授权、前台活动、CPU 优先本机、GPU 优先家里、单卡显存、输入提交匹配、并发领取、过期凭据、协调重启和完成回执去重。日志为 `build-exe/verification/compute-queue-targeted-01.txt` 和 `compute-queue-targeted-02.txt`。
+- 专项末轮 16 项通过，2.838 秒。真实 CLI 进程通过本机回环 HTTP 向协调服务提交并查询作业，返回同一个固定提交和作业 ID。输出为 `build-exe/verification/compute-queue-targeted-03.txt`。
+- `.\.venv\Scripts\python.exe -m tests.bench_compute_queue --output build-exe/verification/compute-queue-01`。各测 30 次成功分配和无可领取作业时的轮询。空库的成功领取和空轮询中位数分别为 9.569 和 1.562 毫秒。预填 5,000 条排队及 5,000 条已完成记录时分别为 12.510 和 3.194 毫秒。测试直接调用本机 SQLite 队列，包含事务和写入时间。结果见 `result.json`。未测 HTTP 网络、真实 CPU/GPU 执行时长、并发端到端吞吐及内存。
+- `.\.venv\Scripts\python.exe -m unittest discover -s tests -t . -p 'test_*.py' -v` 全量运行 196 项，195 项通过，1 项可选 Stream SDK 跳过，177.412 秒。输出为 `build-exe/verification/compute-queue-regression-01.txt`。
+- 当前阶段交付队列和执行端协议。家庭执行进程、输入准备、取消与检查点、日志和结果文件校验及交付仍待实现。 [计算队列配置与调用](../PROJECT_CONTROL.md#硬件计算队列)
+
 ## 2026-11-18 必需 LFS 对象纳入交接
 
 - 基线 `7141cd9` 提供独立的 LFS 预取命令。本轮把已提交且登记的 LFS 指针纳入签名交接，接收后按所需对象校验本机就绪状态，缺件时保留预备目录。环境为 Windows、Python 3.14.7 和 Git 2.56.0.windows.4。测试使用生成的 Git 仓库、会话和回环 HTTP 服务。

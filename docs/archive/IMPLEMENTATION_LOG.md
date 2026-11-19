@@ -9,6 +9,13 @@
 - 设 `LANXI_MEASURE_COMPUTE_ARTIFACTS=1` 后运行三次 `python -m unittest -v tests.test_compute_worker.WorkerTests.test_artifacts_resume_upload_and_download_through_the_http_service`。复测也从 CLI 下载入口读取同一结果，并通过改动协调中心测试文件验证同长度数据损坏会被拦截。剩余 5 MiB 上传与完成回执分别用时 107.73、67.50 和 113.11 毫秒，下载与落盘分别为 74.77、66.40 和 38.05 毫秒。复用的 4 MiB 未再次传输。日志为同目录的 `artifact-timing-1.txt` 至 `artifact-timing-3.txt`。旧版没有对应的产物网络传输基线。未测真实网络、并发吞吐、峰值内存或 128 MiB 完整作业。
 - 回传只处理成功作业已登记的产物，下载到独立目录，失败和取消依旧保留本机日志。自动按版本写回原工作树、检查点、实际 GPU 探测及物理设备联调待完成。 [回传和下载配置](../PROJECT_CONTROL.md#回传成功作业的文件)
 
+## 2026-11-19 对谈 Markdown 排版
+
+- 基线 `8f6d6de`，Windows 11 x64、Python 3.14.7、PySide6 6.12.0。在现有消息气泡内使用 [Qt Markdown 解析](https://doc.qt.io/qt-6.12/qtextdocument.html#setMarkdown)，复用后台排版和最近会话缓存。用虚构的中英文消息验证标题、加粗、嵌套列表、表格、引用、围栏代码和链接。代码保持缩进并随可用宽度换行。
+- 在 `build-exe/verification/lanxi-markdown/worktree` 设置 `QT_QPA_PLATFORM=windows`，运行 `python tests/smoke_desktop.py --output ../windows-final`。回归通过，覆盖小窗口无横向滚动、点击网页链接和不触发本地文件链接，原生截图为 `windows-final/markdown-desktop.png`。首轮 `windows-01` 通过，预览只显示上半段内容。随后 `windows-release` 和 `windows-verified` 的旧滑块固定等待断言遇到时序波动，改为等待滑块到达目标。最终截图的代码行连续使用浅蓝底。源码专项 `python -m unittest -q tests.test_codex_desktop tests.test_desktop_projects tests.test_desktop_shutdown tests.test_claude tests.test_web` 共 41 项通过，8.493 秒。开发方案通过 17 个 ID 和 18 个页内链接检查。
+- 设置 `QT_QPA_PLATFORM=offscreen`，运行 `python tests/bench_task_switch.py --output ../baseline`，初版和复测分别以 `../markdown-01` 和 `../markdown-final` 为输出。夹具为每个任务 35 条长回复及固定 140 毫秒读取延时。前两次未缓存切换，基线用时 178.45 和 183.04 毫秒，初版 198.78 和 213.71 毫秒，最终 192.98 和 190.04 毫秒。最近三次缓存切换最终为 8.19、10.39 和 7.88 毫秒，基线为 6.81、10.17 和 9.92 毫秒。三轮的事件循环等待中位数分别为 1.88、2.55 和 1.46 毫秒。首次任务的预加载命中不固定，按相同序号比较未缓存切换。未测真实模型流式输出或用户历史库。
+- 用 PyInstaller 6.22.3 执行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-exe.ps1 -AppName Lanxi-Glass-R16-Markdown`。首包保存在 `package-first`，最终构建约 40.72 秒。交付 `release/Lanxi-Glass-R16-Markdown.exe`，61,534,734 字节，复制前后 SHA-256 一致。运行 `python build-exe/verify-lanxi-launch.py Lanxi-Glass-R16-Markdown.exe`，于 1.63 秒在 `lanxi-folder-package-gvotn0lu` 验证新包启动、原生窗口和 SQLite。
+
 ## 2026-11-19 计算作业远程取消
 
 - 基线 `def5d64`，Windows 11 24H2、Python 3.14.7、SQLite 3.50.4、Git 2.56.0.windows.4。使用临时项目仓库、独立 SQLite 与回环协调服务。合成任务和子进程持续等待，子进程原计划在四秒后落盘；断线与租约到期用测试时钟模拟。取消沿用五秒续租，监督进程每 250 毫秒检查本机取消信号。

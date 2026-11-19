@@ -3,7 +3,11 @@ import re
 from functools import lru_cache
 from html import escape
 
-from PySide6.QtGui import QFont, QFontDatabase, QTextBlockFormat, QTextCursor, QTextOption
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import (
+    QColor, QFont, QFontDatabase, QTextBlockFormat, QTextCharFormat, QTextCursor,
+    QTextDocument, QTextDocumentFragment, QTextFormat, QTextFrameFormat, QTextOption,
+)
 
 PALETTE = {
     'paper': '#f3f6fb', 'surface': '#ffffff', 'ink': '#24344d',
@@ -81,7 +85,8 @@ def format_reading_document(document):
                 selection.setPosition(position)
                 selection.setPosition(position + length, QTextCursor.MoveMode.KeepAnchor)
                 selection.setCharFormat(char_format)
-        fmt.setLineHeight(150, QTextBlockFormat.LineHeightTypes.ProportionalHeight.value)
+        if not fmt.hasProperty(QTextFormat.Property.LineHeight):
+            fmt.setLineHeight(150, QTextBlockFormat.LineHeightTypes.ProportionalHeight.value)
         cursor.setBlockFormat(fmt)
         block = block.next()
 
@@ -91,6 +96,112 @@ def _inline(text):
     content = re.sub(r'`([^`\n]+)`', r'<span style="background:#edf2fa;color:#284e82;font-family:Consolas;">\1</span>', content)
     content = re.sub(r'\*\*([^*\n]+)\*\*', r'<b>\1</b>', content)
     return content.replace('\n', '<br>')
+
+
+def web_link(url):
+    return url.isValid() and url.scheme() in {'https', 'http'} and bool(url.host())
+
+
+def insert_markdown(cursor, text):
+    document = QTextDocument()
+    document.setLayoutEnabled(False)
+    document.setUndoRedoEnabled(False)
+    document.setDefaultFont(cursor.document().defaultFont())
+    features = QTextDocument.MarkdownFeature
+    document.setMarkdown(str(text or ''), features.MarkdownDialectGitHub | features.MarkdownNoHTML)
+    if document.isEmpty():
+        return
+
+    for table in document.rootFrame().childFrames():
+        fmt = table.format().toTableFormat()
+        fmt.setBorder(1)
+        fmt.setBorderBrush(QColor('#bcd9e9'))
+        fmt.setBorderStyle(QTextFrameFormat.BorderStyle.BorderStyle_Solid)
+        fmt.setCellPadding(6)
+        fmt.setBorderCollapse(True)
+        table.setFormat(fmt)
+        for column in range(table.columns()):
+            cell = table.cellAt(0, column)
+            header = cell.format()
+            header.setBackground(QColor('#dfedf6'))
+            cell.setFormat(header)
+
+    image_replacements = []
+    previous_code = False
+    block = document.begin()
+    while block.isValid():
+        line = QTextCursor(block)
+        fmt = block.blockFormat()
+        heading = fmt.headingLevel()
+        code = fmt.nonBreakableLines()
+        quote = fmt.intProperty(QTextFormat.Property.BlockQuoteLevel)
+        if heading:
+            fmt.setTopMargin(9)
+            fmt.setBottomMargin(4)
+        elif code:
+            fmt.setNonBreakableLines(False)
+            fmt.setBackground(QColor('#e4eff7'))
+            fmt.setLeftMargin(8)
+            fmt.setRightMargin(8)
+            fmt.setTopMargin(0 if previous_code else 6)
+            following = block.next()
+            fmt.setBottomMargin(0 if following.isValid() and following.blockFormat().nonBreakableLines() else 6)
+            fmt.setLineHeight(100, QTextBlockFormat.LineHeightTypes.ProportionalHeight.value)
+        elif quote:
+            fmt.setBackground(QColor('#eaf4fa'))
+            fmt.setLeftMargin(12 + 10 * (quote - 1))
+            fmt.setRightMargin(8)
+        elif line.currentTable() is None:
+            fmt.setTopMargin(3)
+            fmt.setBottomMargin(6)
+        line.setBlockFormat(fmt)
+
+        changes = []
+        for item in block:
+            run = item.fragment()
+            char = run.charFormat()
+            if char.isImageFormat():
+                alt = char.stringProperty(QTextFormat.Property.ImageAltText)
+                image_replacements.append((run.position(), run.length(), alt or '图片'))
+                continue
+            if char.isAnchor():
+                if web_link(QUrl(char.anchorHref())):
+                    char.setForeground(QColor('#215b86'))
+                    char.setFontUnderline(True)
+                else:
+                    char.setAnchor(False)
+                    char.setAnchorHref('')
+                    char.clearForeground()
+            if char.fontFamilies() == ['monospace']:
+                char.setFontFamilies(['Cascadia Mono', 'Consolas', 'monospace'])
+                char.setForeground(QColor('#194b66'))
+                char.setFontPointSize(9)
+                if not code:
+                    char.setBackground(QColor('#dfedf6'))
+            elif heading:
+                char.clearProperty(QTextFormat.Property.FontSizeAdjustment)
+                char.setFontPointSize({1: 16, 2: 14}.get(heading, 12))
+                char.setFontWeight(QFont.Weight.Bold)
+                char.setForeground(QColor(PALETTE['heading']))
+            elif quote and not char.isAnchor():
+                char.setForeground(QColor('#365b70'))
+            if char != run.charFormat():
+                changes.append((run.position(), run.length(), char))
+        for position, length, char in changes:
+            line.setPosition(position)
+            line.setPosition(position + length, QTextCursor.MoveMode.KeepAnchor)
+            line.setCharFormat(char)
+        previous_code = code
+        block = block.next()
+
+    for position, length, alt in reversed(image_replacements):
+        image = QTextCursor(document)
+        image.setPosition(position)
+        image.setPosition(position + length, QTextCursor.MoveMode.KeepAnchor)
+        image.insertText(alt, QTextCharFormat())
+    cursor.insertBlock(document.begin().blockFormat(), QTextCharFormat())
+    # Start with its own block so list structure and the author label stay separate.
+    cursor.insertFragment(QTextDocumentFragment(document))
 
 
 def message_html(role, text, assistant):

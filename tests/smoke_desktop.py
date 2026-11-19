@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from PySide6.QtCore import QEvent, QMimeData, QPoint, QPointF, QRect, QTimer, Qt
+from PySide6.QtCore import QEvent, QMimeData, QPoint, QPointF, QRect, QTimer, Qt, QUrl
 from PySide6.QtGui import QEnterEvent, QFontDatabase, QImage, QMouseEvent, QRawFont, QTextCursor, QTextDocument
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog, QFrame, QLabel, QMessageBox, QPushButton
@@ -74,6 +74,49 @@ def wait_until(condition, seconds=2):
         QApplication.processEvents()
         time.sleep(.005)
     return condition()
+
+
+def check_markdown(window, data, output):
+    data['messages'] = [
+        {'role': 'user', 'text': '帮我检查这次构建，把结果列出来。'},
+        {'role': 'assistant', 'text': (
+            '## 构建结果\n\n'
+            '**桌面构建已通过。** 改动集中在 `desktop_qt.py`。\n\n'
+            '1. 复核窗口布局\n'
+            '2. 验证小窗口下的换行\n'
+            '   - 输入区保持可用\n\n'
+            '| 检查项 | 结果 |\n| --- | --- |\n| 桌面界面 | 通过 |\n\n'
+            '~~~powershell\nif ($ready) {\n    .\\scripts\\build-exe.ps1\n}\n~~~\n\n'
+            '> 下一步，打开[构建说明](https://example.org/build)核对发布包。'
+        )},
+        {'role': 'assistant', 'text': (
+            '边界校验 [本地文件](file:///C:/private.txt) ![图片说明](https://example.org/image.png)'
+            ' <b>原生标签</b>'
+        )},
+    ]
+    size = window.size()
+    window.resize(1320, 990)
+    window.message_edit.clear()
+    window.refresh()
+    browser = window.conversation
+    assert wait_until(lambda: '<b>原生标签</b>' in browser.toPlainText())
+    document = browser.document()
+    source = document.toHtml()
+    assert '<h2 ' in source and '<ol ' in source and '<ul ' in source
+    assert 'background-color:#e4eff7' in source and 'background-color:#eaf4fa' in source
+    assert 'bgcolor="#dfedf6"' in source
+    assert '    .\\scripts\\build-exe.ps1' in browser.toPlainText()
+    assert '![图片说明]' not in browser.toPlainText() and '图片说明' in browser.toPlainText()
+    assert '<img ' not in source and 'file:///' not in source
+    assert 'href="https://example.org/build"' in source
+    with patch('desktop_qt.QDesktopServices.openUrl') as open_url:
+        browser.anchorClicked.emit(QUrl('file:///C:/private.txt'))
+        browser.anchorClicked.emit(QUrl('https://example.org/build'))
+        open_url.assert_called_once_with(QUrl('https://example.org/build'))
+    browser.verticalScrollBar().setValue(0)
+    assert browser.horizontalScrollBar().maximum() == 0
+    window.grab().save(str(output / 'markdown-desktop.png'))
+    window.resize(size)
 
 
 def check_edge_menu(window, output):
@@ -262,8 +305,7 @@ def check_notebook(window, output):
         workspace = window.notebook
         assert workspace is not None and workspace.isVisible()
         assert not window.task_workspace.isVisible() and window.client == previous_client
-        QTest.qWait(420)
-        assert switch.position == switch.offsets['notebook']
+        assert wait_until(lambda: switch.position == switch.offsets['notebook'])
         for panel, (position, size) in zip((workspace.list_panel, workspace.editor_panel), positions):
             assert isinstance(panel, FrostedPanel)
             assert (panel.mapTo(window, QPoint()), panel.size()) == (position, size)
@@ -674,7 +716,9 @@ def main():
             assert len(claude.calls) == before + 1
             # Exercise a long reply at the minimum window size. The send button
             # remains in view while conversation and details scroll independently.
-            sample = '已完成 **桌面布局优化**，保留双客户端独立任务。\n\n```python\nprint("中文消息与代码")\n```\n\n' + '继续核对结果。 ' * 100
+            sample = ('已完成 **桌面布局优化**，保留双客户端独立任务。\n\n'
+                      '```python\nprint("中文消息与代码")\n' + 'long_identifier_' * 70 + '\n```\n\n'
+                      + '继续核对结果。 ' * 100)
             assert '&lt;script&gt;' in message_html('Codex', '<script>alert(1)</script>', True)
             data['messages'] = [{'role': 'assistant', 'text': sample}]
             data['events'] = []
@@ -816,7 +860,8 @@ def main():
             check_notebook(window, args.output)
             check_edge_menu(window, args.output)
             check_model_settings(window, args.output)
-            print('Qt smoke passed: glass, rotation, hover/focus, approval, dual-client controls, drafts, rename, failure dialogs, Chinese glyphs, layout and tray.')
+            check_markdown(window, data, args.output)
+            print('Qt smoke passed: Markdown, glass, rotation, hover/focus, approval, dual-client controls, drafts, rename, failure dialogs, Chinese glyphs, layout and tray.')
     finally:
         if window is not None:
             window._quitting = True

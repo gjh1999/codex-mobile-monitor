@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QEasingCurve, QPoint, QPropertyAnimation, QRectF, QSharedMemory, QSignalBlocker, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QCursor, QFont, QIcon, QKeySequence, QPainter, QPainterPath, QPen, QShortcut, QTextDocument
+from PySide6.QtGui import QColor, QCursor, QDesktopServices, QFont, QIcon, QKeySequence, QPainter, QPainterPath, QPen, QShortcut, QTextDocument
 from PySide6.QtWidgets import (
     QApplication, QCompleter, QDialog, QFrame, QGraphicsDropShadowEffect, QGraphicsOpacityEffect,
     QHBoxLayout, QLabel, QLineEdit, QTreeWidget, QTreeWidgetItem,
@@ -29,7 +29,10 @@ from desktop_model_api import ModelApiDialog
 from desktop_notebook import NotebookStore, NotebookWorkspace
 from desktop_poetry import COVER_VERSES
 from desktop_projects import SessionTitles, folder_name, project_group
-from desktop_theme import SLASH_MENU_STYLE, STYLESHEET, configure_text, format_reading_document, message_html, ui_font, warning_html
+from desktop_theme import (
+    SLASH_MENU_STYLE, STYLESHEET, configure_text, format_reading_document, insert_markdown,
+    message_html, ui_font, warning_html, web_link,
+)
 from model_groups import Organizer
 from rpc_errors import RPCError
 
@@ -54,11 +57,14 @@ def load_conversation(key, previous, font, option, width, gui_thread, stop):
         return None
     bubbles = []
     roles = []
+    replies = []
     for message in data.get('messages') or []:
         assistant = message.get('role') == 'assistant'
         role = ('Claude Code' if client == 'claude' else 'Codex') if assistant else '你'
-        bubbles.append(message_html(role, message.get('text', ''), assistant))
+        text = message.get('text', '')
+        bubbles.append(message_html(role, '' if assistant else text, assistant))
         roles.append(assistant)
+        replies.append(text)
     errors = {json.dumps(event, sort_keys=True, ensure_ascii=False) for event in data.get('events') or []
               if isinstance(event.get('status'), dict) and event['status'].get('error')}
     for encoded in sorted(errors):
@@ -70,12 +76,18 @@ def load_conversation(key, previous, font, option, width, gui_thread, stop):
     document.setDefaultFont(font)
     document.setDefaultTextOption(option)
     document.setDocumentMargin(3)
+    document.setIndentWidth(24)
     document.setDefaultStyleSheet('p { margin-top:3px; margin-bottom:8px; }')
     document.setUndoRedoEnabled(False)
     document.setHtml(''.join(bubbles) or '<p style="color:#61738c;">灯下尚无来信。写下第一句吧。</p>')
     # Only the leading tables are messages. Warnings follow them and code
     # tables are children of the corresponding message.
     document.message_frames = tuple(zip(document.rootFrame().childFrames(), roles))
+    for (frame, assistant), text in zip(document.message_frames, replies):
+        if stop.is_set():
+            return None
+        if assistant:
+            insert_markdown(frame.cellAt(0, 0).lastCursorPosition(), text)
     format_reading_document(document)
     document.setTextWidth(width)
     document.setLayoutEnabled(True)
@@ -172,6 +184,15 @@ class ProjectTree(QTreeWidget):
 
 
 class ConversationBrowser(QTextBrowser):
+    def __init__(self):
+        super().__init__()
+        self.setOpenLinks(False)
+        self.anchorClicked.connect(self.open_link)
+
+    def open_link(self, url):
+        if web_link(url):
+            QDesktopServices.openUrl(url)
+
     def paintEvent(self, event):
         document = self.document()
         messages = getattr(document, 'message_frames', ())

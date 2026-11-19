@@ -92,24 +92,24 @@
     <header class="cover"><div class="cover-inner">
       <p class="meta">开发方案 · 2026 年 11 月 19 日</p>
       <h1>跨设备开发工作台<br>商业版架构方案</h1>
-      <p>同一个团队可以一起看进度，每个人都能从自己的设备接着工作。以 5 万人同时在线为设计峰值，Java 承担协作与调度，C++ 用于经测量值得加速的本机计算。</p>
+      <p>工程师可在多台设备并行开发，团队 Leader 在独立评审单上审核工程师提交的代码版本。以 5 万人同时在线为设计峰值，Java 承担协作与调度，C++ 用于经测量值得加速的本机计算。</p>
     </div></header>
     <div class="frame">
       <aside><details id="contents" open><summary>文档目录</summary><p class="nav-group">架构决策</p><nav aria-label="架构决策">
-        <a href="#scope">产品与重构范围</a><a href="#capacity">五万人容量账</a><a href="#architecture">运行架构</a><a href="#tenancy">租户与商业运营</a><a href="#collaboration">多人协作与审批</a><a href="#execution">作业与算力调度</a><a href="#handoff">代码、会话与文件</a><a href="#native">Java 与 C++ 的分工</a><a href="#operations">扩容、容灾与值班</a><a href="#delivery">迁移与上线验收</a>
+        <a href="#scope">产品与重构范围</a><a href="#capacity">五万人容量账</a><a href="#architecture">运行架构</a><a href="#tenancy">工程师与团队 Leader</a><a href="#review">独立代码评审</a><a href="#collaboration">多人协作与审批</a><a href="#execution">作业与算力调度</a><a href="#handoff">代码、会话与文件</a><a href="#native">Java 与 C++ 的分工</a><a href="#operations">扩容、容灾与值班</a><a href="#delivery">迁移与上线验收</a>
       </nav><p class="nav-group">工程实施手册</p><nav aria-label="工程实施手册">
         <a href="#team">团队分工与第一轮迭代</a><a href="#engineering">建工程与开发环境</a><a href="#schema">表结构与租户约束</a><a href="#contracts">接口契约与错误处理</a><a href="#transactions">Java 事务与消息投递</a><a href="#states">执行状态机与断线恢复</a><a href="#client">代理、网页与原生加速器</a><a href="#verification">测试、发布与事故处理</a>
       </nav></details></aside>
       <article aria-label="商业版架构方案">
         <section id="scope">
           <h2>产品与重构范围</h2>
-          <p>商业版采用多租户 SaaS。个人注册后获得私人空间，企业以组织为租户，邀请成员加入项目。公司台式机、笔记本和家庭机都可登记为开发端。企业可以只在自有网络运行代码和 GPU 作业，按项目决定允许上传哪些内容。手机通过同一身份查看进度、暂停任务、处理审批。</p>
+          <p>商业版以团队为协作单位。工程师和团队 Leader 都拥有个人开发空间，可配对多台设备、在多个独立任务中使用 IDE 和 CLI，通过手机查看自己的运行进度和处理工具请求。团队协作通过工程师主动发布的代码评审单进行。以下为待开发设计。</p>
           <div class="tbl"><table><thead><tr><th scope="col">现有基础</th><th scope="col">商业版的迁移决定</th></tr></thead><tbody>
             <tr><th scope="row">Qt、Web 与 IDE</th><td>复用 React/TypeScript 网页、iPhone 布局和 VS Code / PyCharm 项目活动协议。桌面按兼容 API 过渡，再将常驻代理与原生窗口分开交付，Windows 窗口采用 JavaFX，托盘与安装包独立验收。保留 Codex、Claude Code、「吉光片羽」、键盘操作及减弱动态效果。</td></tr>
-            <tr><th scope="row">Python 服务与 SQLite</th><td><code>web_server.py</code> 的个人登录和两秒轮询迁为组织身份、分页读接口和事件订阅。<code>coordination_server.py</code>、<code>task_control.py</code> 的协调语义迁为 Java 事务。中心状态进入 PostgreSQL，设备端 SQLite 继续缓存待传事件和执行回执。</td></tr>
+            <tr><th scope="row">Python 服务与 SQLite</th><td><code>web_server.py</code> 的个人登录和两秒轮询迁为个人身份与团队成员关系、分页读接口和事件订阅。<code>coordination_server.py</code>、<code>task_control.py</code> 的协调语义迁为 Java 事务。中心状态进入 PostgreSQL，设备端 SQLite 继续缓存待传事件和执行回执。</td></tr>
             <tr><th scope="row">代码、会话与算力</th><td>沿用 Git origin、签名交接清单、线程和设备路径映射。现有 <code>compute_queue.py</code> 已有持久化队列、按固定提交匹配 CPU/GPU、并发领取和完成回执去重，可作为迁移对照。原方案的家庭机成为用户授权的执行节点，云端负责选址与审计，项目程序和原生 CLI 在获准节点运行。</td></tr>
           </tbody></table></div>
-          <p class="source">本机跨盘 CLI 往返、回环协调和 LFS 续传已有记录。跨租户隔离、企业计费、Java 服务和下列容量目标属于本方案的待交付内容。开发人员可从团队任务表直接进入实现细节。<a href="DELIVERY_STATUS.md">原方案交付进度</a> · <a href="PROJECT_CONTROL.md">项目控制协议</a> · <a href="WEB.md">现有 Web 接口</a> · <a href="跨设备开发工作台方案.html#design">桌面与移动端体验</a> · <a href="#team">工程实施手册</a></p>
+          <p class="source">本机跨盘 CLI 往返、回环协调和 LFS 续传已有记录。团队及个人工作区隔离、代码评审、Java 服务和下列容量目标属于本方案的待交付内容。开发人员可从团队任务表直接进入实现细节。<a href="DELIVERY_STATUS.md">原方案交付进度</a> · <a href="PROJECT_CONTROL.md">项目控制协议</a> · <a href="WEB.md">现有 Web 接口</a> · <a href="跨设备开发工作台方案.html#design">桌面与移动端体验</a> · <a href="#team">工程实施手册</a></p>
         </section>
         <section id="capacity">
           <h2>五万人同时在线意味着多少负载</h2>
@@ -117,7 +117,7 @@
           <div class="tbl"><table><thead><tr><th scope="col">负载</th><th scope="col">满规模场景的计算口径</th><th scope="col">约束的资源</th></tr></thead><tbody>
             <tr><th scope="row">长连接</th><td>50,000 人 × 1.2 个前台连接 + 15,000 台在线代理 = <strong>75,000 条</strong>。代理每 30 秒心跳一次，均匀摊开约 500 次/秒。</td><td>网关套接字、直接内存、TLS 握手和重连速率。</td></tr>
             <tr><th scope="row">业务 API</th><td>每人平均每 10 秒读一次、每 100 秒写一次，得到 <strong>5,000 读/秒、500 写/秒</strong>。写入含任务提交，设备心跳和事件扇出另计。</td><td>API 实例、缓存命中率、数据库连接池、锁等待。</td></tr>
-            <tr><th scope="row">状态推送</th><td>2,000 条状态事件/秒 × 平均 5 个订阅者 × 1 KiB，约 9.8 MiB/s 净载荷。单个热门任务若有 1 万观察者，每秒更新两次，仅此任务就约 19.5 MiB/s。</td><td>网关出口与慢客户端缓冲。日志、TLS 和重传另计。</td></tr>
+            <tr><th scope="row">状态推送</th><td>2,000 条状态事件/秒 × 平均 5 个订阅者 × 1 KiB，约 9.8 MiB/s 净载荷。单份公开范围内的团队评审摘要若有 1 万个已授权订阅端，每秒更新两次，仅此任务就约 19.5 MiB/s。</td><td>网关出口与慢客户端缓冲。日志、TLS 和重传另计。</td></tr>
             <tr><th scope="row">执行槽位</th><td>假设峰值每秒提交 30 个同规格 CPU 作业，平均执行 30 秒，稳定到达时平均有 900 个在跑。按 70% 目标占用约需 <strong>1,286 个槽位</strong>。GPU 按型号、显存和真实作业时长单独估算。</td><td>槽位按 CPU/内存请求装箱到机器。模型账号额度、排队上限独立核算。</td></tr>
             <tr><th scope="row">大对象传输</th><td>400 台设备在 60 秒内各取 64 MiB，平均约 <strong>427 MiB/s</strong>。另计上传、跨区复制和失败重传。</td><td>对象存储出口、客户网络、租户流量成本。</td></tr>
           </tbody></table></div>
@@ -142,24 +142,39 @@
           <p class="source">JDK 和框架的兼容范围在构建时锁定到补丁版。网关按非阻塞 I/O 设计。<a href="https://www.oracle.com/java/technologies/java-se-support-roadmap.html">Java LTS 路线图</a> · <a href="https://docs.spring.io/spring-boot/system-requirements.html">Spring Boot 系统要求</a> · <a href="https://docs.spring.io/spring-framework/reference/web/webflux/new-framework.html">Spring WebFlux 并发模型</a></p>
         </section>
         <section id="tenancy">
-          <h2>租户、权限与商业运营</h2>
-          <p>组织付费并拥有成员和项目。每个工作区属于一个项目和一个租户，线程、设备授权、审批、归档对象都带相同边界。同一个人可以加入多家公司，每个会话明确当前组织。客户可购买席位、托管并发槽、存储和流量；自有执行节点单独计量。</p>
+          <h2>工程师与团队 Leader 的权限</h2>
+          <p>本期有两种产品身份。每位成员都有自己的开发工作区；担任 Leader 的成员另有本团队授权项目的代码评审入口。下文的 <code>tenant_id</code> 是团队的数据隔离标识，同一成员在不同团队分别授权。公司层待定，不进入本期数据模型、接口、页面和验收。</p>
+          <div class="tbl"><table><thead><tr><th scope="col">操作对象</th><th scope="col">工程师</th><th scope="col">团队 Leader</th></tr></thead><tbody>
+            <tr><th scope="row">我的开发</th><td>创建多个任务，配对多台设备，编辑自己的工作树、续接对话、发指令、暂停任务、批准自己的工具请求。</td><td>在自己的设备和工作区享有相同能力。担任多个项目的评审人也只使用自己的开发身份。</td></tr>
+            <tr><th scope="row">其他成员的开发环境</th><td>个人对话、草稿、终端、未提交文件、凭证、设备和私有任务仅其所有者可访问。</td><td>同样受所有者约束。界面和 API 均阻止查看或写入成员对话、代批工具、远程执行、接管、暂停或恢复他人任务。</td></tr>
+            <tr><th scope="row">已提交的代码评审</th><td>为自己的变更选定提交版本，发布评审单，在单内讨论、回应意见和提交修订。</td><td>查看授权项目评审单的差异和已发布的检查摘要，逐行评论、要求修改或批准该版本。自己作为作者时走提交人的流程。</td></tr>
+          </tbody></table></div>
           <ul>
-            <li><strong>成员与设备分别认证。</strong> 用户经 OIDC 登录，企业可接自己的身份提供商。浏览器使用短期会话与写请求防伪保护。设备通过一次性配对换取可轮换的设备身份，限定租户、项目和执行能力。客户的模型登录及 Git 凭据保存在其授权执行端。</li>
-            <li><strong>按操作授权。</strong> 观察者可看授予的任务，开发者可提交和操作自己的工作区，审批者按项目和风险范围决定，组织管理员管理成员和套餐。私人会话默认只对所有者可见，成员加入共享项目不自动获得他人的原始对话。</li>
-            <li><strong>每一层都带租户上下文。</strong> 服务从已验证身份导出租户，复核项目成员关系；数据库用复合外键和行级安全策略，连接池在每个事务设置租户，应用角色受策略约束。缓存键、队列消息、对象前缀、检索索引与订阅鉴权采用同一范围。成员离职时撤销会话和设备授权、关闭相关订阅，后续读取再查权限。<a href="https://www.postgresql.org/docs/current/ddl-rowsecurity.html">PostgreSQL 行级安全</a></li>
-            <li><strong>从用量到账单。</strong> 套餐服务管理席位上限与执行并发；提交时原子预留预算，完成后按事件 ID 结算实际执行秒数、存储字节时和出口字节。取消释放预留，结果未知时暂挂对账。账单保留价格版本、账期、调整记录，客户可以按项目导出明细。第三方模型只展示有来源的额度和 token。</li>
-            <li><strong>可运维、可退出。</strong> 自助完成组织创建、成员邀请、设备配对和第一条任务；企业可选专用部署单元和自有对象存储。项目配置保存区域、允许上传的数据类别和保留期。退租流程支持授权导出、撤销凭证、清理在线数据及索引，并记录备份到期日。客服访问须限时授权并留审计记录。</li>
+            <li><strong>成员与设备分别认证。</strong> 登录后选择团队，服务端验证有效成员关系。浏览器使用短期会话与写请求防伪保护。一次性配对将设备绑定到本人，设备指令同时检查所有者、团队、工作区、任务和执行能力。模型登录及 Git 凭据保存在授权执行端。</li>
+            <li><strong>开发与评审分别授权。</strong> 个人资源要求当前成员是资源所有者；作出评审结论要求当前成员是该单所属团队和项目的有效 Leader，并校验当前评审版本。服务端分别记录评审决定和设备工具决定。Leader 名称、他人资源 ID 或浏览器当前页面都不能替代授权检查。</li>
+            <li><strong>每一层都带租户上下文。</strong> 服务从已验证身份导出租户，复核项目成员关系；数据库用复合外键和行级安全策略，连接池在每个事务设置租户，应用角色受策略约束。缓存键、队列消息、对象前缀、检索索引与订阅鉴权采用同一范围。成员离开团队时撤销该团队上下文的会话和设备授权、关闭相关订阅，后续读取再查权限。<a href="https://www.postgresql.org/docs/current/ddl-rowsecurity.html">PostgreSQL 行级安全</a></li>
+            <li><strong>用量与可见性。</strong> 服务按团队配额接单，作业结束后按事件 ID 结算执行秒数、存储和流量。成员可看自己的明细；运行成本按团队汇总，汇总项不含会话正文、命令和文件路径。运维排障用脱敏回执。个人日报、搜索、导出、移动推送和对象下载逐次遵循同一资源边界。</li>
           </ul>
+        </section>
+        <section id="review">
+          <h2>从个人开发到代码评审</h2>
+          <p>小林在笔记本改登录逻辑，同时让台式机运行测试、让计算节点在独立工作树上构建另一个任务。Leader 小周在自己的工作区修复另一个问题。小林只把登录改动送审，小周在评审页看到这次提交的差异；测试和构建继续运行，两个人的对话互相独立。</p>
+          <ol>
+            <li><strong>工程师选择送审内容。</strong> 在“我的开发”选择项目、目标分支、基线提交和待审提交，预览差异及自选测试摘要。服务确认作者和仓库范围，生成带版本的评审单。评审材料采用字段白名单，仅发布提交说明、代码差异和选定的检查结果。个人交接包内含原生会话，禁止用它生成评审附件或下载地址。</li>
+            <li><strong>Leader 在“代码评审”处理。</strong> 评论绑定评审单、修订号、文件和行，决定为要求修改或批准。工程师收到链接到评审单的通知，自己选择如何修改。评审服务只写评审记录及通知，评审事件没有投递到 CLI 对话、终端、设备指令队列或工具审批的路由。</li>
+            <li><strong>工程师提交下一版。</strong> 新的待审提交产生新修订，旧评论保存原上下文，旧批准只对旧修订有效。更新与批准并发时，事务核对修订号及基线、待审提交；迟到的操作返回 409 并提示刷新。评审通过仅生成审计记录，仓库合并由仓库原有分支权限和检查决定。</li>
+            <li><strong>Leader 也可以开发。</strong> 如需亲自验证，Leader 可在有仓库读取权限时，将已发布的提交检出到自己的工作区，用自己的设备、凭据和任务运行。若要贡献修改，以自己的身份提交独立变更。自己的变更保留作者身份并单列自测结果；是否需要独立批准人遵循项目现有的仓库评审规则。</li>
+          </ol>
+          <p class="note"><strong>前端交付两个入口。</strong> “我的开发”按本人列出设备、任务、线程和执行审批；“代码评审”按项目列出送审版本、差异、讨论和决定。两端各自拥有搜索、订阅、下载授权与缓存。评审页上可直接回应代码意见，个人会话仅在作者自己的开发入口可见。</p>
         </section>
         <section id="collaboration">
           <h2>同一项目，谁可以写</h2>
-          <p>甲、乙可以同时打开同一个项目，各自在独立 Git 工作树和线程开发；丙在 iPhone 查看两人的共享任务。甲把自己的线程从笔记本交给台式机时，只转移这条线程和对应工作区的写入权。项目级夜间自动化仍遵从原方案的人工优先规则。</p>
+          <p>每个私有任务记录所有者、工作区、线程和执行设备。甲可在笔记本跑任务 A、在台式机跑任务 B；需要并行改同一仓库时给可写任务分配独立 Git 工作树。只读测试可以共享已封存的输入。甲把 A 转到另一台已配对设备时，B 和同事乙的任务继续运行。</p>
           <div class="tbl"><table><thead><tr><th scope="col">同时发生的事</th><th scope="col">控制规则与用户可见结果</th></tr></thead><tbody>
-            <tr><th scope="row">两人接管同一线程</th><td>中心事务按租户、线程和目标工作区锁定写入记录，发出递增代号。设备在发送命令、批准工具和发布结果前核对有效代号与本机原生锁。竞争失败方收到 HTTP 409、当前持有者和刷新入口，可继续观察或申请交接。</td></tr>
+            <tr><th scope="row">本人两台设备接续同一线程</th><td>先校验任务所有者及两台设备的绑定，再按租户、所有者、线程和目标工作区锁定写入记录，发出递增代号。设备在发送命令、批准工具和发布结果前核对有效代号与本机原生锁。同一所有者的竞争端收到 409 和刷新入口；他人请求在取锁前按不可见资源处理。</td></tr>
             <tr><th scope="row">手机和桌面同时批准</th><td>审批绑定原执行连接、请求 ID、实际命令、目录、设备和有效期。条件更新将 pending 改为 decided，只接受一次决定；相同幂等键返回第一次结果。代理只在原请求存活时发回执，确认前界面显示“已决定，等待执行端确认”。</td></tr>
-            <tr><th scope="row">IDE 打开时自动任务在跑</th><td>按项目登记的 IDE / 人工 CLI 活动立即阻止新的后台推进和自动审批。已有动作到安全点后交还，前台发起的作业继续。最后一个窗口退出后核对所有设备、未决指令及原生进程，再恢复夜间策略。失联的持有者进入待核对状态。</td></tr>
-            <tr><th scope="row">离线重连或热门任务</th><td>共享任务事件按资源生成单调序号，订阅带最后已确认序号；缺页或超过保留期时读授权快照再接增量。网关定时比较高水位，合并进度和日志推送，给每连接设字节上限。慢客户端可重连补读，审批、终态和审计从持久记录恢复。</td></tr>
+            <tr><th scope="row">IDE 打开时自动任务在跑</th><td>按团队、所有者和工作树登记 IDE / 人工 CLI 活动，阻止对应工作树的新自动推进及工具批准。已有动作到安全点后交还，前台发起的作业继续。最后一个窗口退出后核对该工作区绑定的设备、未决指令及原生进程，再恢复夜间策略。失联的持有者进入待核对状态。</td></tr>
+            <tr><th scope="row">离线重连或热门任务</th><td>私有任务流与评审单流分别按资源生成单调序号，订阅带最后已确认序号；缺页或超过保留期时读授权快照再接增量。网关定时比较高水位，合并进度和日志推送，给每连接设字节上限。慢客户端可重连补读，审批、终态和审计从持久记录恢复。</td></tr>
           </tbody></table></div>
           <p>长期、短期和探索性任务分别保留跨天检查点、截止条件和独立工作区。夜间按用户时区和租户策略执行，所用命令、真实路径、环境权限与预算都需匹配有效授权。主动暂停或人工介入时停发新动作，效果未知的旧操作保留待核对。</p>
         </section>
@@ -169,7 +184,7 @@
             <li><strong>接单。</strong> 客户端提交幂等键、工作区和输入快照版本。API 在同一事务写任务、预算预留和待发事件（outbox），提交后返回 <code>202</code> 与任务 ID。同一租户、项目、提交用户下，同键同载荷复用回执，同键不同载荷报冲突。</li>
             <li><strong>排队。</strong> 转发进程把 outbox 发到持久队列，收到发布确认且消息有路由后标记已发。消费者在数据库提交状态后确认消息，重复投递按事件 ID 去重。交互控制与批量计算使用独立队列；按租户配额和加权轮转分配，预留暂停、审批与取消的处理能力。<a href="https://www.rabbitmq.com/docs/confirms">RabbitMQ 发布与消费确认</a></li>
             <li><strong>选节点。</strong> 调度器匹配租户授权、地域、快照位置、环境、可用内存、GPU 型号和显存，在合适的节点间比较传输、等待与预计运行时间。代理主动连接并领取分配；中心以条件更新原子占用槽位、记录本次尝试和执行代号。设备在启动前把指令 ID 写入本机日志。</li>
-            <li><strong>执行与取消。</strong> 企业自有设备只接受获准租户的项目。托管共享机器按任务使用独立的隔离运行环境，区分文件、进程、凭证与网络权限，设置资源上限；互不信任的客户代码使用隔离虚拟机。取消请求持久化，代理终止对应进程树并确认后释放槽位。</li>
+            <li><strong>执行与取消。</strong> 个人设备仅接受本人已授权任务，受托执行节点只取得本次任务所需的隔离输入。托管共享机器按任务使用独立的隔离运行环境，区分文件、进程、凭证与网络权限，设置资源上限；互不信任的客户代码使用隔离虚拟机。取消请求持久化，代理终止对应进程树并确认后释放槽位。</li>
             <li><strong>交付与对账。</strong> 结果先上传临时对象，校验后按任务、尝试和执行代号发布唯一终态。代理掉线后先查本机日志及既有回执。纯计算可按同一输入重新运行；部署、发布等有外部副作用的操作，仅在外部幂等键或执行证据可核实时重试。证据不足则标记“结果待核对”，值班人和用户均可追溯。</li>
           </ol>
           <p class="note">账号额度耗尽时，只暂停使用该凭据的相关任务。项目达到预算、执行槽满、上传限流分别显示原因和预计重试条件。CPU 队列增长时扩 CPU 执行池，GPU 满载时排队或转到获准的同型号设备。</p>
@@ -180,9 +195,9 @@
           <h2>代码、会话与大文件如何交接</h2>
           <p>切换设备时，源端在已完成轮次封存 Git 基线、未推送对象、暂存层、工作树改动、获准新增文件、线程标识和路径映射。每个用户保有自己的工作副本。多人修改通过独立工作树、分支和合并请求汇合；发生同处冲突时保留双方版本供人工解决。</p>
           <ul>
-            <li><strong>API 签清单，设备传字节。</strong> 控制服务按租户、对象、操作和有效期签发短时上传授权。客户端分片直传到本次上传独有的临时对象，记录校验和及分片回执。服务端核对大小、哈希、权限和对象版本后，在事务内发布不可变清单。下载按清单再次授权，跨租户隔离内容寻址和去重。<a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-presigned-url.html">S3 限时对象授权</a></li>
+            <li><strong>API 签清单，设备传字节。</strong> 控制服务按团队、资源类型、所有者或评审访问权、对象、操作和有效期签发短时授权。客户端分片直传到本次上传独有的临时对象，记录校验和及分片回执。服务端核对大小、哈希、权限和对象版本后，在事务内发布不可变清单。下载按清单再次授权，按团队与资源可见范围隔离对象定位和下载授权。<a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-presigned-url.html">S3 限时对象授权</a></li>
             <li><strong>桌面在空闲时应用。</strong> 目标机先在暂存区校验签名及所有必需 LFS 对象，再核对工作区、IDE 和原生线程锁，原子切换并落本机回执。离线修改先封存，冲突保全。设备在新盘符下由终端适配器续接已经验证兼容的原生 CLI。Claude 的可恢复能力按独立兼容矩阵开放。</li>
-            <li><strong>企业数据留在哪里由项目决定。</strong> 获准上云的对象进入租户所属区域；限定内网的源码和原始会话留在客户执行端或其专有存储，云端仅接收获准元数据。LFS 缓存设容量水位，迁移依次复制、验哈希、切引用、清旧版，设置冷备和恢复演练。</li>
+            <li><strong>项目设置可用存储区域与数据类别。</strong> 获准上云的对象进入租户所属区域；限定内网的源码和原始会话留在客户执行端或其专有存储，云端仅接收获准元数据。LFS 缓存设容量水位，迁移依次复制、验哈希、切引用、清旧版，设置冷备和恢复演练。</li>
             <li><strong>日报与记忆异步生成。</strong> 每个用户按本地日期生成一份日报，输入仅来自有权查看的事件。线程与轮次去重计量，跨设备活跃区间求并集，执行与排队时长分别汇总。晚到事件更新原日报；按项目归档决策、探索和原文引用，检索及打开来源时复核当前权限。扩展接入使用带版本的事件，支持回放重建。</li>
           </ul>
           <p class="source"><a href="HANDOFF.md">现有交接包、原路径应用与 LFS 兼容边界</a> · <a href="跨设备开发工作台方案.html#memory">原方案的项目长期记忆</a></p>
@@ -214,28 +229,28 @@
         <section id="delivery">
           <h2>如何从现有版本迁到商业版</h2>
           <div class="tbl"><table><thead><tr><th scope="col">交付阶段</th><th scope="col">完成条件与回退点</th></tr></thead><tbody>
-            <tr><th scope="row">一 · 契约与只读影子</th><td>固定当前 Web、设备活动、线程控制和签名交接格式，抽取脱敏样本。Java 导入时把原个人数据显式映射到所有者、租户和项目，保存原 ID 对照。影子实例仅比对读结果、事件顺序、哈希及权限；Python 继续独占真实写端。</td></tr>
-            <tr><th scope="row">二 · 首个商用闭环</th><td>上线组织、邀请、项目、设备配对、一次提交、双端审批、审计和按租户计量。先试点再按租户切换，切前停止旧写端、排空未决命令、记录水位，换发新代号。回滚时先停新写端，导回新增记录并核对回执再恢复旧端；旧端无法表达的新功能停写并向前修复。</td></tr>
+            <tr><th scope="row">一 · 契约与只读影子</th><td>固定当前 Web、设备活动、线程控制和签名交接格式，抽取脱敏样本。Java 导入时把原个人数据显式映射到所有者、团队和工作区，保存原 ID 对照。缺少可靠所有者的历史记录进入隔离清单，仅在核实后对本人开放。影子实例仅比对读结果、事件顺序、哈希及权限；Python 继续独占真实写端。</td></tr>
+            <tr><th scope="row">二 · 首个商用闭环</th><td>上线团队成员身份、本人多设备任务、独立代码评审、工具审批、审计及基础用量计量。先试点再按租户切换，切前停止旧写端、排空未决命令、记录水位，换发新代号。回滚时先停新写端，导回新增记录并核对回执再恢复旧端；旧端无法表达的新功能停写并向前修复。</td></tr>
             <tr><th scope="row">三 · 跨设备与执行</th><td>Java 代理在两台物理 Windows 机和两个真实 IDE 续接同一线程；验证多人独立工作树、冲突保全、Claude 能力范围、GPU 定向、夜间人工接管。用真实 iPhone Safari 在 VPN、Wi-Fi 和蜂窝下核对审批、后台恢复与可访问性。核对日报、项目记忆、套餐超额、退租导出及删除。</td></tr>
             <tr><th scope="row">四 · 商用放量</th><td>依次通过 1 千、1 万、5 万人在线混合压测及故障演练。交付仪表板、告警路由、恢复手册、版本兼容矩阵和可回退安装包。C++ 加速器独立灰度，可按设备或租户关闭。</td></tr>
           </tbody></table></div>
           <h3>放量前的验收表</h3>
           <ul>
             <li><strong>体验与容量。</strong> 用独立压测机产生前述 HTTP、WebSocket、心跳与作业负载，数据含大量小租户和一个占 20% 流量的租户。每档预热后稳态至少 60 分钟，另做 24 小时稳定性测试。建议区域内服务端 P95 读 ≤ 200 ms、写入受理 ≤ 300 ms，P99 分别 ≤ 500 / 800 ms；在线状态从提交至前台可见 P95 ≤ 1 秒。记录实际到达率、错误率、积压与资源余量。任务完成时间按 CPU、GPU 和外部模型分别统计。</li>
-            <li><strong>可靠性与公平。</strong> 模拟 20% 连接在 60 秒内重连、万人观看同一任务、400 台并行下载、队列重复投递、代理接单后断电及一个故障区退出。验收要求无跨租户读取、无双重审批、无重复结算，未决副作用可查证；受配额保护的其他租户在热点期间仍达到上述交互延迟目标。</li>
+            <li><strong>可靠性与公平。</strong> 模拟 20% 连接在 60 秒内重连、万个获准连接订阅同一评审摘要、400 台并行下载、队列重复投递、代理接单后断电及一个故障区退出。验收要求无跨租户读取、无双重审批、无重复结算，未决副作用可查证；受配额保护的其他租户在热点期间仍达到上述交互延迟目标。</li>
             <li><strong>可核对的交付。</strong> 固定机器、代理和 CLI 版本、网络、输入、保留策略与队列设置。每阶段保存负载脚本、原始分位数、错误样本、计费对账和故障恢复时间，将未达标项记入项目实验记录。用试点的在线率、事件大小、任务时长和账单反算下一档部署规模。</li>
           </ul>
-          <p class="source">首版开发按“组织登录 → 配对一台设备 → 提交一个任务 → 两端审批 → 查看回执与用量”贯通全链路。原有七项功能里程碑继续作为兼容验收依据。<a href="跨设备开发工作台方案.html#delivery">原方案验收清单</a> · <a href="archive/IMPLEMENTATION_LOG.md">项目实施与验收记录</a></p>
+          <p class="source">首版开发按“成员登录 → 两台设备并行跑两个私有任务 → 送审其中一个提交 → Leader 请求修改 → 工程师提交新版 → Leader 批准”贯通全链路。原有七项功能里程碑继续作为兼容验收依据。<a href="跨设备开发工作台方案.html#delivery">原方案验收清单</a> · <a href="archive/IMPLEMENTATION_LOG.md">项目实施与验收记录</a></p>
         </section>
         <section id="team">
           <h2>团队分工与第一轮迭代</h2>
-          <p>负责人先带队完成一条可演示的链路。甲、乙分别属于两家公司。甲在桌面提交项目的测试作业，执行端发起一个待审批的工具请求，甲用手机批准，设备回传退出码，账单出现一条用量记录。乙从列表、直链、订阅和下载入口均无法得知这个作业。实现这条链路后，各小组沿同样的契约扩展功能。</p>
+          <p>首轮演示用同一团队的工程师甲和 Leader 乙，加一位外团队 Leader 丙。甲在两台设备并行跑两个任务，只发布一个代码版本。乙在自己的工作区开发，并从评审入口要求修改、批准新版。乙直接请求甲的对话、工具批准或设备时被拒绝；丙也无法读取该评审单。甲自己的工具批准、退出码和用量回执可以独立核对。</p>
           <div class="tbl"><table><thead><tr><th scope="col">负责人 / 顺序</th><th scope="col">领取的任务与输入</th><th scope="col">提交评审时演示什么</th></tr></thead><tbody>
             <tr><th scope="row">技术负责人 · 先行</th><td>确认负载口径、租户边界、资源 ID、状态机、错误码、可重试操作和旧端兼容范围。与负责数据库、代理的工程师一起走读“执行后丢回执”。</td><td>签入接口示例、权限矩阵和状态迁移表。对是否允许自动重跑外部副作用作出书面决定。</td></tr>
-            <tr><th scope="row">后端 A · 第一批</th><td>搭 Maven 工程、迁移脚本、开发租户与角色；实现带租户限制的项目列表和任务查询。使用开发身份提供商签发测试令牌。</td><td>新数据库从零迁移成功；两家公司项目同名且拥有相同资源号时，访问结果仍隔离。给前端可导入的契约。</td></tr>
-            <tr><th scope="row">后端 B · 契约冻结后</th><td>在 A 的表约束上实现提交事务、预算预留、outbox 和审批比较更新。先用假执行端收取已提交任务。</td><td>两个 API 进程同时处理同一个请求，只建一个任务；杀掉转发进程再启动，仍能收到待发事件。</td></tr>
+            <tr><th scope="row">后端 A · 第一批</th><td>搭 Maven 工程、迁移脚本、开发租户与角色；实现带租户限制的项目列表和任务查询。使用开发身份提供商签发测试令牌。</td><td>新数据库从零迁移成功；两个团队项目同名且拥有相同资源号时，访问结果仍隔离。给前端可导入的契约。</td></tr>
+            <tr><th scope="row">后端 B · 契约冻结后</th><td>在 A 的表约束上实现提交事务、预算预留、outbox、工具批准和代码评审的独立写入路径。先用假执行端收取已提交任务。</td><td>两个 API 进程同时处理同一个请求，只建一个任务；杀掉转发进程再启动，仍能收到待发事件。</td></tr>
             <tr><th scope="row">代理工程师 · 与后端并行</th><td>实现设备配对、本机回执日志、一个固定的测试运行配置和合成输入。按契约发送“启动、退出、交付”。</td><td>主动出站连接；断网前已运行过的指令可查。用旧版交接夹具核对文件、暂存状态、线程和盘符映射。</td></tr>
-            <tr><th scope="row">前端工程师 · 与代理并行</th><td>沿用 React 页面，用契约样例实现登录、提交、审批、观察和重连。给“已受理、等待设备、结果待核对”三个状态分别准备界面。</td><td>手机与桌面争抢同一审批时，两端最终显示同一决定；权限撤回后关闭订阅并清除项目缓存。</td></tr>
+            <tr><th scope="row">前端工程师 · 与代理并行</th><td>沿用 React 页面，用契约样例实现登录、提交、审批、观察和重连。分开“我的开发”和“代码评审”的路由与缓存，为受理、等待设备和结果待核对分别准备界面。</td><td>手机与桌面争抢同一审批时，两端最终显示同一决定；权限撤回后关闭订阅并清除项目缓存。</td></tr>
             <tr><th scope="row">测试 / 平台 · 从第一批开始</th><td>准备两个租户、三台虚构设备、可控制回执时序的代理和独立压测机。为每个故障点提供可重复触发的测试钩子。</td><td>提交故障矩阵、压测输入与可追踪的一笔账。用全新环境完成构建、迁移、运行、回滚和数据核对。</td></tr>
           </tbody></table></div>
           <p><strong>合并顺序。</strong> 先合并契约与夹具，再合并数据库约束、带鉴权的只读接口、任务提交、执行回执，最后接真实设备与页面。每个变更单只跨一个可演示的业务步骤。跨租户授权、预算扣减、审批状态、数据迁移、C++ 资源边界由负责人会同对应模块维护人审查。发现“可能重复执行且不可核对”的路径，先默认进入待核对，再决定如何自动恢复。</p>
@@ -246,7 +261,7 @@
           <pre><code>commercial/
   pom.xml, mvnw, mvnw.cmd       构建入口和锁定版本的 wrapper
   contracts/                   OpenAPI、设备事件 JSON Schema、请求与回执样本
-  control-api/                 identity、project、job、approval、billing、handoff
+  control-api/                 identity、workspace、project、job、tool-approval、code-review、billing、handoff
   realtime-gateway/            连接、授权订阅、发送缓冲、断线补读
   worker/                      outbox、调度、对账、报告消费者的运行入口
   device-agent/                配对、本机 SQLite、CLI 适配、受管进程
@@ -256,7 +271,7 @@
           <ol>
             <li><strong>准备依赖。</strong> 用 JDK 25 和 Maven Wrapper 固定构建；Spring Boot BOM 管理应用依赖。Compose 提供 PostgreSQL、RabbitMQ、Redis、S3 兼容存储、开发 OIDC 服务。迁移用 Flyway；应用和迁移工具分用低权限账号及表所有者。生产凭据从密钥管理服务注入。</li>
             <li><strong>写第一条接口。</strong> 在 <code>job</code> 包中放 <code>JobController</code>、<code>JobApplicationService</code>、<code>JobRepository</code>。控制器解析 DTO、身份及响应码，应用服务完成授权和事务，仓储持有参数化 SQL。接口层接收资源 ID，服务端按可信身份解析租户；网关、后台消费者也经同样的授权入口。</li>
-            <li><strong>本机走通。</strong> 骨架完成后，在 <code>commercial</code> 中依次使用下列命令。种子数据提供两个组织、各自的开发者、一个审批者和离线代理。首次演示用确定性测试命令和一份只读快照；CI 保存构建日志和集成测试报告。</li>
+            <li><strong>本机走通。</strong> 骨架完成后，在 <code>commercial</code> 中依次使用下列命令。种子数据提供两个团队、同团队的工程师和 Leader、外团队 Leader，以及绑定到不同成员的设备。首次演示用确定性测试命令和一份只读快照；CI 保存构建日志和集成测试报告。</li>
           </ol>
           <pre><code>docker compose -f dev/compose.yaml up -d --wait
 .\mvnw.cmd install
@@ -265,10 +280,12 @@
         </section>
         <section id="schema">
           <h2>先让数据库守住租户和唯一性</h2>
-          <p>下表规定首批核心对象。<code>tenant_id</code> 来自认证上下文，所有时间按 UTC 保存；显示日报时才转用户时区。资源使用稳定 UUID。表间依赖用含租户的复合外键，保证即使应用参数传错也无法把甲公司的任务挂到乙公司的快照上。</p>
+          <p>下表规定首批核心对象。<code>tenant_id</code> 来自认证上下文，所有时间按 UTC 保存；显示日报时才转用户时区。资源使用稳定 UUID。表间依赖用含租户的复合外键，保证即使应用参数传错也无法把一个团队的任务挂到另一个团队的快照上；在团队内再通过所有者和工作区复合键隔离不同成员的输入。</p>
           <div class="tbl"><table><thead><tr><th scope="col">表或表组</th><th scope="col">必须实现的键、约束与用途</th></tr></thead><tbody>
-            <tr><th scope="row">project / membership</th><td>项目主键 <code>(tenant_id, project_id)</code>。成员主键再加 <code>user_id</code>，包含角色、状态、授权版本。私人线程另存所有者和共享策略。资源查询先定位本租户，再检查项目及线程权限。</td></tr>
-            <tr><th scope="row">snapshot / job</th><td>快照主键 <code>(tenant_id, project_id, snapshot_id)</code>。任务保存输入快照、提交人、请求摘要、初始回执、状态、版本、所属执行端和尝试号。相同请求键由唯一索引裁决。</td></tr>
+            <tr><th scope="row">workspace / device_binding</th><td>工作区保存团队、项目、owner_id 和 workspace_id，私有线程、任务、工具请求和快照继承同一所有者。一个成员拥有多个工作区和设备，配对凭证绑定本人。同一任务在两台设备间迁移只更换执行尝试和租约。评审身份没有签发配对凭证或变更他人资源所有者的能力。</td></tr>
+            <tr><th scope="row">code_review / review_revision / review_decision</th><td>评审单归团队及项目，含 author_id、repository_id、目标分支和当前修订号；每次修订保存不可变的 base_sha、head_sha 和脱敏材料引用。评论和决定外键指向同一团队、评审单和修订号，记录操作者与时间。发布时把允许的材料写进独立存储命名空间；评审 DTO 仅返回已发布字段。</td></tr>
+            <tr><th scope="row">project / membership</th><td>项目主键 <code>(tenant_id, project_id)</code>。成员主键再加 <code>user_id</code>，包含角色、状态、授权版本。团队角色为工程师或 Leader，Leader 的评审范围另外绑定项目。私有线程归属于工作区及其所有者。</td></tr>
+            <tr><th scope="row">snapshot / job</th><td>私有快照提供唯一键 <code>(tenant_id, project_id, owner_id, workspace_id, snapshot_id)</code>。任务保存输入快照、提交人、请求摘要、初始回执、状态、版本、所属执行端和尝试号。相同请求键由唯一索引裁决。</td></tr>
             <tr><th scope="row">control_lease / approval</th><td>每个线程和工作区各有唯一的控制记录，包含 holder、epoch、fence、到期时间和未决命令。审批唯一键覆盖租户、原执行连接、原请求；同时保存命令摘要、发起用户、决策人、过期时间和设备回执。</td></tr>
             <tr><th scope="row">job_attempt / receipt</th><td>尝试主键含租户、job_id 和 attempt；回执唯一键含租户、设备和 command_id。设备本机 SQLite 也将 command_id 设为唯一，保存外部进程或作业凭证、最终退出码和结果哈希。</td></tr>
             <tr><th scope="row">event_log / outbox / inbox</th><td>持久事件按租户、资源与 seq 唯一；outbox 每个 event_id 唯一，记录投递时间、重试次数及领取者。消费者 inbox 按租户、消费者名、event_id 唯一，和消费者产生的业务变更同事务提交。</td></tr>
@@ -278,7 +295,7 @@
           <p>以下为字段约束片段。迁移顺序为租户和成员、项目、快照、任务、尝试及事件。从 OIDC 身份识别的用户先映射为本地 UUID。冻结请求摘要的规范化算法，用同一规范比较 JSON 字段顺序不同的等价请求。</p>
           <pre><code>CREATE TABLE job (
     tenant_id uuid NOT NULL, job_id uuid NOT NULL, project_id uuid NOT NULL,
-    actor_id uuid NOT NULL, snapshot_id uuid NOT NULL,
+    actor_id uuid NOT NULL, workspace_id uuid NOT NULL, snapshot_id uuid NOT NULL,
     request_key uuid NOT NULL, request_hash bytea NOT NULL,
     state text NOT NULL CHECK (state IN ('queued','assigned','running',
         'cancel_requested','reconciling','succeeded','failed','cancelled')),
@@ -286,30 +303,42 @@
     created_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (tenant_id, job_id),
     UNIQUE (tenant_id, project_id, actor_id, request_key),
-    FOREIGN KEY (tenant_id, project_id, snapshot_id)
-        REFERENCES snapshot (tenant_id, project_id, snapshot_id),
+    FOREIGN KEY (tenant_id, project_id, actor_id, workspace_id, snapshot_id)
+        REFERENCES snapshot (tenant_id, project_id, owner_id, workspace_id, snapshot_id),
     CHECK (octet_length(request_hash) = 32)
 );
 CREATE INDEX job_project_page
-    ON job (tenant_id, project_id, created_at DESC, job_id DESC);</code></pre>
+    ON job (tenant_id, project_id, actor_id, created_at DESC, job_id DESC);</code></pre>
           <p>任务示例以外的尝试、预算与接单回执由各自迁移补齐。事件以资源当前版本递增，在同一事务更新资源版本并插入事件。分页令牌编码最后一行的时间和 ID，并绑定查询条件；并列时间用 ID 排序。列表默认 50 条，首版上限 100 条。</p>
           <h3>不要让连接池串租户</h3>
           <pre><code>ALTER TABLE job ENABLE ROW LEVEL SECURITY;
 ALTER TABLE job FORCE ROW LEVEL SECURITY;
-CREATE POLICY job_tenant ON job
-  USING (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid)
-  WITH CHECK (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
--- 在每个事务内用绑定参数设置，第三个参数 true 将作用域限制在本次事务
-SELECT set_config('app.tenant_id', :verifiedTenantId, true);</code></pre>
-          <p>业务账号没有超级用户、表所有者或 BYPASSRLS 权限。读事务、写事务、消费者都先设置上下文。订阅路由或跨租户调度需要的内部目录使用独立最小权限账号，只列待处理的租户 ID，再逐租户进入事务。用大小为 1 的连接池轮流请求甲、乙、无租户三种身份，验证结果、更新行数及审计归属。<a href="https://www.postgresql.org/docs/current/ddl-rowsecurity.html">行级安全策略及角色行为</a></p>
+CREATE POLICY job_owner ON job
+  USING (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid
+     AND actor_id = nullif(current_setting('app.actor_id', true), '')::uuid)
+  WITH CHECK (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid
+     AND actor_id = nullif(current_setting('app.actor_id', true), '')::uuid);
+-- 应用事务只使用服务端认证的团队与用户，true 限定在当前事务
+SELECT set_config('app.tenant_id', :verifiedTenantId, true),
+       set_config('app.actor_id', :verifiedActorId, true);</code></pre>
+          <p>这里的 <code>job.actor_id</code> 是该私有任务不可变的所有者。成员请求使用上述策略；后台调度按已持久化的任务授权处理受托作业，设备回执通过绑定设备、所有者和 attempt 的专用入口写入。评审服务使用独立数据库角色，可访问成员授权和评审材料表，没有私有会话表读取或设备命令写入权限。旧接口、搜索和 WebSocket 补读同样检查资源类型及所有者。</p>
+          <p>业务账号没有超级用户、表所有者或 BYPASSRLS 权限。读事务、写事务、消费者都先设置上下文。订阅路由或跨租户调度需要的内部目录使用独立最小权限账号，只列待处理的租户 ID，再逐租户进入事务。用大小为 1 的连接池轮流请求同团队的所有者、Leader、外团队成员和缺少上下文的身份，验证结果、更新行数及审计归属。<a href="https://www.postgresql.org/docs/current/ddl-rowsecurity.html">行级安全策略及角色行为</a></p>
         </section>
         <section id="contracts">
           <h2>接口契约与客户端错误处理</h2>
           <p>商业接口统一使用 <code>/api/v2</code>。旧版适配器继续识别原接口，其资源和个人空间经映射后才进入 v2 服务。OpenAPI 固定请求字段、成功响应、分页、错误枚举和示例，代理消息另有 schemaVersion。</p>
+          <h3>代码评审接口</h3>
+          <div class="tbl"><table><thead><tr><th scope="col">项目下的相对路径</th><th scope="col">授权与持久化结果</th></tr></thead><tbody>
+            <tr><th scope="row">POST /reviews</th><td>作者从自己的工作区提交 repositoryId、目标分支、baseSha、headSha、说明和已选材料。服务检查项目、仓库、来源所有者与材料清单，持久化首个修订。使用幂等键返回同一 reviewId。</td></tr>
+            <tr><th scope="row">GET /reviews/{r}<br>POST /reviews/{r}/comments</th><td>作者或本团队该项目的 Leader 可查看评审材料及参与讨论。评论绑定 revision，响应和通知链接只指向评审单。无权获知该评审单时返回 404。</td></tr>
+            <tr><th scope="row">POST /reviews/{r}/revisions</th><td>仅原作者可发布新修订。行锁内核对 expectedRevision，新增不可变提交对并将当前状态置为待评审。旧版评论和结论保存在各自修订上。</td></tr>
+            <tr><th scope="row">POST /reviews/{r}/decisions</th><td>当前项目有评审权的 Leader 发送 expectedRevision、baseSha、headSha、决定与幂等键。事务内复核当前授权、作者身份和当前修订，条件更新并写评审审计。角色撤销后返回 403 或按不可见资源返回 404，旧修订返回 409。该端点没有执行命令或合并分支的副作用。</td></tr>
+          </tbody></table></div>
+          <h3>个人工作区与设备接口</h3>
           <div class="tbl"><table><thead><tr><th scope="col">接口</th><th scope="col">实现及客户端行为</th></tr></thead><tbody>
-            <tr><th scope="row">POST /projects/{p}/jobs</th><td>需项目执行权限、<code>Idempotency-Key</code> 和已就绪快照。首次受理返回 202、固定 jobId 和查询地址。客户端提交前持久化键，发送超时继续复用原键，显式新作业才生成新键。</td></tr>
+            <tr><th scope="row">POST /projects/{p}/jobs</th><td>需当前成员自己的工作区及其中已就绪的快照、项目执行权限和 <code>Idempotency-Key</code>。首次受理返回 202、固定 jobId 和查询地址。客户端提交前持久化键，发送超时继续复用原键，显式新作业才生成新键。</td></tr>
             <tr><th scope="row">GET /projects/{p}/jobs/{j}</th><td>返回状态、版本、当前尝试、更新时间和可执行动作。状态 GET 从授权上下文解析资源。界面遇到过期版本先刷新。</td></tr>
-            <tr><th scope="row">POST /projects/{p}/approvals/{a}/decisions</th><td>提交 allow / deny、expectedVersion、幂等键；服务重新核对原连接、权限、版本和有效期。202 表示决定已持久化，执行端确认后更新回执状态。</td></tr>
+            <tr><th scope="row">POST /projects/{p}/approvals/{a}/decisions</th><td>提交 allow / deny、expectedVersion、幂等键；服务重新核对工作区所有者、原工具请求连接、版本和有效期。202 表示决定已持久化，执行端确认后更新回执状态。</td></tr>
             <tr><th scope="row">POST /projects/{p}/jobs/{j}/cancel</th><td>写入取消意图后返回 202。尚未派发可直接结束；已交给设备则显示“取消中”。终态竞争由状态机判定，刷新后呈现实际结果。</td></tr>
             <tr><th scope="row">GET /projects/{p}/events</th><td>按获准资源和 after 游标补读，支持 limit 和 nextCursor。WebSocket 握手后发相同资源的订阅及最后序号，接入时先订阅并缓冲，再查快照水位、按序合并，避免订阅建立时漏事件。</td></tr>
             <tr><th scope="row">POST /device/receipts</th><td>使用设备身份提交 commandId、attempt、epoch、fence、状态和产物引用，服务端解析所绑定租户和设备。重复相同回执返回已确认结果，内容不同进入审计与核对。</td></tr>
@@ -318,7 +347,7 @@ SELECT set_config('app.tenant_id', :verifiedTenantId, true);</code></pre>
 Idempotency-Key: f33822d1-8e9e-4fc6-84ef-cf6ea6490010
 Content-Type: application/json
 
-{"snapshotId":"f19d4f4c-3cd4-4411-8ccc-6ca21bcb0010","profile":"unit-test"}
+{"workspaceId":"e757613a-d9e9-4073-a996-f1926a4e0010","snapshotId":"f19d4f4c-3cd4-4411-8ccc-6ca21bcb0010","profile":"unit-test"}
 
 HTTP/1.1 202 Accepted
 Location: /api/v2/projects/51b1c922-34b3-4c0f-ad8b-63a887450010/jobs/2ae1d27d-22c9-4dc2-8795-08f543cb0010
@@ -331,13 +360,13 @@ Location: /api/v2/projects/51b1c922-34b3-4c0f-ad8b-63a887450010/jobs/2ae1d27d-22
           <p>这一节由后端工程师和负责人共同评审。一次事务只使用一个数据库连接。Spring 事务放在由容器调用的应用服务公共方法，仓储复用同一事务；向消息队列、对象存储和设备的网络调用在事务外进行。以下 Java 为接口级伪代码，方法名描述要由团队补齐的契约。<a href="https://docs.spring.io/spring-framework/reference/data-access/transaction/declarative/annotations.html">Spring 声明式事务和代理边界</a></p>
           <pre><code>@Transactional(isolation = Isolation.READ_COMMITTED)
 public AcceptedJob submit(Actor actor, ProjectId project, SubmitJob input, UUID key) {
-    tenantContext.bindForTransaction(actor.tenant());
-    access.requireCanRun(actor, project);
+    tenantContext.bindForTransaction(actor.tenant(), actor.userId());
+    access.requireWorkspaceOwner(actor, project, input.workspaceId());
     var hash = requests.hashCanonical(project, input);
     var existing = jobs.findByRequest(actor, project, key);
     if (existing.isPresent()) return existing.get().receiptIfSameHash(hash);
 
-    snapshots.requireReady(project, input.snapshotId());
+    snapshots.requireReady(actor, project, input.workspaceId(), input.snapshotId());
     var job = Job.queued(actor, project, input, key, hash);
     if (!jobs.insertIfAbsent(job)) {
         return jobs.requireByRequest(actor, project, key).receiptIfSameHash(hash);
@@ -357,10 +386,10 @@ public AcceptedJob submit(Actor actor, ProjectId project, SubmitJob input, UUID 
    SET decision = :decision, decision_state = 'decided',
        decided_by = :actor, version = version + 1
  WHERE tenant_id = :tenant AND project_id = :project AND approval_id = :id
-   AND version = :expected AND decision_state = 'pending'
+   AND owner_id = :actor AND version = :expected AND decision_state = 'pending'
    AND expires_at &gt; clock_timestamp()
 RETURNING approval_id, version;</code></pre>
-          <p>先在事务中核对成员权限与活动连接，固定读取锁顺序，再运行条件更新。返回一行时写审计、幂等回执及 outbox；零行时读取授权范围内的最新状态，区分已处理、已过期与连接已变更。执行端临发送前再次校验原生请求和操作代号。两人分别“允许”和“拒绝”时只有一个决定可进入执行队列；原连接断开且无法确认时显示“结果待核对”。</p>
+          <p>先在事务中核对本人所有权与活动连接，固定读取锁顺序，再运行条件更新。返回一行时写审计、幂等回执及 outbox；零行时读取授权范围内的最新状态，区分已处理、已过期与连接已变更。执行端临发送前再次校验原生请求和操作代号。本人两端分别点击“允许”和“拒绝”时只有一个决定可进入执行队列；原连接断开且无法确认时显示“结果待核对”。</p>
         </section>
         <section id="states">
           <h2>执行状态机与最难的断线窗口</h2>
@@ -374,7 +403,7 @@ RETURNING approval_id, version;</code></pre>
             <tr><th scope="row">reconciling → queued</th><td>确认旧动作未发生，或任务合同明确允许重复纯计算且可丢弃旧输出时，另建 attempt 并提升 fence。保留取消意图的作业优先完成取消和核对。外部发布效果未知时继续等待证据。</td></tr>
           </tbody></table></div>
           <p><strong>具体时序。</strong> 设备收到 commandId 后先在本机 SQLite 提交“已领取”。随后启动进程并追加进程标识及启动时间。如果设备恰在进程启动和日志写入之间断电，仅有“已领取”无法证明运行与否。重启后向原执行器查询同一外部键或核对产物；不具备核对能力的有副作用操作停在 reconciling。用户在操作页能看到命令、设备、最后证据及下一位处理人。</p>
-          <p><strong>隔离迟到的旧进程。</strong> 每次转移控制权都提升 fence，灾备恢复时再提升独立 epoch；设备按二元组比较新旧，并持久化已见最高值。产物先写以 attempt 区分的临时位置，只有中心条件更新成功才能发布。对外部系统的写入还需要对方支持幂等键或显式核对。管理员人工解锁需提供原执行端已退出或外部动作已核实的证据，并写审计。</p>
+          <p><strong>隔离迟到的旧进程。</strong> 每次转移控制权都提升 fence，灾备恢复时再提升独立 epoch；设备按二元组比较新旧，并持久化已见最高值。产物先写以 attempt 区分的临时位置，只有中心条件更新成功才能发布。对外部系统的写入还需要对方支持幂等键或显式核对。本人申请解除占用时须提供原执行端已退出或外部动作已核实的证据，由恢复服务记录审计。解除占用只允许原所有者重新领取。</p>
         </section>
         <section id="client">
           <h2>设备代理、网页与 C++ 怎样对接</h2>
@@ -385,7 +414,7 @@ RETURNING approval_id, version;</code></pre>
             <li>快照按“临时下载 → 大小与哈希校验 → 记录回执 → 同卷原子发布”推进。将原路径切换的每一步写入本机恢复日志。对象收全前保留旧工作区，重新启动后读取恢复日志并核对本地状态。用包含未暂存与已暂存两种内容的同一文件验收。</li>
           </ol>
           <h3>前端工程师的同步规则</h3>
-          <p>按 <code>tenant / project / resource</code> 存放缓存、最后确认序号和草稿。先显示权威初始快照，再应用序号连续的事件。小于等于已确认序号的事件丢弃；跳号时暂停应用后续事件，补读后按序恢复。撤销成员资格的通知关闭现有订阅；网关同时主动失效授权并周期复核。用户切换组织时取消旧请求，用上下文代号丢弃迟到响应。界面中的“已申请取消”与“已取消”分别绑定状态机。</p>
+          <p>按 <code>tenant / actor / space-kind / resource</code> 存放缓存、最后确认序号和草稿。先显示权威初始快照，再应用序号连续的事件。小于等于已确认序号的事件丢弃；跳号时暂停应用后续事件，补读后按序恢复。撤销成员资格的通知关闭现有订阅；网关同时主动失效授权并周期复核。用户切换团队、账户或开发／评审入口时取消旧请求，用上下文代号丢弃迟到响应。界面中的“已申请取消”与“已取消”分别绑定状态机。</p>
           <h3>C++ 原型只接一个可测函数</h3>
           <p>第一个原型限定为读取已封存文件、按固定块大小计算 SHA-256 清单。Java 提供本次工作私有目录中的输入与无冲突输出位置，通过受限的本机子进程传递路径；限制句柄、可访问目录、最大输入、并发、耗时与内存。控制消息用有界的长度前缀加 UTF-8 JSON，数据字节直接从文件读取。两端约定协议版本、字节偏移和长度均按字节计算，文件大小及偏移使用 64 位整数。版本不兼容时走 Java。</p>
           <pre><code>请求字段   version, requestId, operation, inputHandle, chunkBytes
@@ -398,8 +427,11 @@ RETURNING approval_id, version;</code></pre>
           <h2>测试、发布和事故处理由谁拍板</h2>
           <p>每个团队用同一组租户、资源和故障名称复现问题。单元测试用可控时钟覆盖截止时间和退避；集成测试启动真实数据库、队列和对象存储。并发用屏障同时放行两个独立请求，测试钩子在指定事务或外部调用边界暂停，避免依赖偶然时序。</p>
           <div class="tbl"><table><thead><tr><th scope="col">必须交付的测试</th><th scope="col">怎样制造故障</th><th scope="col">谁核对什么</th></tr></thead><tbody>
+            <tr><th scope="row">多任务、多设备</th><td>工程师在两台设备同时运行 A、B，将 A 转到另一台设备，并在两个窗口争抢 A 的线程。Leader 同时运行自己的任务 C。</td><td>代理核对 A 只保留一个有效写入者，B、C 继续执行。工作树、输入快照、回执和工具请求各归其主。</td></tr>
+            <tr><th scope="row">同团队越权与内容泄露</th><td>同项目 Leader 获准评审 A 后，携带 A 的原始资源 ID 请求作者对话、WebSocket 补读、附件签名、日报导出、终端消息、工具批准、任务取消和设备接管。再交换为另一名工程师和外团队 Leader。</td><td>私有读写按不可见资源返回 404 或在设备通道拒绝；数据库中的对话内容、命令数、工具状态和租约均不变。用仅出现在私人会话和未提交文件中的标记验证评审 API、通知、检索、缓存及下载内容。</td></tr>
+            <tr><th scope="row">评审闭环及并发</th><td>Leader 在修订 1 留逐行意见并要求修改，作者发布修订 2，同时送达修订 1 的批准，再批准修订 2；重试同一决定，并撤销 Leader 角色后再发请求。</td><td>旧批准不能批准新版，修订 2 只有一次有效决定，撤权后拒绝新评审写入。作者对话与设备命令计数不变。Leader 回到“我的开发”仍可运行自己的任务。</td></tr>
             <tr><th scope="row">提交成功却丢响应</th><td>数据库提交后让代理丢弃 HTTP 响应；第二次用原键重发，再用同键改快照。</td><td>后端核对两次同载荷回同 jobId、改载荷为 409，任务、预留、首个事件均各一条。</td></tr>
-            <tr><th scope="row">审批争抢与撤权</th><td>两名审批者对同版本分别允许、拒绝。另测订阅期间移除成员，然后刷新列表、补读和申请对象下载授权。</td><td>后端和前端核对一条获胜决定、一条派发记录，失权用户看不到后续内容。已有短时对象授权按有效期到期；要求即时撤销的项目用每次鉴权的下载代理。</td></tr>
+            <tr><th scope="row">审批争抢与撤权</th><td>任务所有者在两台设备上对同一工具请求分别允许、拒绝；同团队 Leader 对此工具请求的决定必须被拒绝。另测订阅期间移除成员，然后刷新列表、补读和申请对象下载授权。</td><td>后端和前端核对一条获胜决定、一条派发记录，失权用户看不到后续内容。已有短时对象授权按有效期到期；要求即时撤销的项目用每次鉴权的下载代理。</td></tr>
             <tr><th scope="row">消息重投与乱序</th><td>转发已成功但尚未标 sent 时杀进程；消费事务提交后、ack 前再杀一次。按 5、7、6 顺序投递状态。</td><td>后端核对 inbox 和账本唯一；前端补齐 6 后显示 7。过期版本无法覆盖新版本。</td></tr>
             <tr><th scope="row">执行途中设备掉电</th><td>分别停在领取后、进程启动后、上传后、发布后未回执四处；换设备再把旧回执送回。</td><td>代理核对隔离目录、fence 和最终产物；值班人能定位待核对的外部动作。可计费结果只出现一次。</td></tr>
             <tr><th scope="row">共享资源受压</th><td>在峰值混合负载加入单个大租户、慢 WebSocket、限速对象下载和停一个故障区。独立记录发压机 CPU、网络和实际到达率。</td><td>平台核对按租户的 P95/P99、错误率、重连和积压恢复曲线。业务负责人复核每千次请求的成本及是否达到放量门槛。</td></tr>
@@ -410,7 +442,7 @@ RETURNING approval_id, version;</code></pre>
             <li><strong>值班人。</strong> 接到“提交慢”的告警时，用 traceId 对照入口、连接池等待、数据库提交和 outbox 水位；“执行慢”则对照队列最老年龄、执行池资源和代理最后心跳。先记录影响的租户、地域与版本；限流热点、暂停批量报告或扩对应进程后复核 P99 与积压趋势。</li>
             <li><strong>负责人。</strong> 一旦发现跨租户可见、重复批准、重复计费或旧执行代号能发布，停止扩大灰度，关闭对应写入或订阅、保全审计，按租户核对已受影响记录，再决定回退或向前修复。单区域容量不足时按单元隔离影响；恢复后由第二人核对账本、产物和未决指令。</li>
           </ol>
-          <p class="note"><strong>首个商业版本的完成定义。</strong> 一位新工程师能从空环境按文档演示完整业务链路，一位值班人能凭任务编号判断任务是在排队、运行还是等待核对，一位客户管理员能追溯谁在什么设备批准了哪条命令、产生了多少费用。负责人依据原始测试、压测和恢复记录决定可对外承诺的并发人数。</p>
+          <p class="note"><strong>首个商业版本的完成定义。</strong> 一位新工程师能从空环境按文档演示完整业务链路，一位值班人能凭任务编号判断任务是在排队、运行还是等待核对，一位工程师能核对本人批准的命令及费用，一位 Leader 能核对自己审核的代码版本、意见和结论。负责人依据原始测试、压测和恢复记录决定可对外承诺的并发人数。</p>
         </section>
         <p class="end"><a href="#top">返回顶部 ↑</a></p>
       </article>

@@ -582,6 +582,26 @@ def main():
             with patch('desktop_qt.vscode_executable', return_value=editor), patch('desktop_qt.subprocess.Popen') as launch:
                 QTest.mouseClick(window.action_buttons['open_project'], Qt.MouseButton.LeftButton)
                 launch.assert_called_once_with([str(editor), project_directory])
+            from personal_sync import PersonalSync
+            with tempfile.TemporaryDirectory() as checkout:
+                flow = PersonalSync(Path(checkout), {})
+                project = 'fixture/work'
+                destination = Path(checkout)/'work'
+                flow.projects[project] = str(destination)
+                flow.threads[CODEX] = {'project':project,'cwd':str(destination)}
+                with patch.object(monitor,'personal_sync',flow), patch('desktop_qt.vscode_executable',return_value=editor), patch('desktop_qt.subprocess.Popen') as launch:
+                    window.refresh()
+                    QTest.mouseClick(window.action_buttons['open_project'], Qt.MouseButton.LeftButton)
+                    assert flow.priority == project and flow.wake.is_set()
+                    window.refresh()
+                    launch.assert_not_called()
+                    destination.mkdir()
+                    flow.status[project] = '已同步'
+                    flow.completed[project] = 1
+                    window.refresh()
+                    window.refresh()
+                    launch.assert_called_once_with([str(editor),str(destination)])
+                window.refresh()
             assert not window.action_buttons['manage'].isEnabled()
             assert window.action_buttons['unmanage'].isEnabled()
             assert window.action_buttons['pause'].isEnabled()

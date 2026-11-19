@@ -110,6 +110,9 @@ def create_app(path, devices, clock=None, compute=None, artifact_dir=None):
             raise ValueError('启用产物目录需要计算队列')
         artifacts = ArtifactStore(artifact_dir)
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    if any(entry.get('personalSpace') for entry in devices.values()):
+        from personal_relay import install_routes
+        install_routes(app, path, devices)
 
     @app.exception_handler(Conflict)
     async def conflict(_, error):

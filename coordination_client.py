@@ -281,6 +281,12 @@ def terminal(client, cwd, args, resume=False, *, outbox=None):
             home = Path(os.environ.get('CODEX_HOME') or Path.home() / '.codex').resolve()
             binding = install_resume(selected, home, args[0])
             command = [*args, 'resume', '--cd', binding['cwd'], binding['thread']]
+        elif resume:
+            from personal_memory import latest_session
+            session = latest_session(Path(cwd))
+            if session:
+                thread, directory = session
+                command = [*args, 'resume', '--cd', str(directory), thread]
         return subprocess.Popen(command, cwd=cwd)
 
     if project is None:

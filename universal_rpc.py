@@ -198,6 +198,10 @@ class CodexRPC(UniversalRPC):
         super().__init__('codex', journal=journal, custom_process=custom_process)
 
     def call(self, method, params, timeout=20):
+        if method == 'thread/resume' and not params.get('cwd') and getattr(self, 'personal_session', None):
+            session = self.personal_session(params['threadId'])
+            if session:
+                params = {**params, 'cwd': session['cwd'], 'path': session['path']}
         writes = self.project_writes
         if not writes:
             return super().call(method, params, timeout)

@@ -13,6 +13,7 @@ from attachments import Attachments
 from task_control import TaskControl
 from history_labels import load_labels
 from coordination_client import device_client
+from code_sync import github_id
 from ide_activity import close_queue, flush_closes
 def _runtime_root():
  # A frozen app must keep its databases/configuration beside the EXE.  PyInstaller's
@@ -30,6 +31,17 @@ claude_controller=None
 claude_rpc=None
 claude_journal=None
 history_labels={}
+personal_sync=None
+
+def enable_personal_sync(settings, stop, workers):
+ global personal_sync
+ from personal_sync import PersonalSync
+ if personal_sync is not None:
+  raise ValueError('个人同步已启动')
+ personal_sync=PersonalSync(ROOT,settings,config().get('coordination'))
+ thread=threading.Thread(target=personal_sync.worker,args=(stop,),name='personal-sync',daemon=True)
+ workers.threads.append(thread)
+ thread.start()
 
 def client_snapshot(snap,client='codex'):
  if client not in ('codex','claude'):raise ValueError('无效客户端。')
@@ -86,7 +98,7 @@ def collect(rpc,cfg,scheduler):
  try:
   data=rpc.call('thread/list',{'limit':20})
   names=((snapshot().get('controls') or {}).get('names') or {})
-  update(threads=[{'id':t['id'],'title':names.get(t['id']) or t.get('name') or t.get('title') or history_labels.get(t['id'],{}).get('title') or '未命名历史任务','source':history_labels.get(t['id'],{}).get('source'),'cwd':t.get('cwd') or history_labels.get(t['id'],{}).get('cwd'),'status':t.get('status',{'type':'unknown'}),'updatedAt':t.get('updatedAt')} for t in data.get('data',[])])
+  update(threads=[{'id':t['id'],'title':names.get(t['id']) or t.get('name') or t.get('title') or history_labels.get(t['id'],{}).get('title') or '未命名历史任务','source':history_labels.get(t['id'],{}).get('source'),'cwd':t.get('cwd') or history_labels.get(t['id'],{}).get('cwd'),'githubProject':github_id((t.get('gitInfo') or {}).get('originUrl')),'status':t.get('status',{'type':'unknown'}),'updatedAt':t.get('updatedAt')} for t in data.get('data',[])])
  except Exception:update(threads=[],threadStatus='unavailable')
  update(updated=int(time.time()),connection='disconnected' if rpc.closed else 'connected')
 class Notifications:
@@ -126,6 +138,7 @@ def poll(stop):
        drained.append(rpc)
      client=device_client(cfg)
      rpc=RPC(approvals,journal=journal,coordination=client) if client else RPC(approvals,journal=journal)
+     rpc.personal_session=lambda tid: personal_sync.snapshot()['sessions'].get(tid) if personal_sync else None
     writes=getattr(rpc,'project_writes',None)
     if writes:
      try:flush_closes(close_queue(ROOT),writes.client)
@@ -233,7 +246,7 @@ def start_background_service(stop=None, embed_web=None):
   settings=config()
   transfer=settings.get('handoffSync')
  except (ValueError,OSError,AttributeError):
-  transfer=None
+  settings={};transfer=None
  if transfer is not None:
   from handoff_sync import run as run_handoff_sync
   def report_handoff(status):update(handoffSyncStatus=status)
@@ -249,4 +262,16 @@ def start_background_service(stop=None, embed_web=None):
    try:run_stream(router,os.environ['DINGTALK_CLIENT_ID'],os.environ['DINGTALK_CLIENT_SECRET'],lambda:update(streamStatus='callback_received'))
    except Exception:update(streamStatus='unavailable; credentials or SDK need local verification')
   threading.Thread(target=stream_worker,daemon=True,name='dingtalk-stream').start()
- return stop,ServiceWorkers(workers,service_lock)
+ group=ServiceWorkers(workers,service_lock)
+ global personal_sync
+ personal_sync=None
+ pair_file=ROOT/'personal-sync.json'
+ try:
+  personal=settings.get('personalSync') if isinstance(settings,dict) else None
+  if pair_file.is_file():
+   personal={**(personal or {}),**json.loads(pair_file.read_text(encoding='utf-8-sig'))}
+  if isinstance(personal,dict):
+   enable_personal_sync(personal,stop,group)
+ except (ValueError,OSError,KeyError,TypeError):
+  update(personalSyncError='个人设备同步配置无效')
+ return stop,group

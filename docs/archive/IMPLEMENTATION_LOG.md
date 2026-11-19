@@ -2,6 +2,19 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-19 个人后台同步与项目相对记忆目录
+
+- 基线 `0b07317` 的「启卷」只打开当前设备已有的项目目录。个人版增加后台发现项目、按大小过滤克隆、追随远端分支和自动发布已保存的代码。笔记、原生长期记忆记录和已完成会话按 GitHub 仓库标识和项目相对路径同步。全局规则保存在各机 Codex 主目录。 [操作与配置](../PERSONAL_SYNC.md)
+- Windows、Python 3.14.7、Git 2.56.0.windows.4、Git LFS 3.8.1、Codex CLI 0.170.0。输入为两个独立仓库路径、两个独立 Codex 主目录、私人共享目录或带设备鉴权的回环协调服务。Git 测试使用 URL 重写，将测试用 GitHub 地址指向启用过滤能力的本地 bare 仓库。生产上限 10 MiB，默认轮询间隔 10 秒。为检查临界行为，专项将 Git 上限缩到 16 KiB，用 32–34 KB 随机内容验证对象在接收端 Git 对象库中缺失。
+- 复现命令 `python -B -m unittest tests.test_personal_flow -v`。首轮 3 项中 1 项因测试 SQLite 连接未关闭而无法清理，7.458 秒。第二轮 6 项中 1 项失败，14.924 秒。大小互换时 Git 快进默认生成差异统计，尝试读取已过滤的大对象。关闭合并差异统计后，单项复验 2.471 秒通过。加入 HTTP 双端验收后的专项 7 项全部通过，18.885 秒，覆盖空目录克隆、双向保存、非冲突合并、冲突与暂存保留、LFS 指针、远端无过滤能力、鉴权和版本校验、相对记忆目录变更、笔记与长期记忆删除。项目清单和全局规则另经真实 HTTP 协调端点验收。
+- `python -B -m tests.smoke_personal_flow --output ../native-06.json` 使用真实 CLI 和回环模型，在两个 Codex 主目录间完成笔记本 → 台式机 → 笔记本三轮往返，线程 UUID 保持一致，最终代码提交相同。真实 App Server 在接收机用本地项目目录恢复线程，持有期间拒绝第二个原生写入锁。首轮接收机尚无 Codex 主目录，已修正创建顺序。随后三次 CLI 往返均通过。新增 App Server 探针首次因测试机未配置回环模型提供方而失败，两端各配置测试提供方后通过，该次命令墙钟约 4.55 秒。模型登录配置保持各机独立。
+- `python -B -m unittest discover -s tests -t . -p 'test_*.py' -v` 中途基线回归 225 项，223 项通过、2 项跳过，179.016 秒。加入 HTTP 验收后的回归 229 项，227 项通过、2 项跳过，186.508 秒。跳过项为当前沙箱用户配置不支持 DPAPI 和缺少可选钉钉 Stream SDK。源码 Qt 验收 `python -B tests/smoke_desktop.py --output ../desktop-02` 通过，实际点击「启卷」，验证后台未准备好时等待、完成后按本机路径仅启动一次 VS Code；编辑器进程由测试替身接收。首次通用桌面回归也通过。
+- 使用项目构建脚本相同的 PyInstaller 参数，首轮隔离构建得到 `Lanxi-Glass-R18-Flow.exe`，大小 61,599,462 字节，SHA-256 为 `255023ECE12F06C6F5370DEF88107673B8AAEFF5CC2F4D349DA9CAFAA7A9BA3A`。可从项目根执行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-exe.ps1 -AppName Lanxi-Glass-R18-Flow` 复建。用 `python build-exe/verify-lanxi-launch.py Lanxi-Glass-R18-Flow.exe` 启动独立副本，在 1.42 秒内检测到原生窗口和本地 SQLite。
+- 输出位于 `build-exe/verification/personal-flow-20261119/`，包括 `targeted-01.txt` 至 `targeted-03.txt`、`sparse-03.txt`、`full-01.txt` 与 `full-02.txt`、`native-*.txt/json`、`desktop-01/`、`desktop-02/` 和 `build-01.txt`。本轮使用独立测试数据，没有测量真实两台物理设备的 GitHub/SMB 网络时延、项目规模下的常驻资源消耗和长期离线恢复时间。现场配对和运行状态仍待两台设备接入。
+
+- 补查项目笔记写入中断时的恢复，先写完新内容，再切换原文件。注入磁盘写失败、文件链接失败均保留原文。专项最终 8 项通过，20.326 秒，见 `targeted-04.txt`。完整回归 **230 项，228 项通过、2 项跳过**，188.088 秒，见 `full-03.txt`。真实 CLI、桌面工作目录和原生写入锁复验通过，见 `native-07.json`。
+- 最终发布包 `release/Lanxi-Glass-R18-Flow.exe` 为 61,598,404 字节，SHA-256 为 `635BBDBC927EB9DB989B9E17AD787BB8FEBD03813DFF35EA112CB0663CAB8F44`，独立桌面副本在 1.41 秒内显示窗口并创建数据库。额外使用两个隔离的 EXE 配置运行完整后台。首次同时启动触发同一 Windows 会话的单实例约束，清理时遇到文件占用。改成笔记本 → 台式机 → 笔记本顺序运行后，8.24 秒完成零项目端自动克隆、两端 `notes/Codex/context.md` 归位、全局规则恢复和编辑回传，两端代码提交一致。复现命令 `python -B -m tests.smoke_personal_exe --exe ../package-final/Lanxi-Glass-R18-Flow.exe --output ../exe-flow-02.json`。该时间包含三次本机启动和关闭，使用两秒轮询及本地 Git 传输，不能用于估算真实跨机延迟。最终打包日志在 `build-02.txt`。
+
 ## 2026-11-19 澜汐与 Codex 终端历史接续
 
 - 基线 `d127e44` 的桌面对谈只显示 `replies.sqlite3`，集成底座为含本地壁纸轮换的 `a478b96`。环境为 Windows 11 24H2、Python 3.14.7、Codex CLI 0.170.0、PySide6 6.12.0。桌面读取相同 `CODEX_HOME` 的原生可见消息，与 SQLite 实时记录按轮次及消息 ID 去重。参考旧版可见事件字段，并核对真实本地测试会话的已完成消息格式。 [Codex 旧版事件协议](https://github.com/openai/codex/blob/rust-v0.100.0/codex-rs/protocol/src/protocol.rs)

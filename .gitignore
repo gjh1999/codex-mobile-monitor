@@ -1,5 +1,6 @@
 # Private configuration and local state
 local-config.json
+personal-sync.json
 local-model-api.json
 local-model-api-*.tmp
 claude-drafts.json

@@ -1,4 +1,4 @@
-﻿"""Native task workspace: light cards, soft-blue actions and explicit failures."""
+"""Native task workspace: light cards, soft-blue actions and explicit failures."""
 import json
 import os
 import re
@@ -17,7 +17,7 @@ from PySide6.QtCore import QEvent, QEasingCurve, QPoint, QPropertyAnimation, QRe
 from PySide6.QtGui import QColor, QCursor, QDesktopServices, QFont, QIcon, QKeySequence, QPainter, QPainterPath, QPen, QShortcut, QTextDocument
 from PySide6.QtWidgets import (
     QApplication, QCompleter, QDialog, QFrame, QGraphicsDropShadowEffect, QGraphicsOpacityEffect,
-    QHBoxLayout, QLabel, QLineEdit, QTreeWidget, QTreeWidgetItem,
+    QFileDialog, QHBoxLayout, QLabel, QLineEdit, QTreeWidget, QTreeWidgetItem,
     QMainWindow, QMenu, QMessageBox, QPushButton, QSizePolicy, QStackedWidget, QStyle,
     QStyleOptionViewItem, QSystemTrayIcon,
     QTextBrowser, QTextEdit, QVBoxLayout, QWidget,
@@ -513,6 +513,8 @@ class MainWindow(QMainWindow):
         self._review_token = None
         self._rename_target = None
         self._project_directory = None
+        self._pending_open = None
+        self._sync_project = None
         self.notebook = None
         self._last_snapshot = {}
         self._history_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='lanxi-history')
@@ -859,6 +861,8 @@ class MainWindow(QMainWindow):
         menu.addAction('打开澜汐', self.show_window)
         menu.addAction('吉光片羽', self.open_notebook)
         menu.addAction('运行与额度', self.show_details)
+        sync_menu = menu.addMenu('跨机接续')
+        sync_menu.aboutToShow.connect(lambda: self.fill_sync_menu(sync_menu))
         menu.addAction('查看待审批请求', lambda: self.offer_approval(force=True))
         menu.addSeparator()
         menu.addAction('退出程序', self.quit_app)
@@ -866,6 +870,51 @@ class MainWindow(QMainWindow):
         self.tray.activated.connect(lambda reason: self.show_window() if reason in (
             QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick) else None)
         self.tray.show()
+
+    def fill_sync_menu(self, menu):
+        menu.clear()
+        flow = monitor.personal_sync
+        if flow:
+            view = flow.snapshot()
+            for project in sorted(view['projects']):
+                label = project + ' · ' + view['status'].get(project, '准备中')
+                menu.addAction(label, lambda checked=False, p=project: self.request_project(p))
+            for key in ('配对', '记忆'):
+                if key in view['status']:
+                    menu.addAction(key+' · '+view['status'][key]).setEnabled(False)
+            if not view['projects']:
+                menu.addAction('等待项目登记').setEnabled(False)
+        if (not flow or flow.settings.get('codeOnly') or
+                not flow.settings.get('exchange') and not flow.coordination):
+            menu.addAction('选择两台电脑共用的私人目录…', self.pair_folder)
+            if monitor.config().get('coordination'):
+                menu.addAction('通过已配置的澜汐协调服务配对', lambda: self.enable_flow({'codeOnly':False}))
+        if not flow:
+            menu.addAction('仅启用已登记项目的 GitHub 同步', lambda: self.enable_flow({'codeOnly':True}))
+
+    def pair_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, '选择所有设备均可访问的个人共享目录')
+        if folder:
+            self.enable_flow({'exchange':folder,'codeOnly':False})
+
+    def enable_flow(self, settings):
+        from handoff_sync import atomic_write
+        try:
+            if monitor.personal_sync:
+                settings = {**monitor.personal_sync.settings, **settings}
+            if settings.get('exchange'):
+                share = Path(settings['exchange']).resolve()
+                if any((p/'.git').exists() for p in (share,*share.parents)):
+                    raise ValueError('请选择 Git 工作区以外的私人共享目录')
+            atomic_write(monitor.ROOT/'personal-sync.json',json.dumps(settings,ensure_ascii=False).encode())
+            if monitor.personal_sync:
+                monitor.personal_sync.settings = settings
+                monitor.personal_sync.wake.set()
+            else:
+                monitor.enable_personal_sync(settings,self.stop,self.worker)
+            self.control_message.setText('跨机接续已启动')
+        except (OSError,ValueError) as error:
+            self._popup('跨机接续', str(error))
 
     def show_window(self):
         self.show()
@@ -1098,6 +1147,23 @@ class MainWindow(QMainWindow):
         self.refresh_verse()
         snapshot = monitor.snapshot()
         snap = monitor.client_snapshot(snapshot, self.client)
+        flow = monitor.personal_sync
+        if flow:
+            view = flow.snapshot()
+            if self.client == 'codex':
+                threads = {t['id']:t for t in snap.get('threads',[])}
+                for tid, session in view['sessions'].items():
+                    threads[tid] = {**threads.get(tid,{'id':tid,'title':'跨机会话 · '+session['project']}),'cwd':session['cwd']}
+                snap['threads'] = list(threads.values())
+            if self._pending_open:
+                project, epoch = self._pending_open
+                if view['completed'].get(project,0) > epoch or '配对' in view['status'] and project not in view['status']:
+                    self._pending_open = None
+                    status = view['status'].get(project,'项目尚未准备好')
+                    if status == '已同步':
+                        self.launch_project(Path(view['projects'][project]))
+                    else:
+                        self._popup('无法启卷',status)
         self._last_snapshot = snap
         if self.client == 'codex':
             self.session_titles.refresh()
@@ -1139,6 +1205,12 @@ class MainWindow(QMainWindow):
         item = self.task_items.get(self.selected_thread)
         directory = item.data(0, TASK_DIRECTORY_ROLE) if item is not None else ''
         self._project_directory = Path(directory) if directory and Path(directory).is_absolute() else None
+        self._sync_project = None
+        if monitor.personal_sync:
+            remote = next((t.get('githubProject') for t in snap.get('threads',[]) if t['id']==self.selected_thread),None)
+            mapping = monitor.personal_sync.resolve(self.selected_thread,directory,remote)
+            if mapping:
+                self._sync_project,self._project_directory = mapping
         self.render_controls(snap)
         self.refresh_conversation()
 
@@ -1168,7 +1240,16 @@ class MainWindow(QMainWindow):
             self.operate('rename', title, tid=target[1])
 
     def open_project(self):
-        directory = self._project_directory
+        if self._sync_project:
+            self.request_project(self._sync_project)
+        else:
+            self.launch_project(self._project_directory)
+
+    def request_project(self, project):
+        self._pending_open = project, monitor.personal_sync.request(project)
+        self.control_message.setText('正在后台同步 '+project+'，完成后打开 VS Code')
+
+    def launch_project(self, directory):
         if directory is None or not directory.is_dir():
             self._popup('无法启卷', '当前任务的项目目录在本机不可用。')
             return

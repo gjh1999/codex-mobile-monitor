@@ -2,6 +2,15 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-19 R20 便携分发与会话 ID
+
+- 从主线 `94da2b2` 增加 Windows 便携分发和验收入口。在「案头诸事」右键点击任一 Codex 会话，可查看完整 ID 并复制。本地及已同步到本机的会话适用同一入口。实际续接使用 `codex resume -C "本机项目路径" "会话 ID"`。 [使用和验收](../PORTABLE_CHECK.md)
+- 首轮 R19 试验在受限环境下无法关闭临时测试进程，清理临时 SQLite 时报告文件占用。正常环境复验又发现同一 Windows 会话中的日常实例占用了单实例锁。R20 验收通过独立临时运行目录、Qt offscreen 和测试实例标记启动，并用 Windows Job 对象限定临时进程的清理范围。验收只写测试仓库、分享目录中的本次测试子目录及本机 JSON 报告。第一轮通过后检查重定向的中文输出，改为显式 UTF-8 后再次打包和复验。
+- 在 Windows、Python 3.14.7、Git 2.56.0.windows.4 环境，运行 `python -B -m unittest -v tests.test_desktop_shutdown tests.test_codex_history tests.test_coordination tests.test_personal_flow`，24 项通过，21.055 秒。运行 `python -B tests/smoke_desktop.py --output build-exe/portable-check-20261119/desktop-r20` 通过，验证从右键命中的会话读取 ID，弹窗和剪贴板收到同一值。
+- 用和 `scripts/build-exe.ps1 -AppName Lanxi-Glass-R20-Portable` 一致的应用构建参数在独立目录打包。用 `python -m PyInstaller --onefile --console --name Lanxi-Verify --paths . tests/smoke_personal_exe.py` 打包验收程序。交付在 `release/Lanxi-R20-Portable/`。应用 SHA-256 为 `18cf363f3bcf2308df70833d25b68c14880be7890abecbbf162f6541d4e52c6b`，验收程序为 `6cbb79c8ec59643bfc0a6e3228ed2fb74839b365243f614997431f07210698f2`。文件夹内 `SHA256.txt` 包含每个分发文件的校验值。
+- 在本机运行交付文件夹中的 `验收.cmd`，本机自检 6 项通过，10.36 秒。在同一台机器上同时运行源端和接收端，使用带空格的共享测试路径和两个独立程序实例，分别通过 2 项和 5 项，10.40 秒和 7.47 秒。验证了空工作区克隆、12 MiB 对象过滤、项目相对目录、全局规则、会话记录落盘和双向回传。真实两台电脑的 SMB 连接及 GitHub 权限未在本轮实测。
+- 产物和复现脚本位于 `build-exe/portable-check-20261119/`。双端程序的命令行复现入口为 `python -B build-exe/portable-check-20261119/verify-bundle.py`，汇总见 `portable-local-final.json`、`portable-source.json`、`portable-receiver.json`。R19 的测试基线与完整回归见下节。
+
 ## 2026-11-19 三路代码集成审查
 
 以个人同步版 `c590e2b` 为基线，核对三个任务的交付记录、GitHub 引用和本机工作区。远端只有 `main`，查询时未发现 PR 引用。以下提交均已是该基线的祖先。

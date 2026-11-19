@@ -30,7 +30,9 @@
 
 ## EXE 与数据
 
-当前个人版使用 `release/Lanxi-Glass-R19-Integrated.exe`。它包含下列历史版本的前端、后台和壁纸功能，并保留 R18 的项目代码与记忆同步。已配对设备沿用同一发布目录中的配置。
+R20 可复制整套安装包到另一台 Windows 电脑。右键点击左侧「案头诸事」中的 Codex 会话，选择「查看会话 ID」。弹窗显示完整 ID，可点击「复制 ID」用于终端续接。 [安装与验收](PORTABLE_CHECK.md)
+
+R19 的集成包为 `release/Lanxi-Glass-R19-Integrated.exe`，包含下列历史版本的前端、后台和壁纸功能，以及 R18 的项目代码与记忆同步。
 
 包含本机 Codex 历史接续的构建为 `release/Lanxi-Glass-R17-History.exe`。
 

@@ -559,6 +559,21 @@ def main():
             assert group.isExpanded() and viewport.grab(branch_rect).toImage() == open_branch
             window.message_edit.setPlainText('单个任务的草稿')
             second_row = window.task_choice.visualItemRect(window.task_items[other]).center()
+            tree.customContextMenuRequested.emit(second_row)
+            menu = QApplication.activePopupWidget()
+            assert menu is not None and menu.actions()[0].text() == '查看会话 ID'
+            menu.hide()
+            captured_id = []
+            def copy_session_id():
+                dialog = QApplication.activeModalWidget()
+                captured_id.append(dialog.text())
+                next(btn for btn in dialog.buttons() if btn.text() == '复制 ID').click()
+                dialog.reject()
+            QTimer.singleShot(0, copy_session_id)
+            with patch('desktop_qt.QApplication.clipboard') as clipboard:
+                menu.actions()[0].trigger()
+                clipboard.return_value.setText.assert_called_once_with(other)
+            assert captured_id == [other] and window.selected_thread != other
             QTest.mouseClick(window.task_choice.viewport(), Qt.MouseButton.LeftButton, pos=second_row)
             assert window.selected_thread == other and codex.calls[-1][:2] == (other, 'focus')
             task_rect = tree.visualItemRect(window.task_items[other])

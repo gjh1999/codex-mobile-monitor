@@ -675,6 +675,8 @@ class MainWindow(QMainWindow):
         self.task_choice.currentItemChanged.connect(self.select_task)
         self.task_choice.itemClicked.connect(self.focus_task)
         self.task_choice.itemActivated.connect(self.focus_task)
+        self.task_choice.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.task_choice.customContextMenuRequested.connect(self.show_task_menu)
         self.task_choice.itemExpanded.connect(self.expand_project)
         self.task_choice.itemCollapsed.connect(self.collapse_project)
         self.task_choice.viewport().setAutoFillBackground(False)
@@ -1032,6 +1034,32 @@ class MainWindow(QMainWindow):
                 matches += group_matches
         self.task_empty.setText('案头未见这一件，换个词再寻。' if query else '案头暂空，待写新篇。')
         self.task_empty.setVisible(matches == 0)
+
+    def show_task_menu(self, position):
+        if self.client != 'codex':
+            return
+        item = self.task_choice.itemAt(position)
+        thread = item.data(0, Qt.ItemDataRole.UserRole) if item else None
+        if not thread:
+            return
+        menu = QMenu(self.task_choice)
+        menu.addAction('查看会话 ID', lambda: self.show_session_id(thread))
+        menu.aboutToHide.connect(menu.deleteLater)
+        menu.popup(self.task_choice.viewport().mapToGlobal(position))
+
+    def show_session_id(self, thread):
+        dialog = QMessageBox(self)
+        dialog.setObjectName('lanxiDialog')
+        dialog.setWindowTitle('Codex 会话 ID')
+        dialog.setTextFormat(Qt.TextFormat.PlainText)
+        dialog.setText(thread)
+        dialog.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse |
+                                       Qt.TextInteractionFlag.TextSelectableByKeyboard)
+        copy_button = dialog.addButton('复制 ID', QMessageBox.ButtonRole.ActionRole)
+        dialog.addButton('关闭', QMessageBox.ButtonRole.RejectRole)
+        copy_button.clicked.connect(lambda: QApplication.clipboard().setText(thread))
+        dialog.exec()
+        dialog.deleteLater()
 
     def render_tasks(self, projects, threads, controls):
         thread_status = {task.get('id'): (task.get('status') or {}).get('type') for task in threads}
@@ -1690,7 +1718,16 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
-    shared = QSharedMemory('CodexMobileMonitor.QtDesktop')
+    instance_key = 'CodexMobileMonitor.QtDesktop'
+    probe = os.environ.get('LANXI_VERIFICATION_INSTANCE', '')
+    if (re.fullmatch(r'[0-9a-f]{32}', probe) and app.platformName() == 'offscreen'
+            and Path(os.environ.get('CODEX_HOME', '')) == monitor.ROOT / 'codex'):
+        try:
+            if (monitor.ROOT / '.lanxi-verification').read_text(encoding='ascii') == probe:
+                instance_key += '.verification.' + probe
+        except (OSError, UnicodeError):
+            pass
+    shared = QSharedMemory(instance_key)
     if not shared.create(1):
         import ctypes
         user32 = ctypes.windll.user32

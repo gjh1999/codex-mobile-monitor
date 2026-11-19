@@ -129,6 +129,20 @@ class ComputeQueue:
                           stamp=excluded.stamp,capabilities=excluded.capabilities''',
                        (project, device, instance, self.ownership.clock(), json.dumps(capabilities)))
 
+    def artifact_job(self, project, device, job, instance=None, ticket=None):
+        with self.ownership.transaction() as db:
+            row = self.find(db, project, job)
+            if not row:
+                return None
+            successful = row['state'] == 'finished' and row['exit_code'] == 0
+            if instance is None:
+                allowed = row['submitter'] == device and successful
+            else:
+                allowed = ((row['worker'], row['instance']) == (device, instance)
+                           and compare_digest(row['ticket'] or '', ticket)
+                           and (successful or row['state'] in ('running', 'uncertain')))
+            return self.view(row) if allowed else None
+
     @staticmethod
     def eligible(profile, limits, capabilities):
         return (profile in capabilities['profiles'] and capabilities['cpu'] >= limits['cpu']

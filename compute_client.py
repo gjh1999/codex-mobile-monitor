@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from uuid import UUID
 
+from compute_transfer import download_outputs
 from coordination_client import ControlDenied, device_client
 from handoff import limited
 
@@ -15,6 +16,9 @@ def main():
     commands = parser.add_subparsers(dest='command', required=True)
     for name in ('status', 'cancel'):
         commands.add_parser(name).add_argument('job')
+    download = commands.add_parser('download')
+    download.add_argument('job')
+    download.add_argument('--output', type=Path, required=True)
     for name in ('submit', 'heartbeat', 'claim', 'event'):
         command = commands.add_parser(name)
         if name == 'event':
@@ -25,6 +29,9 @@ def main():
         client = device_client(json.loads(limited(args.config, 2 * 1024**2).decode('utf-8-sig')))
         if client is None:
             raise ValueError('计算作业需要设备协调配置')
+        if args.command == 'download':
+            print(json.dumps(download_outputs(client, args.project, str(UUID(args.job)), args.output)))
+            return
         endpoints = {'submit': 'jobs', 'heartbeat': 'heartbeat', 'claim': 'claim'}
         if args.command in ('status', 'cancel', 'event'):
             job = str(UUID(args.job))
@@ -39,7 +46,7 @@ def main():
             if not isinstance(body, dict):
                 raise ValueError('请求内容需要 JSON 对象')
         print(json.dumps(client.request(args.project, 'compute/' + endpoint, body)))
-    except (OSError, ValueError, KeyError, TypeError, ControlDenied) as error:
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError, ControlDenied) as error:
         parser.exit(1, f'计算作业请求失败：{getattr(error, "detail", None) or error}\n')
 
 

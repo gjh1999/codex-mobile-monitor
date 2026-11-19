@@ -30,11 +30,15 @@
 
 带聊天 Markdown 渲染的毛玻璃版交付文件为 `release/Lanxi-Glass-R16-Markdown.exe`。默认构建名为 `release/Lanxi.exe`。
 
+本次壁纸版交付文件为 `release/Lanxi-Glass-R14.exe`，基于 `def5d64` 构建，包含顶部菜单和大模型归组。
+
 首页从 25 联唐诗里每小时轮换一句，并同步显示作者与篇名。重开窗口沿用当前小时的诗句，电脑唤醒后直接显示当时的一句。诗句可离线轮换，副标题沿用开发方案封面原文。选诗参考 [Wscats/poetry-skills](https://github.com/Wscats/poetry-skills) 使用的 [chinese-poetry《唐诗三百首》](https://github.com/chinese-poetry/chinese-poetry/blob/master/全唐诗/唐诗三百首.json)，并参考 [常建《题破山寺后禅院》](https://zh.wikisource.org/wiki/破山寺後禪院) 与 [钱起《省试湘灵鼓瑟》](https://ctext.org/text.pl?if=gb&node=153790) 的原文。
 
 同目录的桌面包使用相同配置和状态。上一版仍在运行时，先从托盘退出再打开新版。单文件内含 Python、Qt 和壁纸。运行任务需本机已安装并登录对应的 Codex / Claude CLI。
 
-壁纸每 30 分钟离线轮换，默认依次为 Mavericks 海浪、Big Sur 白昼和 Catalina 夜景。系统关闭动画效果时，切换直接生效。可用 `desktopWallpaperMinutes` 调整间隔。中文标题和正文使用 Windows 本机字体。[macOS 原配壁纸档案](https://512pixels.net/projects/default-mac-wallpapers-in-5k/)
+澜汐启动时会读取 Windows「图片」下的 `澜汐/macOS`，包括各版本子目录。横版和方形 JPG、PNG 原图用于全窗背景，窗口取画面中央等比裁切。默认每 30 分钟换一张。图库里有 `10.9 Mavericks` 时从这张海浪开始，其余按路径排序。原图可从每张壁纸详情页的下载按钮取得。[AppleWalls macOS 合集](https://applewalls.com/zh/macos-wallpapers)
+
+源码和 EXE 共用当前用户的图片库。新电脑上可复制整个 `澜汐/macOS` 文件夹，未安装图库时使用内置的 Mavericks 海浪、Big Sur 白昼和 Catalina 夜景。可用 `desktopWallpaperMinutes` 调整间隔，设为 0 固定显示 Mavericks。系统关闭动画效果时直接切换。[内置壁纸来源](https://512pixels.net/projects/default-mac-wallpapers-in-5k/)
 
 EXE 的 `local-config.json`、任务数据库、回复记录和草稿位于 EXE 同目录。源码运行则使用项目根目录，二者不会自动同步状态。`local-config.json` 是可选配置；数据清单见 [配置说明](CONFIGURATION.md)。
 

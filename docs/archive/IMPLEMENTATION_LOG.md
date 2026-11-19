@@ -2,6 +2,13 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-19 macOS 高清壁纸库与 R14 实机切换
+
+- Windows 11、Python 3.14.7、PySide6 6.12.0。基线有三张内置背景。本次核对 AppleWalls 的 16 个合集、89 个条目。下载按钮成功返回 20 张后报告当日限额已达。从独立档案取得 56 张对应画面，来源为 512 Pixels（47）、iDownloadBlog（4）、Basic Apple Guy（4）和 iClarified（1）。保留发布方文件，逐图解码，核对宽高与来源并计算 SHA-256。独立版本的文件格式或分辨率可与 AppleWalls 不同。
+- 当次验收保存了 76 张，共 746,602,598 字节。74 张用于桌面，另有 2 张竖版。图片位于 Windows「图片」的 `澜汐/macOS`，同目录的 `下载清单.csv` 记录每项来源、尺寸、字节数和待续传状态。还有 Mac OS 9 的 Sage Foam 及 macOS 27 Beta 6 的 12 项待补。已登记 Windows 任务 `Lanxi-AppleWalls-20261119`，首次触发时间为本地 11 月 20 日 00:05，按服务端 Retry-After 续传，全部保存后自动注销。后续实际完成时间以清单为准。
+- 在应用内沿用 30 分钟轮换和 0 分钟固定 Mavericks 的设置。运行 `python tests/smoke_desktop.py --output build-exe/verification/applewalls-r14-integrated`，Windows Qt 桌面回归通过。用 Qt offscreen 运行 `python build-exe/verification/applewalls-r14-integrated/verify_rotation.py`，手动触发完整一轮，74 张原图和模糊层均加载，回到首张 6016×3384 Mavericks，固定模式计时器关闭。结果见同目录 `local-library.json`。未等待真实的 30 分钟间隔。
+- 在 `def5d64` 和本次壁纸改动上运行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-exe.ps1 -AppName Lanxi-Glass-R14`，生成 61,531,754 字节的 `release/Lanxi-Glass-R14.exe`。切换时未检测到 R13 进程。首次从临时命令启动后进程退出，随后通过资源管理器启动，独立复核了 R14 的实际进程路径、窗口标题「澜汐」和响应状态。
+
 ## 2026-11-19 对谈 Markdown 排版
 
 - 基线 `8f6d6de`，Windows 11 x64、Python 3.14.7、PySide6 6.12.0。在现有消息气泡内使用 [Qt Markdown 解析](https://doc.qt.io/qt-6.12/qtextdocument.html#setMarkdown)，复用后台排版和最近会话缓存。用虚构的中英文消息验证标题、加粗、嵌套列表、表格、引用、围栏代码和链接。代码保持缩进并随可用宽度换行。

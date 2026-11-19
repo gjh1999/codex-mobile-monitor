@@ -4,11 +4,25 @@ from math import exp
 from pathlib import Path
 from time import monotonic
 
-from PySide6.QtCore import QEvent, QEasingCurve, QPoint, QPointF, QRectF, Qt, QTimer, QVariantAnimation
-from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter, QPainterPath, QPen
+from PySide6.QtCore import QEvent, QEasingCurve, QPoint, QPointF, QRectF, QStandardPaths, Qt, QTimer, QVariantAnimation
+from PySide6.QtGui import QColor, QImage, QImageReader, QLinearGradient, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QApplication, QFrame, QHBoxLayout, QPushButton, QWidget
 
 WALLPAPERS = ('os-x-mavericks-wave.jpg', 'macos-big-sur-day.jpg', 'macos-catalina-night.jpg')
+
+
+def local_wallpapers():
+    pictures = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.PicturesLocation)
+    if not pictures:
+        return []
+    library = Path(pictures) / '澜汐' / 'macOS'
+    images = []
+    for path in library.rglob('*'):
+        if path.suffix.lower() in {'.jpg', '.jpeg', '.png'} and path.is_file():
+            size = QImageReader(str(path)).size()
+            if size.width() >= size.height() > 0:
+                images.append(path)
+    return sorted(images, key=lambda path: (path.stem != '10.9 Mavericks', path))
 
 
 def motion_enabled():
@@ -24,10 +38,18 @@ class OceanBackdrop(QWidget):
     def __init__(self, bundle: Path, minutes):
         super().__init__()
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
-        self.assets = bundle / 'docs' / 'assets'
-        self.wallpapers = [name for name in WALLPAPERS if (self.assets / name).is_file()]
+        assets = bundle / 'docs' / 'assets'
+        bundled = [assets / name for name in WALLPAPERS if (assets / name).is_file()]
+        if type(minutes) is not int or not 0 <= minutes <= 1440:
+            minutes = 30
+        self.wallpapers = local_wallpapers()
+        if minutes == 0:
+            self.wallpapers = [path for path in self.wallpapers if path.stem == '10.9 Mavericks']
         self.index = 0
         self.current = self.load_wallpaper()
+        if self.current[0].isNull():
+            self.wallpapers = bundled
+            self.current = self.load_wallpaper()
         self.previous = None
         self.fade = 1.0
         self.transition = QVariantAnimation(self)
@@ -39,18 +61,19 @@ class OceanBackdrop(QWidget):
         self.transition.finished.connect(self.finish_fade)
         self.rotation = QTimer(self)
         self.rotation.timeout.connect(self.next_wallpaper)
-        if type(minutes) is not int or not 0 <= minutes <= 1440:
-            minutes = 30
         if minutes and len(self.wallpapers) > 1:
             self.rotation.start(minutes * 60_000)
 
     def load_wallpaper(self):
-        if not self.wallpapers:
-            return QImage(), QImage()
-        image = QImage(str(self.assets / self.wallpapers[self.index]))
-        # Downsample once per wallpaper, then interpolate in the painter.
-        soft = image.scaledToWidth(100, Qt.TransformationMode.SmoothTransformation)
-        return image, soft
+        while self.wallpapers:
+            self.index %= len(self.wallpapers)
+            image = QImage(str(self.wallpapers[self.index]))
+            if not image.isNull():
+                soft = image.scaledToWidth(100, Qt.TransformationMode.SmoothTransformation)
+                return image, soft
+            self.wallpapers.pop(self.index)
+        self.index = 0
+        return QImage(), QImage()
 
     def next_wallpaper(self):
         if len(self.wallpapers) < 2:

@@ -30,8 +30,12 @@ PROJECT = "lanxi-check/fixture"
 PROJECT_FOLDER = Path("客户甲/工具组/项目 A")
 MEMORY = Path("notes/Codex")
 BIG_FILE = "fixture-large.bin"
-SHARE_PREFIX = "Lanxi-R21-test-"
 TIMEOUT = 90
+MENU = {
+    "1": ("local", "本机自检（默认）"),
+    "2": ("cloud-source", "阿里云验收源电脑"),
+    "3": ("cloud-receiver", "阿里云验收接收电脑"),
+}
 
 
 def write(path, text):
@@ -81,15 +85,6 @@ def read_is(path, expected):
     return path.read_text(encoding="utf-8").strip() == expected
 
 
-def require_share(value):
-    root = Path(value.strip().strip('"'))
-    check(root.is_absolute() and root.is_dir(), "请输入两台电脑都能读写的已存在共享目录绝对路径。")
-    check(
-        not any((p / ".git").exists() for p in (root, *root.parents)), "共享测试目录需要位于 Git 项目之外。"
-    )
-    return root
-
-
 def source_fixture(exchange, repo, profile):
     bare = exchange / "remote.git"
     git(None, "init", "--bare", "-b", "main", str(bare))
@@ -115,7 +110,6 @@ def source_fixture(exchange, repo, profile):
     )
     write(profile / relative, "".join(json.dumps(event) + "\n" for event in events))
     return {
-        "schema": 1,
         "id": thread,
         "blob": git(repo, "rev-parse", "HEAD:" + BIG_FILE),
         "session_hash": hash_file(profile / relative),
@@ -134,13 +128,12 @@ def hash_file(path):
 @contextmanager
 def isolated_git(root, exchange):
     bare = exchange / "remote.git"
-    uri = bare.as_uri() if not bare.drive.startswith("\\\\") else "file:////" + bare.as_uri()[7:]
     inherited = {name: value for name, value in os.environ.items() if not name.startswith("GIT_")}
     inherited.update(GIT_CONFIG_GLOBAL=str(root / "test.gitconfig"), GIT_CONFIG_NOSYSTEM="1")
     with patch.dict(os.environ, inherited, clear=True):
         git(None, "config", "--global", "user.name", "Lanxi verification")
         git(None, "config", "--global", "user.email", "fixture@example.invalid")
-        git(None, "config", "--global", f"url.{uri}.insteadOf", REMOTE)
+        git(None, "config", "--global", f"url.{bare.as_uri()}.insteadOf", REMOTE)
         git(None, "config", "--global", "safe.directory", bare.as_posix())
         yield
 
@@ -219,50 +212,24 @@ def running(exe, runtime, *, local_appdata=None, arguments=()):
             kernel.CloseHandle(job)
 
 
-def verify(exe, root, exchange, mode, report):
+def verify_local(exe, root, report):
+    exchange = root / "relay"
+    exchange.mkdir()
     source, receiver = root / "source-projects" / PROJECT_FOLDER, root / "receiver"
     source_runtime = root / "source"
     note_key = f"notes/{PROJECT}/decision.md"
-    ready = exchange / "source-ready.json"
-    checked = exchange / "source-verified.json"
-    returned = exchange / "receiver-returned.json"
-    if mode == "receiver":
-        check(
-            exchange.name.startswith(SHARE_PREFIX) and ready.is_file(),
-            f"找不到源机验收标记，请输入源机显示的完整测试子目录。\n{exchange}",
-        )
     database = Records(exchange / "lanxi-personal.sqlite", "personal")
     with isolated_git(root, exchange):
-        if mode != "receiver":
-            source_profile = prepare_runtime(exe, source_runtime, exchange, source)
-            fixture = source_fixture(exchange, source, source_profile)
-            with running(exe, source_runtime) as proc:
-                session_key = f"sessions/{PROJECT}/{session_path(fixture).name}"
-                wait_for(
-                    "源机发布项目和记忆",
-                    lambda: (
-                        database.read(note_key) == b"source note\n" and database.read(session_key) is not None
-                    ),
-                    proc,
-                )
-                report("源机启动并发布项目记忆")
-                if mode == "source":
-                    write_json(ready, fixture)
-                    print(f"\n在另一台电脑选 3，输入此目录\n{exchange}\n", flush=True)
-                    verify_return(source, returned, fixture, proc, 20 * 60)
-                    write_json(checked, {"id": fixture["id"], "status": "passed"})
-                    report("源机收到接收机保存的代码和同路径项目记忆")
-                    return
-        else:
-            fixture = json.loads(ready.read_text(encoding="utf-8"))
-            check(
-                fixture.get("schema") == 1
-                and str(uuid.UUID(fixture["id"])) == fixture["id"]
-                and re.fullmatch(r"[a-f0-9]{40}|[a-f0-9]{64}", fixture["blob"])
-                and re.fullmatch(r"[a-f0-9]{64}", fixture["session_hash"]),
-                "源机的验收标记格式无效。",
+        source_profile = prepare_runtime(exe, source_runtime, exchange, source)
+        fixture = source_fixture(exchange, source, source_profile)
+        with running(exe, source_runtime) as proc:
+            session_key = f"sessions/{PROJECT}/{session_path(fixture).name}"
+            wait_for(
+                "源机发布项目和记忆",
+                lambda: database.read(note_key) == b"source note\n" and database.read(session_key) is not None,
+                proc,
             )
-            check(not returned.exists(), "这组验收已回传。请在源机开启一组新验收。")
+            report("源机启动并发布项目记忆")
 
         profile = prepare_runtime(exe, receiver, exchange)
         target = root / "receiver-projects" / PROJECT_FOLDER
@@ -297,39 +264,29 @@ def verify(exe, root, exchange, mode, report):
                 ),
                 proc,
             )
-            write_json(returned, {"id": fixture["id"], "head": git(target, "rev-parse", "HEAD")})
+            receiver_head = git(target, "rev-parse", "HEAD")
             report("接收机自动提交和回传代码、项目记忆")
-            if mode == "receiver":
-                wait_for(
-                    "源机确认收到回传",
-                    lambda: (
-                        checked.is_file()
-                        and json.loads(checked.read_text(encoding="utf-8"))["id"] == fixture["id"]
-                    ),
-                    proc,
-                )
-                report("源机确认回传成功")
-                return
         with running(exe, source_runtime) as proc:
-            verify_return(source, returned, fixture, proc, TIMEOUT)
+            wait_for(
+                "源机收到回传的代码和记忆",
+                lambda: (
+                    read_is(source / "app.py", "# receiver change")
+                    and read_is(source / MEMORY / "decision.md", "receiver note")
+                    and receiver_head == git(source, "rev-parse", "HEAD")
+                ),
+                proc,
+            )
             report("源端收到回传，双方 Git 提交一致")
 
 
-def verify_return(source, marker, fixture, proc, seconds):
-    def returned():
-        receipt = json.loads(marker.read_text(encoding="utf-8"))
-        return (
-            receipt["id"] == fixture["id"]
-            and read_is(source / "app.py", "# receiver change")
-            and read_is(source / MEMORY / "decision.md", "receiver note")
-            and receipt["head"] == git(source, "rev-parse", "HEAD")
-        )
-
-    wait_for("源机收到回传的代码和记忆", returned, proc, seconds)
-
-
 def cloud_roundtrip(mode, data_dir, code, passed):
-    config = json.loads((data_dir / "local-config.json").read_text(encoding="utf-8-sig"))
+    try:
+        config = json.loads((data_dir / "local-config.json").read_text(encoding="utf-8-sig"))
+    except FileNotFoundError as error:
+        raise RuntimeError(
+            "本机尚未配置阿里云配对。请按包内 CLOUD_COORDINATOR.md 的「配对两台电脑」"
+            "设置本机设备配置和令牌，再连接 SSH 隧道后重新验收。"
+        ) from error
     settings = config.get("personalSync")
     override = data_dir / "personal-sync.json"
     if override.is_file():
@@ -362,7 +319,7 @@ def cloud_roundtrip(mode, data_dir, code, passed):
     offer = json.dumps(request).encode()
     store.put(key, EMPTY, offer)
     passed("源设备令牌已验证，已写入独立测试记录")
-    print(f"请在接收电脑选择 5，输入测试码 {code}", flush=True)
+    print(f"请在接收电脑选择 3，输入测试码 {code}", flush=True)
     current = offer
     try:
         deadline = time.monotonic() + 20 * 60
@@ -386,18 +343,18 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--exe", type=Path, required=True)
     parser.add_argument("--output", type=Path)
-    parser.add_argument("--mode", choices=("local", "source", "receiver", "cloud-source", "cloud-receiver"))
+    parser.add_argument("--mode", choices=tuple(mode for mode, _ in MENU.values()))
     parser.add_argument("--data-dir", type=Path)
     parser.add_argument("--code")
-    parser.add_argument("--share")
     args = parser.parse_args()
     if getattr(sys, "frozen", False):
         ctypes.windll.kernel32.SetDllDirectoryW(None)
     mode = args.mode or ("local" if args.output else None)
     if mode is None:
-        print("1  本机自检（默认）\n2  共享目录源电脑\n3  共享目录接收电脑\n4  SSH 云通道源电脑\n5  SSH 云通道接收电脑")
+        for number, (_, label) in MENU.items():
+            print(f"{number}  {label}")
         selected = input("选择模式，直接回车选择 1：").strip() or "1"
-        mode = dict(zip("12345", ("local", "source", "receiver", "cloud-source", "cloud-receiver"))).get(selected)
+        mode = MENU[selected][0] if selected in MENU else None
     started = time.monotonic()
     report = {"status": "failed", "mode": mode, "checks": []}
 
@@ -413,10 +370,10 @@ def main():
         if mode in ("cloud-source", "cloud-receiver"):
             cloud_roundtrip(mode, args.data_dir or user_data_root(), args.code, passed)
         else:
-            check(shutil.which("git") is not None, "本机和共享目录自检需要 Git for Windows。")
+            check(shutil.which("git") is not None, "本机自检需要 Git for Windows。")
             report["git"] = git(None, "--version")
             with tempfile.TemporaryDirectory(prefix="lanxi-check-", ignore_cleanup_errors=True) as temp:
-                verify_fixture_mode(exe, Path(temp), mode, args.share, report, passed)
+                verify_local(exe, Path(temp), passed)
         report["status"] = "passed"
         print("\n验收通过。", flush=True)
     except HTTPError as error:
@@ -443,19 +400,6 @@ def main():
     write_json(output, report)
     print(f"验收报告\n{output}", flush=True)
     return 0 if report["status"] == "passed" else 1
-
-
-def verify_fixture_mode(exe, root, mode, share, report, passed):
-    if mode == "local":
-        exchange = root / "relay"
-        exchange.mkdir()
-    else:
-        exchange = require_share(share or input("共享目录绝对路径（两端都能读写）："))
-        if mode == "source":
-            exchange /= SHARE_PREFIX + uuid.uuid4().hex[:12]
-            exchange.mkdir()
-        report["shared_test_folder"] = str(exchange)
-    verify(exe, root, exchange, mode, passed)
 
 
 if __name__ == "__main__":

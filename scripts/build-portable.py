@@ -51,8 +51,9 @@ def main():
     instructions.write_text(
         f'澜汐 R{VERSION}\n\n'
         f'双击 {app}.exe 打开澜汐。旧版正在运行时，先从托盘退出。\n'
-        '首次使用时填写配对码，并选择项目母目录。已有配对和数据会自动读回。\n'
-        '在 Codex 或 Claude Code 主窗口左下角点「测试」，也可右键澜汐托盘图标。\n'
+        '首次使用时点「全新开始」，选择本机项目母目录。已有配对码时可同时填写。\n'
+        '已有配对和数据会自动读回。\n'
+        '在 Codex 或 Claude Code 主窗口左下角点「配对」或「测试」，也可右键澜汐托盘图标。\n'
         '需要在 VS Code 或 PyCharm 中上报项目占用时，解压「IDE上报工具.zip」，'
         '运行「启用IDE上报.cmd」，安装对应插件后重启 IDE。\n',
         encoding='utf-8-sig', newline='\r\n',

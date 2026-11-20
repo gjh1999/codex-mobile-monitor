@@ -14,8 +14,9 @@ from PySide6.QtWidgets import (
 
 
 class DiagnosticsDialog(QDialog):
-    def __init__(self, parent):
+    def __init__(self, parent, has_pairing, pair_device):
         super().__init__(parent)
+        self.has_pairing = has_pairing
         self.setWindowTitle("澜汐测试")
         self.resize(670, 400)
         self.runner = QProcess(self)
@@ -27,7 +28,7 @@ class DiagnosticsDialog(QDialog):
         self.runner.finished.connect(self.process_finished)
         self.runner.errorOccurred.connect(self.process_error)
         box = QVBoxLayout(self)
-        self.status = QLabel("检查本机同步和云配对。测试使用隔离数据。")
+        self.status = QLabel("本机自检可直接运行，双机测试需要两台电脑都已配对。")
         self.status.setWordWrap(True)
         box.addWidget(self.status)
         self.output = QPlainTextEdit()
@@ -35,8 +36,11 @@ class DiagnosticsDialog(QDialog):
         box.addWidget(self.output, 1)
         header = QHBoxLayout()
         self.self_test = QPushButton("开始自检")
-        self.self_test.clicked.connect(lambda: self.run("diagnostics"))
+        self.self_test.clicked.connect(self.run_self_test)
         header.addWidget(self.self_test)
+        pairing = QPushButton("配对…")
+        pairing.clicked.connect(lambda: pair_device(self))
+        header.addWidget(pairing)
         self.source = QPushButton("发起双机测试")
         self.source.clicked.connect(lambda: self.run("cloud-source"))
         header.addWidget(self.source)
@@ -54,7 +58,10 @@ class DiagnosticsDialog(QDialog):
         self.receiver.clicked.connect(self.reply)
         row.addWidget(self.receiver)
         box.addLayout(row)
-        QTimer.singleShot(0, lambda: self.run("diagnostics"))
+        QTimer.singleShot(0, self.run_self_test)
+
+    def run_self_test(self):
+        self.run("diagnostics" if self.has_pairing() else "local")
 
     def reply(self):
         code = self.code.text().strip()

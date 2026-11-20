@@ -24,6 +24,7 @@ from codex_history import read_codex_conversation
 from desktop_glass import FrostedPanel, OceanBackdrop
 from desktop_model_api import ModelApiDialog
 from desktop_notebook import GROUP_HEADER, NotebookStore
+from desktop_pairing import PairingDialog
 from desktop_poetry import COVER_VERSES
 from desktop_qt import MainWindow
 from desktop_theme import configure_text, message_html, set_reading_html, ui_font
@@ -42,6 +43,71 @@ class NoWorkers:
 class Shared:
     def detach(self):
         pass
+
+
+def check_first_setup(window):
+    from project_library import configured_root, set_project_root
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        folder = root / '开发项目'
+        folder.mkdir()
+        for invitation in ('', 'pairing-code-fixture'):
+            data = root / ('paired' if invitation else 'local')
+            data.mkdir()
+            errors = []
+
+            def submit():
+                dialog = QApplication.activeModalWidget()
+                try:
+                    assert isinstance(dialog, PairingDialog)
+                    assert dialog.windowTitle() == '设置项目母目录'
+                    assert dialog.action.text() == '开始使用'
+                    dialog.folder.setText(str(folder))
+                    dialog.code.setText(invitation)
+                    assert dialog.action.text() == ('连接并同步' if invitation else '开始使用')
+                    QTest.mouseClick(dialog.action, Qt.MouseButton.LeftButton)
+                except Exception as error:
+                    errors.append(error)
+                    if dialog is not None:
+                        dialog.reject()
+
+            with (patch.object(monitor, 'ROOT', data),
+                  patch.object(monitor, 'activate_cloud_pairing') as activate,
+                  patch('desktop_pairing.join', side_effect=lambda profile, _code, path: set_project_root(profile, path)) as join):
+                QTimer.singleShot(0, submit)
+                window.open_cloud_pairing(first=True)
+                if errors:
+                    raise errors[0]
+                assert configured_root(data) == folder.resolve()
+                if invitation:
+                    join.assert_called_once_with(data, invitation, folder)
+                    activate.assert_called_once_with(window.stop, window.worker)
+                else:
+                    join.assert_not_called()
+                    activate.assert_not_called()
+
+
+def check_diagnostics_pairing(window):
+    settings = {}
+    with (patch.object(monitor, 'config', return_value=settings),
+          patch.object(window, 'open_device_pairing') as pair,
+          patch('desktop_diagnostics.DiagnosticsDialog.run', autospec=True) as run):
+        test = next(button for button in window.task_panel.findChildren(QPushButton) if button.text() == '测试')
+        pairing = next(button for button in window.task_panel.findChildren(QPushButton) if button.text() == '配对')
+        QTest.mouseClick(pairing, Qt.MouseButton.LeftButton)
+        pair.assert_called_once_with(window)
+        QTest.mouseClick(test, Qt.MouseButton.LeftButton)
+        QTest.qWait(30)
+        dialog = window.diagnostics
+        run.assert_called_once_with(dialog, 'local')
+        shortcut = next(button for button in dialog.findChildren(QPushButton) if button.text() == '配对…')
+        QTest.mouseClick(shortcut, Qt.MouseButton.LeftButton)
+        pair.assert_called_with(dialog)
+        settings['coordination'] = {'url': 'https://example.test'}
+        QTest.mouseClick(dialog.self_test, Qt.MouseButton.LeftButton)
+        run.assert_called_with(dialog, 'diagnostics')
+        dialog.close()
 
 
 class FakeApprovalClient:
@@ -962,6 +1028,8 @@ def main():
             check_notebook(window, args.output)
             check_edge_menu(window, args.output)
             check_model_settings(window, args.output)
+            check_first_setup(window)
+            check_diagnostics_pairing(window)
             check_markdown(window, data, args.output)
             check_process_bubbles(window, args.output)
             from project_library import ENTRY_PREFIX, ProjectLibrary, configured_root

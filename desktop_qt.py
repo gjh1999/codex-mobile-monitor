@@ -39,7 +39,7 @@ from desktop_theme import (
 from desktop_update import DesktopUpdates
 from model_groups import Organizer
 from portable_update import VERSION
-from project_library import ENTRY_PREFIX, SETTINGS as PROJECT_LIBRARY_FILE, configured_root, set_project_root
+from project_library import ENTRY_PREFIX, configured_root, set_project_root
 from rpc_errors import RPCError
 
 MUTED = '#24495f'
@@ -712,6 +712,10 @@ class MainWindow(QMainWindow):
         self.live.setObjectName('status')
         footer = QHBoxLayout()
         footer.addWidget(self.live, 1)
+        pairing = ActionButton('配对')
+        pairing.setToolTip('连接或邀请另一台电脑')
+        pairing.clicked.connect(lambda: self.open_device_pairing(self))
+        footer.addWidget(pairing)
         diagnostics = ActionButton('测试')
         diagnostics.setToolTip('检查本机同步与双机连接')
         diagnostics.clicked.connect(self.open_diagnostics)
@@ -818,7 +822,7 @@ class MainWindow(QMainWindow):
             setattr(self, attr, content)
             details.addWidget(content, 1)
         self.edge_menu = EdgeMenu(root, {
-            WINDOW_TITLE: [('关于澜汐', self.about_lanxi), ('退出程序', self.quit_app)],
+            WINDOW_TITLE: [],
             '任务': [('执舟', self.action_buttons['attach'].click), ('暂泊', self.action_buttons['pause'].click),
                    ('续航', self.action_buttons['resume'].click), ('待你定夺', lambda: self.offer_approval(force=True)),
                    ('运行与额度', self.show_details)],
@@ -904,11 +908,9 @@ class MainWindow(QMainWindow):
         if getattr(sys, 'frozen', False):
             menu.addAction('检查更新…', lambda: self.updater.check(manual=True))
         menu.addSeparator()
+        if include_about:
+            menu.addAction('关于澜汐', self.about_lanxi)
         menu.addAction('退出程序', self.quit_app)
-        self.tray.setContextMenu(menu)
-        self.tray.activated.connect(lambda reason: self.show_window() if reason in (
-            QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick) else None)
-        self.tray.show()
 
     def choose_project_root(self, first=False):
         base = configured_root(monitor.ROOT) or Path.home()
@@ -1045,15 +1047,25 @@ class MainWindow(QMainWindow):
             except OSError as error:
                 self._popup('无法回传大文件', str(error))
 
-    def open_cloud_pairing(self, first=False):
-        if PairingDialog(self, monitor.ROOT).exec() == QDialog.DialogCode.Accepted:
-            try:
-                monitor.activate_cloud_pairing(self.stop, self.worker)
-                self.control_message.setText('本机已配对，正在同步项目')
-            except (OSError, ValueError, KeyError, TypeError) as error:
-                self._popup('跨机接续', str(error))
-        elif first:
-            self.choose_project_root(first=True)
+    def open_device_pairing(self, parent):
+        coordination = monitor.config().get('coordination') or {}
+        if coordination.get('url', '').startswith('https://'):
+            PairingDialog(parent, monitor.ROOT, coordination).exec()
+        else:
+            self.open_cloud_pairing(parent=parent)
+
+    def open_cloud_pairing(self, first=False, *, parent=None):
+        dialog = PairingDialog(parent or self, monitor.ROOT, first=first)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        if not dialog.paired:
+            self.control_message.setText('已保存项目母目录，正在扫描项目')
+            return
+        try:
+            monitor.activate_cloud_pairing(self.stop, self.worker)
+            self.control_message.setText('本机已配对，正在同步项目')
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            self._popup('跨机接续', str(error))
 
     def enable_flow(self, settings):
         from handoff_sync import atomic_write
@@ -1105,7 +1117,9 @@ class MainWindow(QMainWindow):
 
     def open_diagnostics(self):
         if self.diagnostics is None:
-            self.diagnostics = DiagnosticsDialog(self)
+            self.diagnostics = DiagnosticsDialog(
+                self, lambda: bool(monitor.config().get('coordination')), self.open_device_pairing,
+            )
         self.diagnostics.show()
         self.diagnostics.raise_()
         self.diagnostics.activateWindow()
@@ -1971,11 +1985,11 @@ def select_legacy_data(candidates):
     from desktop_storage import has_legacy_data
     dialog = QMessageBox()
     dialog.setWindowTitle('澜汐用户数据')
-    dialog.setText('首次建立固定的用户数据目录。已经使用过澜汐，可以选择旧版 EXE 所在文件夹。')
+    dialog.setText('有旧版数据时可选择旧版 EXE 所在文件夹。全新开始会设置本机项目母目录。')
     choose = dialog.addButton('选择旧版目录', QMessageBox.ButtonRole.AcceptRole)
     fresh = dialog.addButton('全新开始', QMessageBox.ButtonRole.ActionRole)
     dialog.addButton('取消', QMessageBox.ButtonRole.RejectRole)
-    dialog.setDefaultButton(choose)
+    dialog.setDefaultButton(choose if candidates else fresh)
     directory = str(candidates[-1]) if candidates else str(Path.home())
     while True:
         dialog.exec()
@@ -2035,7 +2049,7 @@ def main():
         window.show()
         if getattr(sys, 'frozen', False) and not verification:
             window.updater.watch()
-        if getattr(sys, 'frozen', False) and not verification and not (monitor.ROOT / PROJECT_LIBRARY_FILE).is_file():
+        if getattr(sys, 'frozen', False) and not verification and configured_root(monitor.ROOT) is None:
             if monitor.config().get('coordination'):
                 QTimer.singleShot(0, lambda: window.choose_project_root(first=True))
             else:

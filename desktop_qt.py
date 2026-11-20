@@ -831,6 +831,7 @@ class MainWindow(QMainWindow):
             '设置': [('大模型 API…', self.open_model_api)],
             '窗口': [('最大化／还原', self.toggle_maximized), ('收起到托盘', self.close)],
         })
+        self.populate_app_menu(self.edge_menu.menus[WINDOW_TITLE], include_about=True)
         task_menu = self.edge_menu.menus['任务']
         task_menu.aboutToShow.connect(self.refresh_task_menu)
 
@@ -896,6 +897,13 @@ class MainWindow(QMainWindow):
         self.tray.setIcon(self.windowIcon() if not self.windowIcon().isNull() else self.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon))
         self.tray.setToolTip(WINDOW_TITLE)
         menu = QMenu(self)
+        self.populate_app_menu(menu)
+        self.tray.setContextMenu(menu)
+        self.tray.activated.connect(lambda reason: self.show_window() if reason in (
+            QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick) else None)
+        self.tray.show()
+
+    def populate_app_menu(self, menu, *, include_about=False):
         menu.addAction('打开澜汐', self.show_window)
         menu.addAction('吉光片羽', self.open_notebook)
         menu.addAction('运行与额度', self.show_details)

@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PySide6.QtCore import QEvent, QMimeData, QPoint, QPointF, QRect, QTimer, Qt, QUrl
 from PySide6.QtGui import QEnterEvent, QFontDatabase, QImage, QMouseEvent, QRawFont, QTextCursor, QTextDocument
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QDialog, QFrame, QLabel, QMessageBox, QPushButton
+from PySide6.QtWidgets import QApplication, QDialog, QFrame, QLabel, QMenu, QMessageBox, QPushButton
 
 import monitor
 from automation import Approvals
@@ -273,6 +273,8 @@ def check_edge_menu(window, output):
         assert wait_until(lambda: menu.opacity.opacity() == 1.0)
         assert list(menu.menus) == ['澜汐', '任务', '显示', '设置', '窗口']
         assert menu.menus['设置'].actions()[0].text() == '大模型 API…'
+        check_app_menu(window, output)
+        move(80, 1)
         tasks = menu.menus['任务']
         tasks.popup(menu.mapToGlobal(QPoint(80, menu.HEIGHT)))
         details = next(action for action in tasks.actions() if action.text() == '运行与额度')
@@ -283,6 +285,64 @@ def check_edge_menu(window, output):
         assert wait_until(menu.panel.isHidden) and menu.height() == menu.HOT_ZONE
         assert window.client_switch.geometry() == geometry
         window.grab().save(str(output / 'top-menu-hidden.png'))
+
+
+def check_app_menu(window, output):
+    edge = window.edge_menu
+    app_menu = edge.menus['澜汐']
+    tray_menu = window.tray.contextMenu()
+    tray_labels = [action.text() for action in tray_menu.actions()]
+    assert [action.text() for action in app_menu.actions() if action.text() != '关于澜汐'] == tray_labels
+    assert '检查更新…' not in tray_labels
+
+    settings = {}
+    result = []
+
+    def inspect_popup():
+        sync = next(action for action in app_menu.actions() if action.text() == '跨机接续')
+        submenu = sync.menu()
+        try:
+            assert app_menu.isVisible() and edge.active_menu is app_menu
+            app_menu.grab().save(str(output / 'top-menu-lanxi.png'))
+            app_menu.setActiveAction(sync)
+            QTest.keyClick(app_menu, Qt.Key.Key_Right)
+            assert wait_until(submenu.isVisible)
+            assert edge.revealed and edge.active_menu is app_menu
+            assert [action.text() for action in submenu.actions()][0] == '使用配对码连接…'
+            QTest.keyClick(submenu, Qt.Key.Key_Escape)
+            details = next(action for action in app_menu.actions() if action.text() == '运行与额度')
+            QTest.mouseClick(app_menu, Qt.MouseButton.LeftButton, pos=app_menu.actionGeometry(details).center())
+            assert window.details_dialog.isVisible()
+            window.details_dialog.hide()
+        except Exception as error:
+            result.append(error)
+        else:
+            result.append(None)
+        finally:
+            submenu.hide()
+            app_menu.hide()
+
+    with (patch.object(monitor, 'config', return_value=settings), patch.object(monitor, 'personal_sync', None)):
+        QTimer.singleShot(20, inspect_popup)
+        button = app_menu.parentWidget()
+        QTest.mouseClick(button, Qt.MouseButton.LeftButton)
+        assert wait_until(lambda: len(result) == 1)
+        if result[0] is not None:
+            raise result[0]
+        settings['coordination'] = {'url': 'https://example.test'}
+        for menu in (app_menu, tray_menu):
+            submenu = next(action.menu() for action in menu.actions() if action.text() == '跨机接续')
+            submenu.popup(edge.mapToGlobal(QPoint(100, edge.HEIGHT)))
+            assert submenu.actions()[0].text() == '邀请另一台电脑…'
+            submenu.hide()
+
+    with patch.object(sys, 'frozen', True, create=True), patch.object(window.updater, 'check') as check:
+        for include_about in (False, True):
+            packaged_menu = QMenu(window)
+            window.populate_app_menu(packaged_menu, include_about=include_about)
+            next(action for action in packaged_menu.actions() if action.text() == '检查更新…').trigger()
+            packaged_menu.deleteLater()
+        assert check.call_count == 2 and check.call_args.kwargs == {'manual': True}
 
 
 def check_model_settings(window, output):

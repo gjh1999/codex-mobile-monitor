@@ -434,14 +434,15 @@ class PersonalSync:
             result = None
             try:
                 result = self.cycle(stop)
-            except (OSError, ValueError, sqlite3.Error, KeyError, TypeError, subprocess.TimeoutExpired):
+            except (OSError, ValueError, sqlite3.Error, KeyError, TypeError, AttributeError, subprocess.TimeoutExpired):
                 with self.lock:
                     self.epoch += 1
                     self.status = {"配对": "个人同步暂不可用，请检查项目登记和配对连接"}
                     if self.connection:
                         self.connection = self.status["配对"]
-            if manual is not None:
-                manual.set_result(None if stop.is_set() else result)
+            finally:
+                if manual is not None:
+                    manual.set_result(None if stop.is_set() else result)
             for _ in range(interval * 4):
                 if stop.wait(0.25) or self.wake.is_set():
                     break

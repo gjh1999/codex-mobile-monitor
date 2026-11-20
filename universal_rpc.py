@@ -11,7 +11,7 @@ from automation import APPROVAL_METHODS
 
 
 from rpc_errors import RPCError
-from coordination_client import ControlDenied, ProjectWrites
+from coordination_client import ControlDenied, ProjectWrites, personal_project_at
 
 
 class UniversalRPC:
@@ -189,6 +189,8 @@ class UniversalRPC:
 class CodexRPC(UniversalRPC):
     """Codex-specific RPC client."""
     project_writes = None
+    personal_flow = None
+    handing_off = False
 
     def __init__(self, approvals, journal=None, custom_process=None, coordination=None):
         self.approvals = approvals
@@ -204,11 +206,37 @@ class CodexRPC(UniversalRPC):
             if session:
                 params = {**params, 'cwd': session['cwd'], 'path': session['path']}
         writes = self.project_writes
-        if not writes:
-            return super().call(method, params, timeout)
         if method == 'thread/start':
             result = super().call(method, params, timeout)
             self.loaded_threads.add(result['thread']['id'])
+            return result
+        thread = params.get('threadId')
+        reading = method in ('thread/read', 'thread/turns/list', 'thread/goal/get', 'thread/settings/read')
+        if thread and not reading and self.personal_flow:
+            flow = self.personal_flow()
+            locks = flow.task_locks() if flow else None
+            project = self.personal_project(thread, params.get('cwd')) if locks else None
+            if project:
+                previous = params.get('_sendGuard')
+
+                def personal_guard():
+                    if self.handing_off:
+                        raise ControlDenied(detail='当前正在交还任务，请稍候。')
+                    if previous and not previous():
+                        return False
+                    try:
+                        locks.claim(thread, project, flow.session_digest)
+                    except ControlDenied as error:
+                        if method == 'thread/resume':
+                            raise ControlDenied(detail='active writer: ' + error.detail) from error
+                        raise
+                    return previous is None or previous()
+
+                params = {**params, '_sendGuard': personal_guard}
+        if not writes:
+            result = super().call(method, params, timeout)
+            if method == 'thread/resume':
+                self.loaded_threads.add(thread)
             return result
         if method not in ('turn/start', 'turn/steer', 'thread/goal/set', 'thread/resume', 'thread/settings/update'):
             return super().call(method, params, timeout)
@@ -273,6 +301,26 @@ class CodexRPC(UniversalRPC):
 
     def approval_guard(self, thread):
         writes = self.project_writes
+        flow = self.personal_flow() if self.personal_flow else None
+        locks = flow.task_locks() if flow else None
+        if locks:
+            if not thread:
+                raise ControlDenied(detail='无法核对此审批所属的任务。')
+            project = self.personal_project(thread)
+            if not project:
+                return self.project_approval_guard(thread) if writes else None
+            owner_guard = self.project_approval_guard(thread) if writes else None
+
+            def guard():
+                if self.handing_off:
+                    return False
+                locks.claim(thread, project, flow.session_digest)
+                return owner_guard() if owner_guard else True
+            return guard
+        return self.project_approval_guard(thread) if writes else None
+
+    def project_approval_guard(self, thread):
+        writes = self.project_writes
         if not writes:
             return None
         if not thread:
@@ -286,6 +334,48 @@ class CodexRPC(UniversalRPC):
             return True
 
         return guard
+
+    def personal_project(self, thread, cwd=None):
+        session = self.personal_session(thread) if getattr(self, 'personal_session', None) else None
+        if session:
+            return session['project']
+        if not cwd:
+            cwd = self.call('thread/read', {'threadId': thread, 'includeTurns': False}).get('thread', {}).get('cwd')
+        if not cwd or not Path(cwd).is_dir():
+            raise ControlDenied(detail='active writer: 尚未核对会话对应的本机项目，请等目录同步后重试。')
+        return personal_project_at(cwd)
+
+    def handoff_personal(self, thread):
+        flow = self.personal_flow() if self.personal_flow else None
+        locks = flow.task_locks() if flow else None
+        if not locks:
+            raise ControlDenied(detail='请先完成澜汐云配对。')
+        route = '/' + thread.lower()
+        state = locks.request(route)
+        if not state['device'] and state['checkpoint']:
+            return
+        if state['device'] != locks.client.device:
+            raise ControlDenied(detail='只有当前持有任务的电脑可以交还。')
+        project = self.personal_project(thread)
+        if not project:
+            raise ControlDenied(detail='尚未找到任务对应的 GitHub 项目。')
+        ticket = locks.claim(thread, project, flow.session_digest)
+        with self.write_lock:
+            self.handing_off = True
+        try:
+            if not all(ProjectWrites.idle(self, tid, allow_unloaded=True)
+                       for tid in self.loaded_threads | self.owned_threads):
+                raise ControlDenied(detail='请等本机运行中的 Codex 对话结束并处理审批，再交还任务。')
+            with self.write_lock:
+                self.closed = True
+                self.p.stdin.close()
+            self.p.wait(timeout=5)
+            if self.project_writes:
+                self.project_writes.release_closed()
+            checkpoint = flow.publish_handoff(thread)
+            locks.handoff(thread, ticket, checkpoint)
+        finally:
+            self.handing_off = False
 
     def reconcile_writes(self, shutdown=False):
         self.project_writes.release_finished(self)

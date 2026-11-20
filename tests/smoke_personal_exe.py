@@ -20,8 +20,8 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError
 
-from code_sync import run
-from coordination_client import ControlClient, device_token
+from code_sync import LIMIT, run
+from coordination_client import ControlClient, PersonalTaskLocks, device_token
 from desktop_storage import user_data_root
 from personal_relay import EMPTY, Records, RemoteRecords, digest
 
@@ -30,6 +30,7 @@ PROJECT = "lanxi-check/fixture"
 PROJECT_FOLDER = Path("客户甲/工具组/项目 A")
 MEMORY = Path("notes/Codex")
 BIG_FILE = "fixture-large.bin"
+BELOW_LIMIT = "fixture-below-limit.bin"
 TIMEOUT = 90
 MENU = {
     "1": ("local", "本机自检（默认）"),
@@ -93,9 +94,10 @@ def source_fixture(exchange, repo, profile):
     git(repo, "init", "-b", "main")
     git(repo, "remote", "add", "origin", REMOTE)
     write(repo / "app.py", "# source change\n")
-    with (repo / BIG_FILE).open("wb") as stream:
-        stream.truncate(12 * 1024 * 1024)
-    git(repo, "add", "app.py", BIG_FILE)
+    for name, size in ((BIG_FILE, LIMIT), (BELOW_LIMIT, LIMIT - 1)):
+        with (repo / name).open("wb") as stream:
+            stream.truncate(size)
+    git(repo, "add", "app.py", BIG_FILE, BELOW_LIMIT)
     git(repo, "commit", "-m", "Lanxi fixture base")
     git(repo, "push", "-u", "origin", "main")
     write(repo / MEMORY / "decision.md", "source note\n")
@@ -250,9 +252,11 @@ def verify_local(exe, root, report):
             large_object = run(target, "cat-file", "-e", fixture["blob"], check=False)
             check(
                 not (target / BIG_FILE).exists() and large_object.returncode != 0,
-                "12 MiB 测试文件进入了接收端工作区或 Git 对象库。",
+                "达到 100 MiB 的测试文件进入了接收端工作区或 Git 对象库。",
             )
-            report("12 MiB 大文件未进入工作区或 Git 对象库")
+            check((target / BELOW_LIMIT).is_file() and (target / BELOW_LIMIT).stat().st_size == LIMIT - 1,
+                  "小于 100 MiB 的测试文件没有完整检出。")
+            report("小于 100 MiB 的文件已检出，达到上限的文件仍留在源端")
             write(target / "app.py", "# receiver change\n")
             write(note, "receiver note\n")
             bare = exchange / "remote.git"
@@ -279,7 +283,7 @@ def verify_local(exe, root, report):
             report("源端收到回传，双方 Git 提交一致")
 
 
-def cloud_roundtrip(mode, data_dir, code, passed):
+def cloud_client(data_dir):
     try:
         config = json.loads((data_dir / "local-config.json").read_text(encoding="utf-8-sig"))
     except FileNotFoundError as error:
@@ -302,6 +306,11 @@ def cloud_roundtrip(mode, data_dir, code, passed):
     client = ControlClient(cfg, token)
     with client.opener.open(client.url + "/healthz", timeout=5) as response:
         check(json.load(response) == {"status": "ready"}, "协调服务尚未就绪。")
+    return client
+
+
+def cloud_roundtrip(mode, data_dir, code, passed):
+    client = cloud_client(data_dir)
     passed("本机已连接协调服务")
     store = RemoteRecords(client)
     source = mode == "cloud-source"
@@ -345,7 +354,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--exe", type=Path, required=True)
     parser.add_argument("--output", type=Path)
-    parser.add_argument("--mode", choices=tuple(mode for mode, _ in MENU.values()))
+    parser.add_argument("--mode", choices=(*[mode for mode, _ in MENU.values()], "diagnostics"))
     parser.add_argument("--data-dir", type=Path)
     parser.add_argument("--code")
     args = parser.parse_args()
@@ -369,13 +378,17 @@ def main():
         exe = args.exe.resolve()
         check(exe.is_file(), f"找不到澜汐程序\n{exe}")
         report["app_sha256"] = hash_file(exe)
+        data_dir = args.data_dir or user_data_root()
         if mode in ("cloud-source", "cloud-receiver"):
-            cloud_roundtrip(mode, args.data_dir or user_data_root(), args.code, passed)
+            cloud_roundtrip(mode, data_dir, args.code, passed)
         else:
             check(shutil.which("git") is not None, "本机自检需要 Git for Windows。")
             report["git"] = git(None, "--version")
             with tempfile.TemporaryDirectory(prefix="lanxi-check-", ignore_cleanup_errors=True) as temp:
                 verify_local(exe, Path(temp), passed)
+            if mode == "diagnostics":
+                PersonalTaskLocks(cloud_client(data_dir)).request()
+                passed("已连接协调服务并验证本机配对及项目占用接口")
         report["status"] = "passed"
         print("\n验收通过。", flush=True)
     except HTTPError as error:

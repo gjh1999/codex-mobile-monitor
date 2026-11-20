@@ -2,6 +2,22 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-20 R28 按需借用与回传大文件
+
+- 以 R27 为基线。借用端从配对设备清单选项目和文件，来源端在线后分块上传。两端用 SHA-256 验证原版和回传版，台式机原文件发生变化时保留两份本机内容。成功或冲突回执写入 SQLite 后清除协调服务器临时目录。正常后台同步继续只登记 100 MiB 及以上文件的清单。
+- Windows Python 3.14.7 执行 `python -B -m unittest tests.test_temporary_files tests.test_large_inventory tests.test_notebook_sync tests.test_personal_project_lock tests.test_coordination tests.test_monitor`。首次测试发现字面量回执路由被变量路由遮挡，调整路由后 23 项通过，3.843 秒。覆盖错设备拒绝、分块续传、回传确认后清除字节、源端冲突保留双方文件。
+- 输出目录 `build-exe/verification/file-exchange-r28-20261120/`。用两套隔离配置从 Windows 经真实阿里云完成 100 MiB 借用、客户端下载、修改回传、源端应用，88.64 秒。生产容器确认测试记录仍存在且临时文件目录已清理。R28 便携包本机六项验收通过。更新 ZIP 大小 95,167,375 字节，SHA-256 为 `bc849c56a57ac67e6650aea3b414c9e45ec895ae62d2429444f6f881beba343b`。两台物理机器及真实项目文件的现场验收待测。 [借用与回传](../PORTABLE_CHECK.md)
+
+## 2026-11-20 R24 至 R27 项目占用、软件内更新、吉光片羽与文件清单
+
+- 以 R23 为基线。R24 服务端按私人空间和 GitHub 仓库标识分配控制权。通过两套临时的已配对身份，在实际阿里云验证不同设备竞争同一项目、IDE 窗口报到与归还、交接检查点不匹配时拒绝接入。VS Code 0.2.0 VSIX 与 PyCharm 263 插件构建通过，IDE 原生 Codex 聊天仍应遵守上报提示。未在两台物理电脑同时运行 IDE 验收。
+- R24 接入软件内更新，旧版需要手动安装一次 R24。用隔离 Qt 窗口确认并从真实阿里云下载 R25，校验后将 EXE 放进独立版本目录，旧用户设置保留。首次发布清单因 Windows 到 Linux 传入的行尾附带回车，文件名异常导致接口 404。校正后同一下载链路通过。旧 R23 服务镜像保留，原 SSH 协调容器继续运行。
+- R25 随记、待办、完成状态、归档和手动分组逐条同步。两端同时改同一正文时保存冲突副本，不传整个数据库。模型自动分组在本机生成。R25 同时引入托盘「测试」窗口。首次实包诊断七项通过但窗口未正确更新结束状态，修正 Qt 信号回调命名后复跑七项通过，11.13 秒。
+- R26 增加大文件清单。通过真实阿里云上传临时测试文件的相对路径和大小，远端显示文件缺失，且接收目录未出现文件本体。验证 HTTPS 更新接口实际下载 R26 与本机包哈希一致。阿里云系统盘 `/dev/vda3` 容量 40 GB，检查时已用 5.1 GB、可用 33 GB。
+- R27 按用户确认将代码同步和清单边界设为单文件 100 MiB。使用旧门槛创建部分克隆后，以同一 Git 提交运行新门槛迁移，旧过滤范围内新允许的文件可恢复。实包 `验收.cmd --mode local` 证明不足 100 MiB 的对象检出，恰好 100 MiB 的对象仍留源机。云笔记单条记录仍使用原有上限。
+- 回归命令 `python -B -m unittest tests.test_large_inventory tests.test_notebook_sync tests.test_personal_project_lock tests.test_ide_activity tests.test_coordination tests.test_task_control tests.test_monitor tests.test_personal_flow tests.test_desktop_storage`，65 项通过，31.426 秒。原桌面验收在 Qt 离屏平台的 Esc 断言处停止，改用 Windows 平台后发现旧测试直接检查本地分组缓存，已改为核对同步存储和实际界面归组，复验通过。验证目录为 `build-exe/verification/{project-lock-r24,notebook-r25,inventory-r26,threshold-r27}-20261120/`。
+- 未开通 OSS。大文件本体只在用户发起按需借用时考虑临时传输。 [项目控制](../PROJECT_CONTROL.md) · [便携包操作](../PORTABLE_CHECK.md)
+
 ## 2026-11-20 R23 首次配对向导
 
 - 以 R21.2 为基线。首次打开应用，同屏填写配对码和项目母目录。台式机可在托盘邀请其他设备，笔记本保存自己的 Windows DPAPI 凭据。服务端用 SQLite 记录配对码哈希及单次领取状态，十分钟后过期。同一台设备可重试尚未超时的请求。配对成功后托盘报告连接与重试状态。

@@ -18,7 +18,7 @@ from PySide6.QtCore import QEvent, QEasingCurve, QPoint, QPropertyAnimation, QRe
 from PySide6.QtGui import QColor, QCursor, QDesktopServices, QFont, QIcon, QKeySequence, QPainter, QPainterPath, QPen, QShortcut, QTextDocument
 from PySide6.QtWidgets import (
     QApplication, QCompleter, QDialog, QFrame, QGraphicsDropShadowEffect, QGraphicsOpacityEffect,
-    QFileDialog, QHBoxLayout, QLabel, QLineEdit, QTreeWidget, QTreeWidgetItem,
+    QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QTreeWidget, QTreeWidgetItem,
     QMainWindow, QMenu, QMessageBox, QPushButton, QSizePolicy, QStackedWidget, QStyle,
     QStyleOptionViewItem, QSystemTrayIcon,
     QTextBrowser, QTextEdit, QVBoxLayout, QWidget,
@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 
 import monitor
 from desktop_glass import ClientSwitch, FrostedPanel, OceanBackdrop, motion_enabled
+from desktop_diagnostics import DiagnosticsDialog
 from desktop_model_api import ModelApiDialog
 from desktop_notebook import NotebookStore, NotebookWorkspace
 from desktop_pairing import PairingDialog
@@ -35,6 +36,7 @@ from desktop_theme import (
     SLASH_MENU_STYLE, STYLESHEET, configure_text, format_reading_document, insert_markdown,
     message_html, process_html, ui_font, warning_html, web_link,
 )
+from desktop_update import DesktopUpdates
 from model_groups import Organizer
 from project_library import ENTRY_PREFIX, SETTINGS as PROJECT_LIBRARY_FILE, configured_root, set_project_root
 from rpc_errors import RPCError
@@ -531,6 +533,8 @@ class MainWindow(QMainWindow):
         self._pending_open = None
         self._sync_project = None
         self.notebook = None
+        self.diagnostics = None
+        self._notebook_revision = 0
         self._last_snapshot = {}
         self._history_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='lanxi-history')
         self._history_busy = False
@@ -856,6 +860,7 @@ class MainWindow(QMainWindow):
             ('attach', '执舟', '接入任务'), ('pause', '暂泊', '暂停任务'),
             ('resume', '续航', '继续任务'), ('manage', '扬帆', '开启自动推进'),
             ('unmanage', '收帆', '关闭自动推进'), ('detach', '移离案头', '移出任务'),
+            ('handoff', '交还任务', '同步当前会话并将操作权交还给下一台电脑'),
             ('open_project', '启卷', '在 VS Code 打开任务项目'),
         ):
             button = QPushButton(text)
@@ -875,6 +880,7 @@ class MainWindow(QMainWindow):
             actions.addWidget(button)
 
     def build_tray(self):
+        self.updater = DesktopUpdates(self)
         self.tray = QSystemTrayIcon(self)
         self.tray.setIcon(self.windowIcon() if not self.windowIcon().isNull() else self.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon))
         self.tray.setToolTip(WINDOW_TITLE)
@@ -882,11 +888,14 @@ class MainWindow(QMainWindow):
         menu.addAction('打开澜汐', self.show_window)
         menu.addAction('吉光片羽', self.open_notebook)
         menu.addAction('运行与额度', self.show_details)
+        menu.addAction('测试…', self.open_diagnostics)
         sync_menu = menu.addMenu('跨机接续')
         sync_menu.aboutToShow.connect(lambda: self.fill_sync_menu(sync_menu))
         menu.addAction('查看待审批请求', lambda: self.offer_approval(force=True))
         menu.addAction('打开用户数据目录', lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(monitor.ROOT))))
         menu.addAction('设置项目母目录…', lambda: self.choose_project_root())
+        if getattr(sys, 'frozen', False):
+            menu.addAction('检查更新…', lambda: self.updater.check(manual=True))
         menu.addSeparator()
         menu.addAction('退出程序', self.quit_app)
         self.tray.setContextMenu(menu)
@@ -919,8 +928,17 @@ class MainWindow(QMainWindow):
                 menu.addAction(view['connection']).setEnabled(False)
             for project in sorted(view['projects']):
                 label = project + ' · ' + view['status'].get(project, '准备中')
+                count = len(view.get('largeInventory', {}).get(project, {}))
+                if count:
+                    label += f' · {count} 个大文件需核对'
                 menu.addAction(label, lambda checked=False, p=project: self.request_project(p))
-            for key in (('记忆',) if view.get('connection') else ('配对', '记忆')):
+            if view['projects']:
+                menu.addAction('查看大文件清单…', self.show_large_inventory)
+                menu.addAction('登记大文件…', self.register_large_files)
+                if flow.file_exchange:
+                    menu.addAction('借用另一台电脑的大文件…', self.borrow_large_file)
+                    menu.addAction('查看大文件借用与回传…', self.large_file_transfers)
+            for key in (('记忆', '吉光片羽', '大文件') if view.get('connection') else ('配对', '记忆', '吉光片羽', '大文件')):
                 if key in view['status']:
                     menu.addAction(key+' · '+view['status'][key]).setEnabled(False)
             if not view['projects']:
@@ -931,6 +949,94 @@ class MainWindow(QMainWindow):
                 menu.addAction('通过已配置的澜汐协调服务配对', lambda: self.enable_flow({'codeOnly':False}))
         if not flow:
             menu.addAction('仅启用已登记项目的 GitHub 同步', lambda: self.enable_flow({'codeOnly':True}))
+
+    def show_large_inventory(self):
+        state = monitor.personal_sync.snapshot()
+        rows = state.get('largeInventory', {})
+        text = []
+        for project, entries in sorted(rows.items()):
+            text.append(project)
+            for name, entry in sorted(entries.items()):
+                size = entry['localSize']
+                local = '本机缺少' if size is None else f'本机 {size / 1024**2:.2f} MiB'
+                text.append(f'  {name}  ·  {local}')
+                for expected, computers in sorted(entry['copies'].items()):
+                    text.append(f"    {expected / 1024**2:.2f} MiB  ·  上次清点见于 {', '.join(computers)}")
+            text.append('')
+        if not text:
+            text.append('上次检查没有发现需核对的大文件。' if state.get('connection')
+                        else '尚未取得其他设备的大文件清单。')
+        if '大文件' in state['status']:
+            text.append(state['status']['大文件'])
+        dialog = QDialog(self)
+        dialog.setWindowTitle('大文件清单')
+        dialog.resize(680, 370)
+        body = QTextBrowser(dialog)
+        body.setPlainText('\n'.join(text))
+        QVBoxLayout(dialog).addWidget(body)
+        dialog.exec()
+
+    def register_large_files(self):
+        from large_inventory import register
+
+        flow = monitor.personal_sync
+        projects = flow.snapshot()['projects']
+        project, accepted = QInputDialog.getItem(self, '登记大文件', '项目', sorted(projects), editable=False)
+        if not accepted:
+            return
+        directory = Path(projects[project])
+        paths, _ = QFileDialog.getOpenFileNames(self, '选择需要在其他设备提示的大文件', str(directory))
+        if not paths:
+            return
+        try:
+            register(monitor.ROOT, project, directory, paths)
+            flow.request(project)
+            self.control_message.setText('已登记大文件清单，其他设备将看到文件路径和大小。')
+        except (OSError, ValueError) as error:
+            self._popup('无法登记大文件', str(error))
+
+    def borrow_large_file(self):
+        flow = monitor.personal_sync
+        choices = {}
+        for project, rows in sorted(flow.snapshot().get('largeAvailable', {}).items()):
+            for name, entry in sorted(rows.items()):
+                for device, hostname in sorted(entry['devices'].items()):
+                    choices[f'{project} · {name} · {hostname} ({device[-6:]})'] = (project, device, name)
+        if not choices:
+            self._popup('借用大文件', '尚无其他设备登记的大文件。')
+            return
+        name, accepted = QInputDialog.getItem(self, '借用大文件', '选择文件及来源电脑', list(choices), editable=False)
+        if accepted:
+            flow.file_exchange.request(*choices[name])
+            self.control_message.setText('借用申请已提交，等来源电脑在线上传。')
+
+    def large_file_transfers(self):
+        flow = monitor.personal_sync
+        exchange = flow.file_exchange
+        states = {
+            'requested': '等待来源电脑响应', 'uploading': '来源电脑正在上传',
+            'ready': '等待借用电脑下载', 'editing': '借用电脑可编辑',
+            'returning': '正在回传', 'returned': '等待来源电脑应用',
+            'completed': '已完成，服务器已清理临时文件', 'conflict': '来源文件已变化，两份本机版本均保留',
+        }
+        rows = list(exchange.rows)
+        note = '\n'.join(f"{item['project']} · {item['name']} · {states[item['state']]}"
+                         + (f" · {exchange.errors[item['key']]}" if item['key'] in exchange.errors else '')
+                         for item in rows)
+        current = (flow.coordination or {}).get('device')
+        choices = {f"{item['project']} · {item['name']}": item['key'] for item in rows
+                   if item['receiver'] == current and item['state'] == 'editing'}
+        if not choices:
+            self._popup('大文件借用记录', note or exchange.errors.get('连接') or '暂无借用记录。')
+            return
+        label = note + '\n\n保存好本机文件后，选择要回传的文件。'
+        selection, accepted = QInputDialog.getItem(self, '大文件借用记录', label, list(choices), editable=False)
+        if accepted:
+            try:
+                exchange.submit(choices[selection])
+                self.control_message.setText('已排队回传保存后的文件。')
+            except OSError as error:
+                self._popup('无法回传大文件', str(error))
 
     def open_cloud_pairing(self, first=False):
         if PairingDialog(self, monitor.ROOT).exec() == QDialog.DialogCode.Accepted:
@@ -989,6 +1095,13 @@ class MainWindow(QMainWindow):
         if self.worker:
             self.worker.join(timeout=8)
         self.tray.hide()
+
+    def open_diagnostics(self):
+        if self.diagnostics is None:
+            self.diagnostics = DiagnosticsDialog(self, monitor.PROGRAM_ROOT)
+        self.diagnostics.show()
+        self.diagnostics.raise_()
+        self.diagnostics.activateWindow()
 
     def show_details(self):
         self.refresh()
@@ -1238,6 +1351,9 @@ class MainWindow(QMainWindow):
         flow = monitor.personal_sync
         if flow:
             view = flow.snapshot()
+            revision = view.get('notebookRevision', 0)
+            if self.notebook is not None and revision != self._notebook_revision and self.notebook.refresh_synced():
+                self._notebook_revision = revision
             if self.client == 'codex':
                 threads = {t['id']:t for t in snap.get('threads',[])}
                 for tid, session in view['sessions'].items():
@@ -1342,6 +1458,11 @@ class MainWindow(QMainWindow):
             self.launch_project(self._project_directory)
 
     def request_project(self, project):
+        owners = monitor.personal_sync.snapshot().get('taskOwners') or {}
+        holder = (owners.get('projects') or {}).get(project)
+        if holder and holder != owners.get('device'):
+            self.control_message.setText('其他设备正在使用该项目，当前仅可查看。')
+            return
         self._pending_open = project, monitor.personal_sync.request(project)
         self.control_message.setText('正在后台同步 '+project+'，完成后打开 VS Code')
 
@@ -1461,6 +1582,9 @@ class MainWindow(QMainWindow):
                 self.message_edit.show_slash()
                 return
         target = self.selected_thread if tid is None else tid
+        if action != 'create_test' and self.other_task_owner(target):
+            self.control_message.setText('其他设备正在使用该项目，当前仅可查看。')
+            return
         if target and target.startswith(ENTRY_PREFIX) and action != 'create_test':
             return
         if action != 'create_test' and not target:
@@ -1522,6 +1646,10 @@ class MainWindow(QMainWindow):
         managed = controlled and bool(selected.get('managed'))
         allowed = manageable and not paused and not waiting_quota
         buttons = self.action_buttons
+        flow = monitor.personal_sync if self.client == 'codex' else None
+        state = flow.snapshot().get('taskOwners') if flow else None
+        buttons['handoff'].setVisible(bool(state))
+        buttons['handoff'].setEnabled(bool(state and state['tasks'].get(self.selected_thread) == state['device']))
         buttons['manage'].setVisible(not managed)
         buttons['unmanage'].setVisible(managed)
         buttons['attach'].setEnabled(bool(self.selected_thread) and not self.selected_thread.startswith(ENTRY_PREFIX))
@@ -1547,8 +1675,29 @@ class MainWindow(QMainWindow):
         else:
             message_hint = '选择案头任务执舟后即可发送。'
         self.message_hint.setText(message_hint)
+        if self.other_task_owner(self.selected_thread):
+            for name in ('attach', 'pause', 'resume', 'manage', 'unmanage', 'handoff', 'open_project'):
+                buttons[name].setEnabled(False)
+            self.message_hint.setText('其他设备正在使用该项目，当前仅可查看。')
+            allowed = False
         self.send_button.setEnabled(allowed)
         self.check_operation_results(controls)
+
+    def other_task_owner(self, thread):
+        flow = monitor.personal_sync
+        if self.client != 'codex' or not thread or not flow:
+            return None
+        view = flow.snapshot()
+        state = view.get('taskOwners')
+        if not state:
+            return None
+        session = view['sessions'].get(thread, {})
+        item = self.task_items.get(thread)
+        cwd = item.data(0, TASK_DIRECTORY_ROLE) if isinstance(item, QTreeWidgetItem) else None
+        mapping = flow.resolve(thread, cwd)
+        project = session.get('project') or (mapping[0] if mapping else None)
+        owner = state['tasks'].get(thread) or state['projects'].get(project)
+        return owner if owner != state['device'] else None
 
     def render_guard_quota(self, snap):
         connection = '已连接' if snap.get('connection') == 'connected' else '连接待检查'
@@ -1877,6 +2026,8 @@ def main():
         window = MainWindow(shared)
         app.aboutToQuit.connect(window.shutdown)
         window.show()
+        if getattr(sys, 'frozen', False) and not verification:
+            window.updater.watch()
         if getattr(sys, 'frozen', False) and not verification and not (monitor.ROOT / PROJECT_LIBRARY_FILE).is_file():
             if monitor.config().get('coordination'):
                 QTimer.singleShot(0, lambda: window.choose_project_root(first=True))

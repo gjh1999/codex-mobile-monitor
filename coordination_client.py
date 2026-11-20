@@ -275,6 +275,63 @@ def device_client(config):
     return ControlClient(coordination, device_token(coordination)) if coordination else None
 
 
+class PersonalTaskLocks:
+    def __init__(self, client):
+        self.client = client
+
+    def request(self, route="", payload=None, *, prefix="/api/v1/personal/tasks"):
+        request = Request(
+            self.client.url + prefix + route,
+            data=None if payload is None else json.dumps(payload).encode(),
+            headers={'Authorization': 'Bearer ' + (self.client.token or ''),
+                     'X-Lanxi-Device': self.client.device, 'Content-Type': 'application/json'},
+        )
+        try:
+            with self.client.opener.open(request, timeout=4) as response:
+                return json.loads(response.read(2 * 1024**2))
+        except HTTPError as error:
+            with error:
+                if error.code == 409:
+                    detail = json.loads(error.read(4096)).get('detail', '')
+                    raise ControlDenied(detail=detail) from error
+                if error.code == 404:
+                    raise ControlDenied(detail='协调服务尚未更新任务控制接口。') from error
+                raise ControlDenied(detail='协调服务未认可本机设备配对。') from error
+        except (OSError, ValueError) as error:
+            raise ControlDenied(detail='无法向协调服务确认任务控制权。') from error
+
+    def claim(self, thread, project, checkpoint):
+        route = '/' + str(uuid.UUID(thread))
+        status = self.request(route)
+        if status['device'] and status['device'] != self.client.device:
+            raise ControlDenied(detail=f"设备 {status['device']} 正在控制此任务，当前仅可查看。")
+        required = status.get('checkpoint')
+        if required and required != checkpoint(thread):
+            raise ControlDenied(detail='上一设备已交还任务，本机正在同步最新会话，请稍后重试。')
+        return self.request(route + '/claim', {'project': project, 'checkpoint': required})['ticket']
+
+    def handoff(self, thread, ticket, checkpoint):
+        self.request('/' + str(uuid.UUID(thread)) + '/handoff', {'ticket': ticket, 'checkpoint': checkpoint})
+
+    def event(self, project, session, source, sequence, event):
+        return self.request(payload={'project': project, 'session': session, 'event': event},
+                            prefix='/api/v1/personal/project-activity')
+
+
+def personal_project_at(cwd):
+    from code_sync import github_id, run
+    if not cwd:
+        return None
+    location = Path(cwd)
+    if not location.is_absolute():
+        return None
+    for folder in (location, *location.parents):
+        if (folder / '.git').exists():
+            result = run(folder, 'config', '--get', 'remote.origin.url', check=False)
+            return github_id(result.stdout.decode(errors='replace').strip())
+    return None
+
+
 def terminal(client, cwd, args, resume=False, *, outbox=None):
     from handoff import install_resume, resume_context
     from ide_activity import close_queue, enqueue_close, flush_closes

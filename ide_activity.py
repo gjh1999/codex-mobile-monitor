@@ -9,7 +9,7 @@ import uuid
 from contextlib import closing
 from pathlib import Path
 
-from coordination_client import ControlDenied, device_client
+from coordination_client import ControlDenied, PersonalTaskLocks, device_client, personal_project_at
 
 
 OUTBOX_SCHEMA = """CREATE TABLE IF NOT EXISTS pending_close (
@@ -27,21 +27,29 @@ def enqueue_close(path, client, project, session, source, sequence):
     with closing(sqlite3.connect(path)) as db, db:
         db.execute(OUTBOX_SCHEMA)
         db.execute("INSERT OR REPLACE INTO pending_close VALUES (?,?,?,?,?,?)",
-                   (client.url, client.device, project, session, source, sequence))
+                   (*address(client), project, session, source, sequence))
+
+
+def address(client):
+    control = client.client if isinstance(client, PersonalTaskLocks) else client
+    return control.url, control.device
 
 
 def flush_closes(path, client):
     if not path.is_file():
         return
     with closing(sqlite3.connect(path, timeout=1)) as db:
-        projects = list(client.paths.values())
-        if not projects:
-            return
         db.execute(OUTBOX_SCHEMA)
-        placeholders = ','.join('?' for _ in projects)
+        if isinstance(client, PersonalTaskLocks):
+            where, params = "instr(project, '/')>0", []
+        else:
+            projects = list(client.paths.values())
+            if not projects:
+                return
+            where, params = 'project IN (' + ','.join('?' for _ in projects) + ')', projects
         rows = db.execute(f"""SELECT project,session,source,sequence FROM pending_close
-                              WHERE url=? AND device=? AND project IN ({placeholders}) ORDER BY rowid LIMIT 8""",
-                          (client.url, client.device, *projects)).fetchall()
+                              WHERE url=? AND device=? AND {where} ORDER BY rowid LIMIT 8""",
+                          (*address(client), *params)).fetchall()
         for project, session, source, sequence in rows:
             try:
                 client.event(project, session, source, sequence, 'close')
@@ -50,7 +58,7 @@ def flush_closes(path, client):
             with db:
                 db.execute("""DELETE FROM pending_close
                               WHERE url=? AND device=? AND project=? AND session=? AND sequence=?""",
-                           (client.url, client.device, project, session, sequence))
+                           (*address(client), project, session, sequence))
 
 
 def report(client, outbox, project, source, commands, heartbeat=5):
@@ -90,20 +98,28 @@ def report(client, outbox, project, source, commands, heartbeat=5):
 
 
 def main():
+    from desktop_storage import user_data_root
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', choices=('vscode', 'pycharm'), required=True)
     parser.add_argument('--root', type=Path, required=True)
-    parser.add_argument('--config', type=Path, default=Path(__file__).with_name('local-config.json'))
+    default = user_data_root() if getattr(sys, 'frozen', False) else Path(__file__).parent
+    parser.add_argument('--config', type=Path, default=default / 'local-config.json')
     args = parser.parse_args()
     try:
         if not args.config.is_file():
             return
-        client = device_client(json.loads(args.config.read_text(encoding='utf-8-sig')))
-        project = client.project_at(args.root) if client else None
-        if project is None:
+        config = json.loads(args.config.read_text(encoding='utf-8-sig'))
+        client = device_client(config)
+        if client is None:
             return
         if not client.token:
             raise ValueError('设备尚未配置 LANXI_DEVICE_TOKEN')
+        project = client.project_at(args.root)
+        if config['coordination'].get('protectedToken'):
+            project = personal_project_at(args.root)
+            client = PersonalTaskLocks(client)
+        if not project:
+            return
         commands = queue.Queue(maxsize=1)
 
         def read_close():

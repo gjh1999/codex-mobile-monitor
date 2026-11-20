@@ -3,10 +3,13 @@ package lanxi.activity;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManagerListener;
+import com.intellij.notification.NotificationGroupManager;
+import com.intellij.notification.NotificationType;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.nio.file.Files;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -23,13 +26,28 @@ public final class LanxiProjectListener implements ProjectManagerListener {
         if (!directory.isAbsolute()) return;
         reporters.computeIfAbsent(project, ignored -> {
             try {
-                return new ProcessBuilder(
-                    directory.resolve(".venv/Scripts/python.exe").toString(),
-                    directory.resolve("ide_activity.py").toString(), "--source", "pycharm", "--root", root
-                ).directory(directory.toFile())
-                 .redirectOutput(ProcessBuilder.Redirect.DISCARD)
-                 .redirectError(ProcessBuilder.Redirect.INHERIT)
-                 .start();
+                Path portable = directory.resolve("Lanxi-IdeActivity.exe");
+                ProcessBuilder command = Files.isRegularFile(portable)
+                    ? new ProcessBuilder(portable.toString(), "--source", "pycharm", "--root", root)
+                    : new ProcessBuilder(directory.resolve(".venv/Scripts/python.exe").toString(),
+                        directory.resolve("ide_activity.py").toString(), "--source", "pycharm", "--root", root);
+                command.environment().put("PYTHONIOENCODING", "utf-8");
+                Process reporter = command.directory(directory.toFile()).redirectErrorStream(true).start();
+                Thread status = new Thread(() -> {
+                    try (var messages = reporter.inputReader(StandardCharsets.UTF_8)) {
+                        for (String line; (line = messages.readLine()) != null; ) {
+                            if (!project.isDisposed() && !line.isBlank()) {
+                                NotificationGroupManager.getInstance().getNotificationGroup("Lanxi Activity")
+                                    .createNotification(line, NotificationType.WARNING).notify(project);
+                            }
+                        }
+                    } catch (IOException error) {
+                        LOG.warn("Could not read Lanxi activity status", error);
+                    }
+                }, "lanxi-project-reporter");
+                status.setDaemon(true);
+                status.start();
+                return reporter;
             } catch (IOException error) {
                 LOG.warn("Could not start Lanxi activity reporter", error);
                 return null;

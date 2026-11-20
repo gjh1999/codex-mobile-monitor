@@ -1,5 +1,6 @@
 const { spawn } = require('node:child_process');
 const path = require('node:path');
+const { existsSync } = require('node:fs');
 const vscode = require('vscode');
 
 const reporters = new Map();
@@ -34,10 +35,19 @@ function activate(context) {
 }
 
 function start(install, root) {
-    const python = path.join(install, '.venv', 'Scripts', 'python.exe');
-    const child = spawn(python, [path.join(install, 'ide_activity.py'), '--source', 'vscode', '--root', root],
-        { cwd: install, windowsHide: true, stdio: ['pipe', 'ignore', 'pipe'] });
-    child.stderr.setEncoding('utf8').on('data', text => output.append(text));
+    const portable = path.join(install, 'Lanxi-IdeActivity.exe');
+    const havePortable = existsSync(portable);
+    const executable = havePortable ? portable : path.join(install, '.venv', 'Scripts', 'python.exe');
+    const args = ['--source', 'vscode', '--root', root];
+    if (!havePortable) args.unshift(path.join(install, 'ide_activity.py'));
+    const child = spawn(executable, args, {
+        cwd: install, windowsHide: true, stdio: ['pipe', 'ignore', 'pipe'],
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+    });
+    child.stderr.setEncoding('utf8').on('data', text => {
+        output.append(text);
+        vscode.window.showWarningMessage(text.trim());
+    });
     child.stdin.on('error', () => {});
     const exited = new Promise(resolve => {
         child.once('close', resolve);

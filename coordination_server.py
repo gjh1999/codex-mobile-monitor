@@ -97,7 +97,8 @@ def artifact_operation(operation, *args):
         raise HTTPException(503, '产物暂时无法读写') from error
 
 
-def create_app(path, devices, clock=None, compute=None, artifact_dir=None, personal_only=False):
+def create_app(path, devices, clock=None, compute=None, artifact_dir=None, personal_only=False, release_dir=None,
+               temporary_dir=None):
     tokens = [entry['token'].encode() for entry in devices.values()]
     if any(len(token) < 32 for token in tokens) or len(set(tokens)) != len(tokens):
         raise ValueError('每台设备需要独立的随机令牌，至少 32 字节')
@@ -118,9 +119,17 @@ def create_app(path, devices, clock=None, compute=None, artifact_dir=None, perso
     if any(entry.get('personalSpace') for entry in devices.values()):
         from device_enrollment import Enrollment, install_pairing
         from personal_relay import install_routes
+        from personal_task_locks import install_task_locks
         enrollment = Enrollment(path, devices)
         install_routes(app, path, enrollment)
         install_pairing(app, enrollment)
+        install_task_locks(app, store, enrollment)
+        if release_dir:
+            from portable_releases import install_releases
+            install_releases(app, release_dir, enrollment)
+        if temporary_dir:
+            from temporary_file_server import install_temporary_files
+            install_temporary_files(app, store, temporary_dir, enrollment)
     if personal_only:
         return app
 
@@ -258,6 +267,8 @@ if __name__ == '__main__':
     parser.add_argument('--tls-cert', type=Path)
     parser.add_argument('--tls-key', type=Path)
     parser.add_argument('--personal-only', action='store_true')
+    parser.add_argument('--release-dir', type=Path)
+    parser.add_argument('--temporary-dir', type=Path)
     parser.add_argument('--no-access-log', action='store_true')
     parser.add_argument('--limit-concurrency', type=int)
     action = parser.add_mutually_exclusive_group()
@@ -289,6 +300,7 @@ if __name__ == '__main__':
         devices = json.loads(args.devices.read_text(encoding='utf-8-sig'))
         compute = json.loads(args.compute.read_text(encoding='utf-8-sig')) if args.compute else None
         uvicorn.run(create_app(args.database, devices, compute=compute, artifact_dir=args.artifact_dir,
-                               personal_only=args.personal_only),
+                               personal_only=args.personal_only, release_dir=args.release_dir,
+                               temporary_dir=args.temporary_dir),
                     host=args.host, port=args.port, access_log=not args.no_access_log,
                     limit_concurrency=args.limit_concurrency, ssl_certfile=args.tls_cert, ssl_keyfile=args.tls_key)

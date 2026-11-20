@@ -2,6 +2,7 @@
 local-config.json
 deploy/coordinator/.env
 deploy/coordinator/tls/
+deploy/coordinator/releases/
 personal-sync.json
 local-model-api.json
 local-model-api-*.tmp

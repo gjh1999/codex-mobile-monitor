@@ -9,7 +9,7 @@ from pathlib import Path
 
 from personal_memory import safe_path, windows_reserved
 
-LIMIT = 10 * 1024 * 1024
+LIMIT = 100 * 1024 * 1024
 CODE_EXTENSIONS = {
     "py",
     "pyi",
@@ -140,7 +140,7 @@ def github_id(remote):
     return "/".join(parts).lower()
 
 
-def run(repo, *args, data=None, check=True, trace=False):
+def run(repo, *args, data=None, check=True, trace=False, timeout=90):
     env = {
         k: v
         for k, v in os.environ.items()
@@ -183,7 +183,7 @@ def run(repo, *args, data=None, check=True, trace=False):
         input=data or b"",
         check=False,
         capture_output=True,
-        timeout=90,
+        timeout=timeout,
         env=env,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
@@ -424,10 +424,12 @@ def sync_project(repo, remote, branch=None, *, memory_subdir=".codex/memories"):
                 "--",
                 remote,
                 str(stage),
+                timeout=900,
             )
             sparse(stage, None, "HEAD", fresh=True)
             run(stage, "read-tree", "-mu", "HEAD")
             exclude_memory(stage, memory_subdir)
+            run(stage, "config", "lanxi.blobLimit", str(LIMIT))
             existed = repo.is_dir()
             if existed:
                 repo.rmdir()  # Succeeds only while the target is still empty.
@@ -461,17 +463,25 @@ def sync_project(repo, remote, branch=None, *, memory_subdir=".codex/memories"):
         raise SyncIssue("本机处于其他分支，保留当前工作区")
     tracking = "refs/remotes/origin/" + selected
     cached = run(repo, "rev-parse", "--verify", tracking, check=False).stdout.decode().strip()
-    if tip != cached:
+    managed_sparse = run(repo, "config", "--bool", "lanxi.sparse", check=False).stdout.strip() == b"true"
+    saved_limit = run(repo, "config", "--get", "lanxi.blobLimit", check=False).stdout.strip()
+    refetch = managed_sparse and saved_limit != str(LIMIT).encode()
+    if tip != cached or refetch:
         run(
             repo,
             "fetch",
             "--no-tags",
+            *(("--refetch",) if refetch else ()),
             "--filter=blob:limit=" + str(LIMIT),
             "origin",
             "refs/heads/" + selected + ":" + tracking,
+            timeout=900,
         )
     commit_saved(repo, memory_subdir)
     head = value(repo, "rev-parse", "HEAD")
+    if refetch:
+        sparse(repo, head, head)
+        run(repo, "config", "lanxi.blobLimit", str(LIMIT))
     if head == tip:
         return "已同步"
     if run(repo, "merge-base", "--is-ancestor", tracking, head, check=False).returncode:

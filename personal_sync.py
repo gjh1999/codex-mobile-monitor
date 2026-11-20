@@ -7,6 +7,7 @@ import queue
 import sqlite3
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 from code_sync import (
@@ -17,9 +18,9 @@ from code_sync import (
     value,
     verify_checkout,
 )
-from coordination_client import ControlClient, device_token
+from coordination_client import ControlClient, ControlDenied, PersonalTaskLocks, device_token
 from handoff_sync import atomic_write
-from personal_memory import Mirror, pack, safe_path, sync_memories
+from personal_memory import Mirror, pack, read, safe_path, split_session, sync_memories
 from personal_relay import EMPTY, Records, RemoteRecords, digest
 from project_library import configured_root, discover
 
@@ -47,6 +48,11 @@ class PersonalSync:
         self.local_state = self.root / ".local" / "personal-sync"
         self.scope = None
         self.connection = None
+        self.task_owners = None
+        self.notebook_revision = 0
+        self.large_inventory = {}
+        self.large_available = {}
+        self.file_exchange = None
 
     def store(self):
         if self.settings.get("codeOnly"):
@@ -72,12 +78,48 @@ class PersonalSync:
                 "completed": dict(self.completed),
                 "epoch": self.epoch,
                 "connection": self.connection,
+                "taskOwners": self.task_owners,
+                "notebookRevision": self.notebook_revision,
+                "largeInventory": dict(self.large_inventory),
+                "largeAvailable": dict(self.large_available),
             }
 
     def reconfigure(self, settings, coordination):
         with self.lock:
             self.pending_settings = settings, coordination
         self.wake.set()
+
+    def task_locks(self):
+        if self.coordination and not self.settings.get("exchange") and not self.settings.get("codeOnly"):
+            return PersonalTaskLocks(ControlClient(self.coordination, device_token(self.coordination)))
+        return None
+
+    def session_digest(self, tid):
+        view = self.snapshot()
+        session = view["sessions"].get(tid)
+        if session and view["status"].get(session["project"]) == "已同步":
+            return digest(read(Path(session["path"])))
+        return None
+
+    def publish_handoff(self, tid):
+        epoch = self.snapshot()["epoch"]
+        self.request(None)
+        deadline = time.monotonic() + 24
+        while time.monotonic() < deadline:
+            view = self.snapshot()
+            session = view["sessions"].get(tid)
+            if view["epoch"] > epoch and session and view["status"].get(session["project"]) == "已同步":
+                native = Path(session["path"])
+                try:
+                    store = self.store()
+                    key = f"sessions/{session['project']}/{native.name}"
+                    _, synced = split_session(store.read(key), native.name, tid)
+                    if read(native) == synced:
+                        return digest(synced)
+                except (OSError, ValueError, KeyError):
+                    pass
+            time.sleep(.25)
+        raise ControlDenied(detail="最新代码和会话尚未同步，任务仍由本机持有。同步成功后可以重试交还。")
 
     def request(self, project):
         with self.lock:
@@ -230,6 +272,7 @@ class PersonalSync:
         store, index = None, {}
         cloud = self.coordination and not self.settings.get("exchange") and not self.settings.get("codeOnly")
         connection = None
+        task_owners = None
         try:
             store = self.store()
             index = store.index() if store else {}
@@ -242,6 +285,25 @@ class PersonalSync:
                 connection = "协调服务暂不可用，后台将重试"
             store = None
             local, specs = self.bindings(None, {}, cached, published, errors)
+        if connection == "已连接协调服务":
+            try:
+                from notebook_store import sync_notebook
+                changed, notebook_errors = sync_notebook(self.root, store, index, stop)
+                if changed:
+                    with self.lock:
+                        self.notebook_revision += 1
+                if notebook_errors:
+                    errors["吉光片羽"] = notebook_errors[0]
+            except (ValueError, OSError, sqlite3.Error):
+                errors["吉光片羽"] = "随记暂不可同步，后台将重试"
+            try:
+                from ide_activity import close_queue, flush_closes
+                locks = PersonalTaskLocks(store.client)
+                flush_closes(close_queue(self.root), locks)
+                owners = locks.request()
+                task_owners = {"device": store.client.device, **owners}
+            except ControlDenied:
+                pass
         if store:
             for file, data in ((catalog, pack(specs)), (preferences, pack(published))):
                 if not file.is_file() or file.read_bytes() != data:
@@ -324,12 +386,29 @@ class PersonalSync:
                     self.threads = sessions
             finally:
                 mirror.db.close()
+        if isinstance(store, RemoteRecords) and not stop.is_set():
+            from large_inventory import sync_inventory
+            try:
+                available, inventory_errors = sync_inventory(self.root, store, index, ready, stop, include_available=True)
+                inventory = {project: {name: row for name, row in files.items()
+                                       if row["localSize"] not in row["copies"]}
+                             for project, files in available.items()}
+                inventory = {project: rows for project, rows in inventory.items() if rows}
+                if inventory_errors:
+                    errors["大文件"] = next(iter(inventory_errors.values()))
+                with self.lock:
+                    self.large_inventory = {**{key: value for key, value in self.large_inventory.items()
+                                                if key in inventory_errors or key not in ready}, **inventory}
+                    self.large_available = available
+            except (ValueError, OSError, TypeError):
+                errors["大文件"] = "大文件清单暂不可用，后台将重试"
         with self.lock:
             for project in specs:
                 self.completed[project] = self.completed.get(project, 0) + 1
             self.epoch += 1
             self.status = errors
             self.connection = connection
+            self.task_owners = task_owners
 
     def worker(self, stop):
         interval = max(2, min(300, int(self.settings.get("intervalSeconds", 10))))

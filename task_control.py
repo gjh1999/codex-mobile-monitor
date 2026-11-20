@@ -55,7 +55,7 @@ class TaskControl:
         if action == 'create_test' and not thread:
             thread = '00000000-0000-0000-0000-000000000000'
         actions = {'create_test', 'attach', 'detach', 'focus', 'manage', 'unmanage', 'pause', 'resume', 'message', 'rename',
-                   'codex_settings'}
+                   'codex_settings', 'handoff'}
         if not re.fullmatch(r'[0-9a-fA-F-]{36}', str(thread)) or action not in actions:
             raise ValueError('无效任务或操作。')
         if not isinstance(text, str) or len(text) > 10000 or (action == 'message' and not text.strip()):
@@ -144,7 +144,7 @@ class TaskControl:
                         raise
                     thread = {}
                 client = 'Claude Code' if getattr(rpc, 'client_type', 'codex') == 'claude' else 'Codex'
-                message = ('项目处于人工使用或后台交还中，当前仅可查看。' if isinstance(error, ControlDenied)
+                message = (detail.removeprefix('active writer: ') if isinstance(error, ControlDenied)
                            else '原' + client + '窗口仍在占用会话，只读关注中；请先退出原会话再接入控制。')
                 return dict(threadId=tid, mode='observe', status='observing', title=thread.get('name') or thread.get('title'), cwd=thread.get('cwd'),
                             message=message, canControl=False,
@@ -289,6 +289,14 @@ class TaskControl:
 
     def _perform(self, rpc, tid, action, text, operation):
         is_claude = getattr(rpc, 'client_type', 'codex') == 'claude'
+        if action == 'handoff':
+            if is_claude:
+                raise ValueError('跨设备交还仅用于 Codex 任务。')
+            rpc.handoff_personal(tid)
+            self._execute('UPDATE targets SET enabled=0 WHERE id=?', (tid,))
+            with self.lock:
+                self.runtime.pop(tid, None)
+            return '最新会话已同步，任务已交还。'
         if action == 'codex_settings':
             return self._update_codex_settings(rpc, tid, text)
         if action == 'rename':

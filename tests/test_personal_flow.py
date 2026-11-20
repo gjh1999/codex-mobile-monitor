@@ -109,6 +109,24 @@ class FlowTests(unittest.TestCase):
                 sync_project(self.b, self.url)
             self.assertEqual((self.b / "a.py").read_text(), "conflicting B\n")
 
+    def test_existing_clone_recovers_newly_allowed_blobs_at_same_commit(self):
+        medium = self.a / "medium.dat"
+        oversized = self.a / "oversized.dat"
+        medium.write_bytes(os.urandom(20_000))
+        oversized.write_bytes(os.urandom(40_000))
+        git(self.a, "add", "medium.dat", "oversized.dat")
+        git(self.a, "commit", "-m", "test threshold migration")
+        git(self.a, "push")
+        with patch("code_sync.LIMIT", 16_384):
+            sync_project(self.b, self.url)
+        self.assertFalse((self.b / medium.name).exists())
+        git(self.b, "config", "--unset", "lanxi.blobLimit")
+        with patch("code_sync.LIMIT", 32_768):
+            sync_project(self.b, self.url)
+        self.assertEqual((self.b / medium.name).read_bytes(), medium.read_bytes())
+        self.assertFalse((self.b / oversized.name).exists())
+        self.assertEqual(git(self.a, "rev-parse", "HEAD"), git(self.b, "rev-parse", "HEAD"))
+
     def test_sparse_size_transitions_and_lfs(self):
         self.b.mkdir(parents=True)
         git(self.a, "config", "filter.lfs.process", "git-lfs filter-process")

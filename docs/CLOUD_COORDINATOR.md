@@ -99,6 +99,10 @@ codex resume -C "C:\Projects\A" "会话 ID"
 
 ## 数据和服务维护
 
+个人版私有 HTTPS 容器从 `/run/lanxi-releases/latest.json` 读取已发布版本。管理员先上传完整 ZIP 并确认 SHA-256，再替换含 `version`、`sha256` 和 `size` 的清单。客户端使用原 HTTPS 配对凭据读取更新。使用 Linux 文件名和换行符。
+
+R28 按需借用文件使用持久卷下的 `temporary-files/`。服务器为系统保留至少 5 GiB，并以 SHA-256 校验完整文件。借用成功或检测到来源冲突后保留交接记录，清除临时内容。
+
 设备登记和 SQLite 位于 `coordinator-data` 持久卷。容器重启和重建会继续使用原数据。Caddy 的证书数据保存在自己的持久卷中。使用 SSH 部署时在以下 Compose 命令中加上 `-f compose.ssh.yaml`，日志只查看 `coordinator` 服务。
 
 ```bash

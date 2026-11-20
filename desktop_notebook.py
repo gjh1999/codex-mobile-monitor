@@ -1,8 +1,6 @@
 """The native notebook and its local SQLite storage."""
 import sqlite3
-from contextlib import closing
 from datetime import datetime, timezone
-from pathlib import Path
 
 from PySide6.QtCore import QEvent, QMimeData, QRectF, QSignalBlocker, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QDrag, QPainter, QPainterPath, QPalette, QPen
@@ -13,6 +11,8 @@ from PySide6.QtWidgets import (
 
 from desktop_glass import FrostedPanel
 from desktop_theme import configure_text, ui_font
+from model_groups import group_name
+from notebook_store import NotebookStore
 
 GROUP_NAMES = {'note': '拾得片羽', 'todo': '待理诸事'}
 INK = '#f3faff'
@@ -20,46 +20,6 @@ MUTED = '#a9c8d7'
 CHECK_STATE = Qt.ItemDataRole.CheckStateRole
 ENTRY_ID = Qt.ItemDataRole.UserRole
 GROUP_HEADER = Qt.ItemDataRole.UserRole + 1
-
-
-class NotebookStore:
-    def __init__(self, path: Path):
-        self.path = path
-        with closing(sqlite3.connect(path)) as db, db:
-            db.execute('''
-                CREATE TABLE IF NOT EXISTS notebook (
-                    id INTEGER PRIMARY KEY,
-                    kind TEXT NOT NULL CHECK(kind IN ('note','todo')),
-                    title TEXT NOT NULL,
-                    body TEXT NOT NULL,
-                    filed INTEGER NOT NULL DEFAULT 0,
-                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-
-    def entries(self, kind, archived=False):
-        with closing(sqlite3.connect(self.path)) as db:
-            return db.execute(
-                '''SELECT id, title, body, filed, updated_at FROM notebook
-                   WHERE kind=? AND (kind='todo' OR filed=?)
-                   ORDER BY updated_at DESC, id DESC''',
-                (kind, int(archived)),
-            ).fetchall()
-
-    def save(self, kind, entry_id, body):
-        with closing(sqlite3.connect(self.path)) as db, db:
-            if entry_id is None:
-                result = db.execute("INSERT INTO notebook(kind, title, body) VALUES(?, '', ?)", (kind, body))
-                return result.lastrowid
-            db.execute(
-                "UPDATE notebook SET title='', body=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND kind=?",
-                (body, entry_id, kind),
-            )
-            return entry_id
-
-    def set_filed(self, kind, entry_id, filed):
-        with closing(sqlite3.connect(self.path)) as db, db:
-            db.execute('UPDATE notebook SET filed=? WHERE id=? AND kind=?', (int(filed), entry_id, kind))
 
 
 class EntryDelegate(QStyledItemDelegate):
@@ -190,6 +150,7 @@ class NotebookWorkspace(QWidget):
         self.archived = False
         self.entry_id = None
         self.dirty = False
+        self.edit_basis = None
         self.selections = {}
         self.records = {}
         self.items = {}
@@ -329,11 +290,14 @@ class NotebookWorkspace(QWidget):
         scrollbar = self.list.verticalScrollBar()
         scroll = scrollbar.value()
         grouped = {}
+        manual_groups = self.store.groups(self.kind)
         for row in rows:
             entry_id, title, body, _filed, _updated_at = row
-            if self.organizer is not None and not self.archived:
+            if self.organizer is not None and not self.archived and entry_id not in manual_groups:
                 self.organizer.observe(self.kind, entry_id, title, body)
-            name = self.organizer.label(self.kind, entry_id) if self.organizer is not None else ''
+            name = manual_groups.get(entry_id)
+            if name is None:
+                name = self.organizer.label(self.kind, entry_id) if self.organizer is not None else ''
             grouped.setdefault(name, []).append(row)
         has_groups = any(grouped)
         with QSignalBlocker(self.list):
@@ -357,10 +321,11 @@ class NotebookWorkspace(QWidget):
         self.empty.setVisible(not rows)
 
     def move_to_group(self, entry_id, name):
-        if self.organizer is None or entry_id not in self.records:
+        if entry_id not in self.records:
             return
         try:
-            self.organizer.assign(self.kind, entry_id, name)
+            self.store.assign(self.kind, entry_id, group_name(name))
+            self.load_list()
         except (OSError, sqlite3.Error):
             QMessageBox.warning(self, '未能移入', '暂时无法保存分组，请稍后再试。')
 
@@ -368,6 +333,7 @@ class NotebookWorkspace(QWidget):
         self.entry_id = entry_id
         self.selections[(self.kind, self.archived)] = entry_id
         title, body, _filed, _updated_at = self.records.get(entry_id, ('', '', False, ''))
+        self.edit_basis = (title, body) if entry_id is not None else None
         if title:
             body = title + ('\n\n' + body if body else '')
         with QSignalBlocker(self.body), QSignalBlocker(self.list):
@@ -395,6 +361,15 @@ class NotebookWorkspace(QWidget):
         self.saved_status.setText('正在记下…')
         self.draft.start()
 
+    def refresh_synced(self):
+        if self.dirty:
+            return False
+        previous = self.entry_id
+        self.load_list()
+        if previous is not None:
+            self.set_entry(previous if previous in self.records else next(iter(self.records), None))
+        return True
+
     def flush(self):
         self.draft.stop()
         if not self.dirty:
@@ -405,7 +380,7 @@ class NotebookWorkspace(QWidget):
             self.dirty = False
             return True
         try:
-            self.entry_id = self.store.save(self.kind, self.entry_id, body)
+            self.entry_id = self.store.save(self.kind, self.entry_id, body, expected=self.edit_basis)
         except (OSError, sqlite3.Error):
             self.saved_status.setText('尚未存下')
             QMessageBox.warning(self, '尚未存下', '暂时无法写入本机，文字还留在此处。')
@@ -413,6 +388,7 @@ class NotebookWorkspace(QWidget):
         self.dirty = False
         self.selections[(self.kind, self.archived)] = self.entry_id
         self.load_list()
+        self.edit_basis = self.records.get(self.entry_id, ())[:2]
         self.update_stamp()
         return True
 

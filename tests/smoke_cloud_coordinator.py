@@ -16,10 +16,12 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
+from zipfile import ZipFile
 
 from cloud_pairing import create_invite, join
 from coordination_client import ControlClient, device_token
 from personal_relay import EMPTY, MAX_RECORD, Changed, RemoteRecords
+from portable_update import latest, prepare
 
 REPO = Path(__file__).resolve().parents[1]
 ADMIN = REPO / "deploy/coordinator/cloud_admin.py"
@@ -50,6 +52,8 @@ def serve(root, port):
         str(root / "cert.pem"),
         "--tls-key",
         str(root / "key.pem"),
+        "--release-dir",
+        str(root / "releases"),
     ]
     with tempfile.TemporaryFile() as log, subprocess.Popen(command, stdout=log, stderr=log) as proc:
         url = f"https://127.0.0.1:{port}"
@@ -196,6 +200,14 @@ def verify(root):
     key_id = "fixture/persistent"
     port = available_port()
     paired = None
+    releases = root / "releases"
+    releases.mkdir()
+    archive = releases / "Lanxi-R999-Windows-Private.zip"
+    with ZipFile(archive, "w") as package:
+        package.writestr("Lanxi-Glass-R999-Portable.exe", b"update fixture")
+    manifest = {"version": "999", "size": archive.stat().st_size,
+                "sha256": hashlib.sha256(archive.read_bytes()).hexdigest()}
+    (releases / "latest.json").write_text(json.dumps(manifest))
 
     def client(url, name, token=None):
         return RemoteRecords(
@@ -247,6 +259,16 @@ def verify(root):
                     assert device_token(paired) not in json.dumps(saved)
                     paired_records = RemoteRecords(ControlClient(paired, device_token(paired)))
                     assert paired_records.read(key_id) == payload
+                    assert latest(saved) == manifest
+                    try:
+                        prepare(saved, {**manifest, "sha256": "0" * 64}, root / "versions")
+                    except ValueError as error:
+                        assert "校验失败" in str(error)
+                    else:
+                        raise AssertionError("Updater accepted a checksum mismatch")
+                    update = prepare(saved, manifest, root / "versions")
+                    assert update.read_bytes() == b"update fixture"
+                    assert json.loads((laptop / "local-config.json").read_bytes()) == saved
                     duplicate = root / "different-device"
                     duplicate.mkdir()
                     try:
@@ -270,6 +292,7 @@ def verify(root):
         "oversize_http": 413,
         "windows_clients_roundtrip": os.name == "nt",
         "windows_pairing_restart_persistence": paired is not None,
+        "private_update_checksum_and_staging": paired is not None,
         "seconds": round(time.monotonic() - started, 2),
     }
 

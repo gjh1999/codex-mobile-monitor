@@ -52,12 +52,17 @@ codex_activity=CodexActivity()
 def enable_personal_sync(settings, stop, workers):
  global personal_sync
  from personal_sync import PersonalSync
+ from temporary_files import FileExchange
  if personal_sync is not None:
   raise ValueError('个人同步已启动')
  personal_sync=PersonalSync(ROOT,settings,config().get('coordination'))
+ personal_sync.file_exchange=FileExchange(ROOT,personal_sync)
  thread=threading.Thread(target=personal_sync.worker,args=(stop,),name='personal-sync',daemon=True)
  workers.threads.append(thread)
  thread.start()
+ transfer=threading.Thread(target=personal_sync.file_exchange.run,args=(stop,),name='file-exchange',daemon=True)
+ workers.threads.append(transfer)
+ transfer.start()
 
 
 def personal_settings(settings):
@@ -178,6 +183,7 @@ def poll(stop):
      client=device_client(cfg)
      rpc=RPC(approvals,journal=journal,coordination=client) if client else RPC(approvals,journal=journal)
      rpc.personal_session=lambda tid: personal_sync.snapshot()['sessions'].get(tid) if personal_sync else None
+     rpc.personal_flow=lambda: personal_sync
     writes=getattr(rpc,'project_writes',None)
     if writes:
      try:flush_closes(close_queue(ROOT),writes.client)

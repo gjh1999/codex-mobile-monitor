@@ -8,6 +8,7 @@ services:
       - "443:8770"
     volumes:
       - ./tls:/run/lanxi-tls:ro
+      - ./releases:/run/lanxi-releases:ro
     command:
       - coordination_server.py
       - --devices
@@ -17,6 +18,10 @@ services:
       - --host
       - 0.0.0.0
       - --personal-only
+      - --release-dir
+      - /run/lanxi-releases
+      - --temporary-dir
+      - /var/lib/lanxi/temporary-files
       - --tls-cert
       - /run/lanxi-tls/server.crt
       - --tls-key

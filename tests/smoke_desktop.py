@@ -434,7 +434,10 @@ def check_notebook(window, output):
             drop.mimeData.return_value = mime
             workspace.list.dropEvent(drop)
             drop.acceptProposedAction.assert_called_once()
-            assert organizer.label('todo', ids[0]) == '发布准备'
+            assert store.groups('todo')[ids[0]] == '发布准备'
+            assert workspace.list.row(workspace.items[ids[0]]) == workspace.list.row(
+                next(workspace.list.item(i) for i in range(workspace.list.count())
+                     if workspace.list.item(i).data(GROUP_HEADER) == '发布准备')) + 1
             assert store.entries('todo')[-1][3] == 1
             QApplication.processEvents()
             window.grab().save(str(output / 'grouped-todo-desktop.png'))

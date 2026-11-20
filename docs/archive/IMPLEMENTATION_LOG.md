@@ -10,6 +10,7 @@
 - 实包升级使用 `python -B -m tests.smoke_desktop_upgrade --old release/Lanxi-R20-Portable/Lanxi-Glass-R20-Portable.exe --new release/Lanxi-R21.1-Portable/Lanxi-Glass-R21-Portable.exe --output build-exe/verification/notebook-relative-20261120/upgrade.json`，5.77 秒通过。另用上一版 R21 建立隔离用户数据后，两次从另一目录打开候选程序，实测配对、项目母目录、随记和既有工作区都保留。输出 `previous.json`。
 - 单文件下载脚本由 `scripts/issue-portable-download.py` 生成，私下交付 `release/笔记本下载/下载澜汐.cmd`。服务端强制只读指定 ZIP，七天后凭据失效。首次连接被 OpenSSH 8.0 的到期时间格式拒绝，按服务器本地时间登记后，使用同一份脚本真实下载成功。重复运行复用了已有 ZIP。文件 78,192,492 字节，SHA-256 为 `828e813e03268f2fa19929490b247a2ecf86e98623a37f7f44310c3603f06f6c`，下载副本的 CRC 及六个包内哈希全部符合。下载脚本含专用凭据，仅将无凭据的模板和生成工具纳入 Git。
 - 输出目录 `build-exe/verification/notebook-relative-20261120/` 含本轮日志、JSON 和下载副本。本次属于私人候选包验收。两台物理电脑现场联测、托盘人工操作及正在开发的前端整合均未验收；正式版本标签待整体验收后创建。
+- 随后将候选包对应的源码提交 `4a14cb1` 与前端流式显示提交 `bf91ae4` 合并为 `750ef02`。合并源码执行 `python -B -m unittest tests.test_codex_activity tests.test_monitor tests.test_project_library tests.test_personal_flow tests.test_desktop_storage`，25 项通过，19.977 秒，输出 `integration.log`。上述私人下载仍对应原候选包哈希。
 
 ## 2026-11-20 Codex 流式回复与命令过程气泡
 

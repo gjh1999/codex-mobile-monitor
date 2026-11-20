@@ -8,6 +8,7 @@
 - Windows、Python 3.14.7。执行 `.venv\Scripts\python.exe -B -m unittest tests.test_personal_flow tests.test_large_inventory tests.test_temporary_files`，14 项通过，41.932 秒。新增测试使用临时 Git 仓库和私人共享记录，源端 `VSCode/A` 与接收端 `PyCharm/A` 采用同一 origin，两台分别配置各自的共同父目录。手动请求排在进行中的后台轮次后，接收端在原目录取得新代码和新记忆。接收端未克隆第二份项目。
 - `.venv\Scripts\python.exe -B tests/smoke_desktop.py --output build-exe/verification/portable-r34-20261120/qt` 通过，验证顶栏入口、等待与执行状态、项目结果、冲突及文件清单显示。Qt 总耗时未单独测量。 [项目目录和手动同步说明](../PERSONAL_SYNC.md)
 - 执行 `.venv\Scripts\python.exe -B scripts/build-portable.py --work build-exe/verification/portable-r34-20261120/windows --pycharm 'C:\Program Files\JetBrains\PyCharm 2026.3' --workspace-grant build-exe/verification/portable-r33-20261120/lanxi-private-workspace.join`。复用 R33 的私人工作区加入授权。`release/Lanxi-R34-Windows-Private.zip` 为 95,153,530 字节，SHA-256 为 `232a7c47ee3384180008471360c4768164e89d52cd9e13a1ed4e2e75be571488`。
+- 同目录 `verify.py` 验证 ZIP 校验值、文件清单和内置授权，使用 R33 更新器解包并运行内置自检，6 项通过，15.95 秒。`publish.py` 将同一 ZIP 发布到私人更新服务，已连接的 R33 更新检查可见 R34。本机解压目录 `release/Lanxi-R34-Portable/` 的 EXE 与验收副本一致。实际两台实体电脑的合流操作待现场验证。
 
 ## 2026-11-20 R33 一键连接云服务器
 

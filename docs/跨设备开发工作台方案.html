@@ -286,16 +286,16 @@ figcaption { color: var(--ink); font-weight: 650; margin-bottom: 15px; }
 
 <section id="current">
   <h2>当前交付与使用</h2>
-  <p><strong>个人版 R33 已在私人更新服务发布。</strong> 每次启动可选「连接云服务器」或「本机使用」，首次再设置本机项目母目录。同一私人包的各台电脑连接后加入同一工作区。<a href="DELIVERY_STATUS.md#个人版交付版本">版本与验证状态</a></p>
+  <p><strong>个人版 R34 已在私人更新服务发布。</strong> 顶部菜单栏可连接云服务器、运行测试，或点「合流」立即安排一轮手动同步。<a href="DELIVERY_STATUS.md#个人版交付版本">版本与验证状态</a></p>
   <div class="tbl"><table>
     <thead><tr><th scope="col">现在能做什么</th><th scope="col">使用入口与行为</th></tr></thead>
     <tbody>
-      <tr><th scope="row">安装、云连接与更新</th><td>启动时先选择连接云服务器或本机使用。首次选择项目母目录。顶部任务栏或主窗口左下角可以随时点击「连接云服务器」。云模式下可从托盘「检查更新」，升级后继续使用原配置和历史。<a href="PORTABLE_CHECK.md">安装和更新步骤</a></td></tr>
+      <tr><th scope="row">安装、云连接与更新</th><td>启动时先选择连接云服务器或本机使用。首次选择项目母目录。可随时在顶部菜单栏点「连接云服务器」。云模式下可从托盘「检查更新」，升级后继续使用原配置和历史。<a href="PORTABLE_CHECK.md">安装和更新步骤</a></td></tr>
       <tr><th scope="row">跨机接上项目与原会话</th><td>代码通过 GitHub 双向同步，项目按各自母目录下同一相对路径克隆。项目记忆及已完成的 Codex 会话经协调服务传递。换机时从「案头诸事」点原会话，或右键「查看会话 ID」，在目标机项目目录用同一 ID 恢复。<a href="PERSONAL_SYNC.md">个人设备自动接续</a></td></tr>
       <tr><th scope="row">查看占用并交还任务</th><td>同一 GitHub 项目由当前持有控制权的设备执行写操作。结束对话和审批后点「交还任务」，等代码和会话同步，再从另一设备接入。VS Code 和 PyCharm 可安装活动插件上报工作区占用。<a href="PROJECT_CONTROL.md#个人版项目占用">交还与 IDE 插件</a></td></tr>
       <tr><th scope="row">桌面对谈与随记</th><td>「灯下对谈」渲染 Markdown，接入的 Codex 会话流式显示正文与「执行札记」，也可读取独立终端已保存的消息和命令记录。「吉光片羽」按条同步随记、待办、完成状态、归档和手动分组，两端同时改正文时保留冲突副本。<a href="DESKTOP.md">桌面操作</a></td></tr>
       <tr><th scope="row">登记、借用并回传大文件</th><td>达到 100 MiB 的文件可从「跨机接续」查看清单或手动登记。需要编辑时选择来源设备借用，在原相对路径保存，再提交回传。来源校验原文件版本后应用，冲突时两端保留各自内容。<a href="PORTABLE_CHECK.md#跨机借用与回传大文件">借用与回传步骤</a></td></tr>
-      <tr><th scope="row">运行自检与双机测试</th><td>从主窗口左下角或托盘打开「测试」。R30 未配对时可做本机自检，配对后增加云连接检查。两台电脑都配对后可交换测试码和回执。版本见顶栏「澜汐 → 关于澜汐」。<a href="PORTABLE_CHECK.md#运行验收">验收操作</a></td></tr>
+      <tr><th scope="row">运行自检与双机测试</th><td>从顶部菜单栏或托盘打开「测试」。已连接云服务器时可检查云连接，两台电脑可交换测试码和回执。版本见顶栏「澜汐 → 关于澜汐」。<a href="PORTABLE_CHECK.md#运行验收">验收操作</a></td></tr>
     </tbody>
   </table></div>
   <p><strong>已验证的范围。</strong> R28 用一台 Windows 电脑的两份隔离配对在阿里云验证了大文件借用、修改回传和清理。R29 验证了从主窗口触发内置测试、云端回执和独立下载。R30 用隔离配置验证了首启、配对入口、旧版校验并解压新版，以及未配对本机自检。台式机和笔记本的真实项目、IDE 上报、原会话续写与休眠重连仍待现场验收。<a href="archive/IMPLEMENTATION_LOG.md">实施与验收记录</a></p>

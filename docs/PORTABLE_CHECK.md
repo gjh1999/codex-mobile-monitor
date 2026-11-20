@@ -1,6 +1,6 @@
 # 澜汐安装、升级与验收
 
-已发布的 R33 便携 ZIP 顶层包含主程序、`开始使用.txt` 和可选的 `IDE上报工具.zip`。验收功能内置于主程序。 [发布与验收记录](archive/IMPLEMENTATION_LOG.md#2026-11-20-r33-一键连接云服务器) · [IDE 安装步骤](PROJECT_CONTROL.md#个人版项目占用)
+已发布的 R34 便携 ZIP 顶层包含主程序、`开始使用.txt` 和可选的 `IDE上报工具.zip`。验收功能内置于主程序。 [发布与验收记录](archive/IMPLEMENTATION_LOG.md#2026-11-20-r34-顶栏整理与手动同步) · [IDE 安装步骤](PROJECT_CONTROL.md#个人版项目占用)
 
 ## 在另一台 Windows 电脑使用
 

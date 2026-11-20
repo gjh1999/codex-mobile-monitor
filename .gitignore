@@ -5,6 +5,7 @@ deploy/coordinator/tls/
 deploy/coordinator/releases/
 personal-sync.json
 *.lanxi-pairing
+lanxi-private-workspace.join
 local-model-api.json
 local-model-api-*.tmp
 claude-drafts.json

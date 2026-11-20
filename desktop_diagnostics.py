@@ -28,7 +28,7 @@ class DiagnosticsDialog(QDialog):
         self.runner.finished.connect(self.process_finished)
         self.runner.errorOccurred.connect(self.process_error)
         box = QVBoxLayout(self)
-        self.status = QLabel("本机自检可直接运行，双机测试需要两台电脑都已配对。")
+        self.status = QLabel("本机自检可直接运行，双机测试需要两台电脑都已连接云服务器。")
         self.status.setWordWrap(True)
         box.addWidget(self.status)
         self.output = QPlainTextEdit()
@@ -38,7 +38,7 @@ class DiagnosticsDialog(QDialog):
         self.self_test = QPushButton("开始自检")
         self.self_test.clicked.connect(self.run_self_test)
         header.addWidget(self.self_test)
-        pairing = QPushButton("配对…")
+        pairing = QPushButton("连接云服务器")
         pairing.clicked.connect(lambda: pair_device(self))
         header.addWidget(pairing)
         self.source = QPushButton("发起双机测试")
@@ -72,6 +72,9 @@ class DiagnosticsDialog(QDialog):
 
     def run(self, mode, options=()):
         if self.runner.state() != QProcess.ProcessState.NotRunning:
+            return
+        if mode in ("cloud-source", "cloud-receiver") and not self.has_pairing():
+            self.status.setText("请先点击「连接云服务器」。")
             return
         executable = Path(sys.executable)
         if not getattr(sys, "frozen", False):

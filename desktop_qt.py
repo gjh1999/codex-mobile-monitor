@@ -25,11 +25,12 @@ from PySide6.QtWidgets import (
 )
 
 import monitor
+from cloud_pairing import bundled_workspace
 from desktop_glass import ClientSwitch, FrostedPanel, OceanBackdrop, motion_enabled
 from desktop_diagnostics import DiagnosticsDialog
 from desktop_model_api import ModelApiDialog
 from desktop_notebook import NotebookStore, NotebookWorkspace
-from desktop_pairing import PairingDialog
+from desktop_pairing import CONNECT_CLOUD, PairingDialog, WorkspaceConnectDialog
 from desktop_poetry import COVER_VERSES
 from desktop_projects import SessionTitles, folder_name, project_group
 from desktop_theme import (
@@ -282,7 +283,7 @@ class EdgeMenu(QWidget):
     HEIGHT = 22
     HOT_ZONE = 4
 
-    def __init__(self, backdrop, menus):
+    def __init__(self, backdrop, menus, *, actions=()):
         super().__init__(backdrop)
         self.revealed = False
         self.active_menu = None
@@ -313,6 +314,10 @@ class EdgeMenu(QWidget):
             button.setMenu(menu)
             menu.aboutToShow.connect(lambda menu=menu: self.menu_opened(menu))
             menu.aboutToHide.connect(self.menu_closed)
+            row.addWidget(button)
+        for caption, callback in actions:
+            button = self.button(caption)
+            button.clicked.connect(callback)
             row.addWidget(button)
         row.addStretch()
 
@@ -502,11 +507,12 @@ class MainWindow(QMainWindow):
     codex_options_ready = Signal(object, object)
     grouping_changed = Signal(str)
 
-    def __init__(self, shared):
+    def __init__(self, shared, workspace=None):
         super().__init__()
         QApplication.instance().setStyle('Fusion')
         self.setFont(ui_font(10))
         self.shared = shared
+        self.workspace_grant = workspace
         self.stop = threading.Event()
         self.worker = None
         self._quitting = False
@@ -712,7 +718,7 @@ class MainWindow(QMainWindow):
         self.live.setObjectName('status')
         footer = QHBoxLayout()
         footer.addWidget(self.live, 1)
-        pairing = ActionButton('配对')
+        pairing = ActionButton(CONNECT_CLOUD)
         pairing.setToolTip('连接或邀请另一台电脑')
         pairing.clicked.connect(lambda: self.open_device_pairing(self))
         footer.addWidget(pairing)
@@ -830,7 +836,7 @@ class MainWindow(QMainWindow):
                    ('吉光片羽', self.open_notebook)],
             '设置': [('大模型 API…', self.open_model_api)],
             '窗口': [('最大化／还原', self.toggle_maximized), ('收起到托盘', self.close)],
-        })
+        }, actions=[(CONNECT_CLOUD, lambda: self.open_device_pairing(self))])
         self.populate_app_menu(self.edge_menu.menus[WINDOW_TITLE], include_about=True)
         task_menu = self.edge_menu.menus['任务']
         task_menu.aboutToShow.connect(self.refresh_task_menu)
@@ -921,12 +927,11 @@ class MainWindow(QMainWindow):
         menu.addAction('退出程序', self.quit_app)
 
     def choose_project_root(self, first=False):
-        base = configured_root(monitor.ROOT) or Path.home()
-        selected = QFileDialog.getExistingDirectory(self, '选择集中存放项目的母文件夹', str(base))
+        selected = choose_project_folder(self)
         if not selected and not first:
             return
         try:
-            set_project_root(monitor.ROOT, Path(selected) if selected else None)
+            set_project_root(monitor.ROOT, selected)
             if selected:
                 self.control_message.setText('已保存项目母目录，正在扫描项目')
         except OSError as error:
@@ -938,7 +943,7 @@ class MainWindow(QMainWindow):
         coordination = monitor.config().get('coordination') or {}
         if coordination.get('url', '').startswith('https://'):
             menu.addAction('邀请另一台电脑…', lambda: PairingDialog(self, monitor.ROOT, coordination).exec())
-        menu.addAction('使用配对码连接…', self.open_cloud_pairing)
+        menu.addAction('使用邀请码连接…', self.open_cloud_pairing)
         if flow:
             view = flow.snapshot()
             if view.get('connection'):
@@ -1056,11 +1061,17 @@ class MainWindow(QMainWindow):
                 self._popup('无法回传大文件', str(error))
 
     def open_device_pairing(self, parent):
-        coordination = monitor.config().get('coordination') or {}
-        if coordination.get('url', '').startswith('https://'):
-            PairingDialog(parent, monitor.ROOT, coordination).exec()
-        else:
+        if monitor.config().get('coordination'):
+            status = monitor.personal_sync.snapshot().get('connection') if monitor.personal_sync else None
+            self._popup(CONNECT_CLOUD, status or '正在检查云服务器连接。')
+            return
+        enrolled = bool(monitor.saved_config().get('coordination'))
+        if not (self.workspace_grant or enrolled):
             self.open_cloud_pairing(parent=parent)
+            return
+        dialog = WorkspaceConnectDialog(parent, monitor.ROOT, self.workspace_grant, enrolled=enrolled)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.activate_cloud_connection()
 
     def open_cloud_pairing(self, first=False, *, parent=None):
         dialog = PairingDialog(parent or self, monitor.ROOT, first=first)
@@ -1069,11 +1080,15 @@ class MainWindow(QMainWindow):
         if not dialog.paired:
             self.control_message.setText('已保存项目母目录，正在扫描项目')
             return
+        self.activate_cloud_connection()
+
+    def activate_cloud_connection(self):
+        monitor.set_workspace_online(True)
         try:
             monitor.activate_cloud_pairing(self.stop, self.worker)
-            self.control_message.setText('本机已配对，正在同步项目')
+            self.control_message.setText('本机已连接云服务器，正在同步项目')
         except (OSError, ValueError, KeyError, TypeError) as error:
-            self._popup('跨机接续', str(error))
+            self._popup(CONNECT_CLOUD, str(error))
 
     def enable_flow(self, settings):
         from handoff_sync import atomic_write
@@ -2013,6 +2028,26 @@ def select_legacy_data(candidates):
             QMessageBox.information(dialog, '澜汐用户数据', '该文件夹中没有找到旧版澜汐数据。')
 
 
+def choose_project_folder(parent=None):
+    base = configured_root(monitor.ROOT) or Path.home()
+    selected = QFileDialog.getExistingDirectory(parent, '选择集中存放项目的母文件夹', str(base))
+    return Path(selected) if selected else None
+
+
+def choose_workspace_startup(workspace):
+    enrolled = bool(monitor.saved_config().get('coordination'))
+    dialog = WorkspaceConnectDialog(None, monitor.ROOT, workspace, enrolled=enrolled, startup=True)
+    if dialog.exec() != QDialog.DialogCode.Accepted:
+        return False
+    if configured_root(monitor.ROOT) is None:
+        folder = choose_project_folder()
+        if folder is None:
+            return False
+        set_project_root(monitor.ROOT, folder)
+    monitor.set_workspace_online(dialog.online)
+    return True
+
+
 def main():
     app = QApplication(sys.argv)
     instance_key = 'CodexMobileMonitor.QtDesktop'
@@ -2040,11 +2075,17 @@ def main():
         return 1
     window = None
     try:
+        workspace = None if verification else bundled_workspace()
         try:
             parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
             parser.add_argument('--import-data-from', type=Path)
             options, _ = parser.parse_known_args()
-            if not monitor.prepare_desktop_data(select_legacy_data, options.import_data_from):
+            def legacy(candidates):
+                return False if workspace and not candidates else select_legacy_data(candidates)
+
+            if not monitor.prepare_desktop_data(legacy, options.import_data_from):
+                return 0
+            if workspace and not choose_workspace_startup(workspace):
                 return 0
         except (OSError, RuntimeError, ValueError, KeyError, TypeError, sqlite3.Error) as error:
             if verification:
@@ -2052,12 +2093,12 @@ def main():
                 return 1
             QMessageBox.critical(None, '无法启动澜汐', f'打开或迁移用户数据失败。\n{error}')
             return 1
-        window = MainWindow(shared)
+        window = MainWindow(shared, workspace)
         app.aboutToQuit.connect(window.shutdown)
         window.show()
         if getattr(sys, 'frozen', False) and not verification:
             window.updater.watch()
-        if getattr(sys, 'frozen', False) and not verification and configured_root(monitor.ROOT) is None:
+        if getattr(sys, 'frozen', False) and not verification and not workspace and configured_root(monitor.ROOT) is None:
             if monitor.config().get('coordination'):
                 QTimer.singleShot(0, lambda: window.choose_project_root(first=True))
             else:

@@ -1,7 +1,8 @@
 param(
   [string]$AppName = 'Lanxi',
   [string]$OutputDirectory,
-  [string]$BuildDirectory
+  [string]$BuildDirectory,
+  [string]$WorkspaceGrant
 )
 $ErrorActionPreference = 'Stop'
 $project = Split-Path -Parent $PSScriptRoot
@@ -10,6 +11,10 @@ $dist = if ($OutputDirectory) { $OutputDirectory } else { Join-Path $project 're
 $work = if ($BuildDirectory) { $BuildDirectory } else { Join-Path $project 'build-exe' }
 $specDir = Join-Path $work 'specs'
 $helpers = Join-Path $work 'helpers'
+$workspaceData = @()
+if ($WorkspaceGrant) {
+  $workspaceData = @('--add-data', "$WorkspaceGrant;.")
+}
 New-Item -ItemType Directory -Force -Path $specDir | Out-Null
 
 if (-not (Test-Path $python)) { throw "找不到虚拟环境 Python：$python" }
@@ -32,6 +37,7 @@ if ($LASTEXITCODE -ne 0) { throw "Lanxi-Verify 构建失败，退出码：$LASTE
   --exclude-module tkinter --exclude-module _tkinter `
   --hidden-import dingtalk_commands --hidden-import desktop_win32 --hidden-import desktop_qt `
   --distpath $dist --workpath $work --specpath $specDir `
+  @workspaceData `
   (Join-Path $project 'desktop_app.py')
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller 构建失败，退出码：$LASTEXITCODE" }
 

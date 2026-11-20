@@ -67,11 +67,12 @@ def main():
     show = commands.add_parser("pair")
     show.add_argument("device")
     show.add_argument("--url", required=True)
-    for name in ("invite", "setup"):
+    for name in ("invite", "setup", "workspace-grant", "workspace-revoke", "workspace-scope"):
         issue = commands.add_parser(name)
         issue.add_argument("device")
-        issue.add_argument("--url", required=True)
-        issue.add_argument("--certificate", type=Path)
+        if name not in ("workspace-revoke", "workspace-scope"):
+            issue.add_argument("--url", required=True)
+            issue.add_argument("--certificate", type=Path)
         issue.add_argument("--database", type=Path, default=Path("/var/lib/lanxi/coordination.sqlite3"))
     options = parser.parse_args()
     try:
@@ -87,17 +88,25 @@ def main():
                 "[Environment]::SetEnvironmentVariable('LANXI_DEVICE_TOKEN', $env:LANXI_DEVICE_TOKEN, 'User')"
             )
         else:
-            from cloud_pairing import encode_invite, encode_setup, public_access
-            from device_enrollment import Enrollment
+            from cloud_pairing import WORKSPACE_PREFIX, encode_invite, encode_setup, public_access
+            from device_enrollment import Enrollment, sha
 
-            cert = options.certificate.read_text(encoding="ascii") if options.certificate else ""
-            access = public_access(options.url, cert)
             devices = json.loads(options.file.read_text(encoding="utf-8"))
             space = devices.get(options.device, {}).get("personalSpace")
             if not space:
                 raise ValueError(f"没有登记个人设备 {options.device}")
+            if options.command == "workspace-scope":
+                print(sha(space))
+                return
             enrollment = Enrollment(options.database, devices)
-            if options.command == "setup":
+            if options.command == "workspace-revoke":
+                enrollment.revoke_workspace(space)
+                return
+            cert = options.certificate.read_text(encoding="ascii") if options.certificate else ""
+            access = public_access(options.url, cert)
+            if options.command == "workspace-grant":
+                print(encode_invite(access, enrollment.issue_workspace(space), prefix=WORKSPACE_PREFIX))
+            elif options.command == "setup":
                 print(encode_setup(access, enrollment.issue_setup(space)))
             else:
                 print(encode_invite(access, enrollment.issue(options.device, space)["code"]))

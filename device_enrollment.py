@@ -45,6 +45,9 @@ class Enrollment:
                 CREATE TABLE IF NOT EXISTS device_setup_members (
                     device TEXT PRIMARY KEY, code_hash TEXT NOT NULL, token_hash TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS workspace_grants (
+                    code_hash TEXT PRIMARY KEY, space TEXT NOT NULL
+                );
             """)
 
     def space(self, device, authorization):
@@ -102,6 +105,33 @@ class Enrollment:
             db.execute("DELETE FROM device_setups WHERE expires<=?", (now,))
             db.execute("INSERT INTO device_setups VALUES(?,?,?)", (sha(code), space, now + SETUP_SECONDS))
         return code
+
+    def issue_workspace(self, space):
+        code = secrets.token_urlsafe(32)
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("INSERT INTO workspace_grants VALUES(?,?)", (sha(code), space))
+        return code
+
+    def revoke_workspace(self, space):
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("DELETE FROM workspace_grants WHERE space=?", (space,))
+
+    def join_workspace(self, claim):
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            grant = db.execute("SELECT space FROM workspace_grants WHERE code_hash=?", (sha(claim.code),)).fetchone()
+            if not grant:
+                raise HTTPException(403, "私人工作区授权无效")
+            if claim.device in self.devices:
+                raise HTTPException(409, "设备标识已登记")
+            current = db.execute("SELECT space, token_hash FROM enrolled_devices WHERE device=?",
+                                 (claim.device,)).fetchone()
+            credentials = (grant[0], sha(claim.token))
+            if current == credentials:
+                return
+            if current:
+                raise HTTPException(409, "设备标识已登记")
+            db.execute("INSERT INTO enrolled_devices VALUES(?,?,?)", (claim.device, *credentials))
 
     def join_setup(self, claim):
         key, token = sha(claim.code), sha(claim.token)
@@ -169,3 +199,9 @@ def install_pairing(app, enrollment):
         claim = await read_claim(request)
         state = await run_in_threadpool(enrollment.join_setup, claim)
         return JSONResponse({"device": claim.device, "state": state}, headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/v1/pairing/join-workspace")
+    async def join_workspace(request: Request):
+        claim = await read_claim(request)
+        await run_in_threadpool(enrollment.join_workspace, claim)
+        return JSONResponse({"device": claim.device}, headers={"Cache-Control": "no-store"})

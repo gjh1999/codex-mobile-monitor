@@ -25,9 +25,9 @@ from codex_history import read_codex_conversation
 from desktop_glass import FrostedPanel, OceanBackdrop
 from desktop_model_api import ModelApiDialog
 from desktop_notebook import GROUP_HEADER, NotebookStore
-from desktop_pairing import PairingDialog
+from desktop_pairing import CONNECT_CLOUD, PairingDialog, WorkspaceConnectDialog
 from desktop_poetry import COVER_VERSES
-from desktop_qt import MainWindow
+from desktop_qt import MainWindow, choose_workspace_startup
 from desktop_theme import configure_text, message_html, set_reading_html, ui_font
 from model_groups import Organizer, read_settings
 from reply_log import ReplyLog
@@ -89,20 +89,66 @@ def check_first_setup(window):
                     activate.assert_not_called()
 
 
+def check_workspace_startup():
+    from project_library import configured_root
+
+    with tempfile.TemporaryDirectory() as directory:
+        profile = Path(directory)
+        errors = []
+
+        def select(connect):
+            dialog = QApplication.activeModalWidget()
+            try:
+                assert isinstance(dialog, WorkspaceConnectDialog)
+                assert dialog.windowTitle() == '选择启动方式'
+                assert dialog.local.text() == '本机使用' and dialog.connect.text() == CONNECT_CLOUD
+                QTest.mouseClick(dialog.connect if connect else dialog.local, Qt.MouseButton.LeftButton)
+            except Exception as error:
+                errors.append(error)
+                if dialog is not None:
+                    dialog.reject()
+
+        def connect(root, _grant):
+            (root / 'local-config.json').write_text('{"coordination":{"url":"https://example.test"}}')
+
+        with (patch.object(monitor, 'ROOT', profile), patch.object(monitor, '_workspace_online', True),
+              patch('desktop_qt.QFileDialog.getExistingDirectory', return_value=str(profile)) as choose,
+              patch('desktop_pairing.join_workspace', side_effect=connect) as join):
+            QTimer.singleShot(0, lambda: select(False))
+            assert choose_workspace_startup('fixture') and not errors
+            assert configured_root(profile) == profile.resolve()
+            assert monitor.personal_settings({'personalSync': {}}) is None
+            choose.assert_called_once()
+            join.assert_not_called()
+            choose.reset_mock()
+
+            QTimer.singleShot(0, lambda: select(True))
+            assert choose_workspace_startup('fixture') and not errors
+            join.assert_called_once_with(profile, 'fixture')
+            assert monitor.config()['coordination']['url'] == 'https://example.test'
+            choose.assert_not_called()
+
+            QTimer.singleShot(0, lambda: select(False))
+            assert choose_workspace_startup('fixture') and not errors
+            assert 'coordination' not in monitor.config() and monitor.saved_config()['coordination']
+            choose.assert_not_called()
+            join.assert_called_once()
+
+
 def check_diagnostics_pairing(window):
     settings = {}
     with (patch.object(monitor, 'config', return_value=settings),
           patch.object(window, 'open_device_pairing') as pair,
           patch('desktop_diagnostics.DiagnosticsDialog.run', autospec=True) as run):
         test = next(button for button in window.task_panel.findChildren(QPushButton) if button.text() == '测试')
-        pairing = next(button for button in window.task_panel.findChildren(QPushButton) if button.text() == '配对')
+        pairing = next(button for button in window.task_panel.findChildren(QPushButton) if button.text() == CONNECT_CLOUD)
         QTest.mouseClick(pairing, Qt.MouseButton.LeftButton)
         pair.assert_called_once_with(window)
         QTest.mouseClick(test, Qt.MouseButton.LeftButton)
         QTest.qWait(30)
         dialog = window.diagnostics
         run.assert_called_once_with(dialog, 'local')
-        shortcut = next(button for button in dialog.findChildren(QPushButton) if button.text() == '配对…')
+        shortcut = next(button for button in dialog.findChildren(QPushButton) if button.text() == CONNECT_CLOUD)
         QTest.mouseClick(shortcut, Qt.MouseButton.LeftButton)
         pair.assert_called_with(dialog)
         settings['coordination'] = {'url': 'https://example.test'}
@@ -302,6 +348,10 @@ def check_edge_menu(window, output):
         assert wait_until(lambda: menu.opacity.opacity() == 1.0)
         assert list(menu.menus) == ['澜汐', '任务', '显示', '设置', '窗口']
         assert menu.menus['设置'].actions()[0].text() == '大模型 API…'
+        connect = next(button for button in menu.panel.findChildren(QPushButton) if button.text() == CONNECT_CLOUD)
+        with patch.object(window, 'open_device_pairing') as pair:
+            QTest.mouseClick(connect, Qt.MouseButton.LeftButton)
+            pair.assert_called_once_with(window)
         check_app_menu(window, output)
         move(80, 1)
         tasks = menu.menus['任务']
@@ -337,7 +387,7 @@ def check_app_menu(window, output):
             QTest.keyClick(app_menu, Qt.Key.Key_Right)
             assert wait_until(submenu.isVisible)
             assert edge.revealed and edge.active_menu is app_menu
-            assert [action.text() for action in submenu.actions()][0] == '使用配对码连接…'
+            assert [action.text() for action in submenu.actions()][0] == '使用邀请码连接…'
             QTest.keyClick(submenu, Qt.Key.Key_Escape)
             details = next(action for action in app_menu.actions() if action.text() == '运行与额度')
             QTest.mouseClick(app_menu, Qt.MouseButton.LeftButton, pos=app_menu.actionGeometry(details).center())
@@ -1118,6 +1168,7 @@ def main():
             check_edge_menu(window, args.output)
             check_model_settings(window, args.output)
             check_first_setup(window)
+            check_workspace_startup()
             check_diagnostics_pairing(window)
             check_automatic_pairing(window)
             check_markdown(window, data, args.output)

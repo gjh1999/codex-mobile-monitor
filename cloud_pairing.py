@@ -5,7 +5,9 @@ import hashlib
 import json
 import re
 import secrets
+import sys
 import time
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request
@@ -14,6 +16,8 @@ from coordination_client import ControlClient, device_token
 
 PREFIX = "LANXI1."
 SETUP_PREFIX = "LANXI2."
+WORKSPACE_PREFIX = "LANXI3."
+WORKSPACE_RESOURCE = "lanxi-private-workspace.join"
 MAX_CODE = 12000
 SECRET = re.compile(r"[A-Za-z0-9_-]{43}")
 
@@ -70,6 +74,7 @@ def post(client, operation, payload=None):
             message = {
                 "redeem": "配对码已过期或已使用。请重新生成。",
                 "join-setup": "双机设置文件无效或已过期，请重新生成。",
+                "join-workspace": "此安装包的工作区授权不可用，请使用最新私人版。",
             }.get(operation, "本机的配对凭据未获服务器认可。")
         elif error.code == 409 and operation == "join-setup":
             message = "此设置文件已用于两台电脑，或当前设备与已有申请冲突。"
@@ -79,7 +84,7 @@ def post(client, operation, payload=None):
             message = "协调服务暂时无法完成配对，请稍后重试。"
         raise ValueError(message) from error
     except (URLError, TimeoutError, OSError) as error:
-        raise ValueError("无法安全连接协调服务，请检查网络和配对码中的服务器证书。") from error
+        raise ValueError("无法安全连接云服务器，请检查网络后重试。") from error
 
 
 def create_invite(coordination):
@@ -89,16 +94,37 @@ def create_invite(coordination):
     return encode_invite(access, result["code"])
 
 
+def bundled_workspace():
+    resources = getattr(sys, "_MEIPASS", None)
+    if resources:
+        try:
+            with (Path(resources) / WORKSPACE_RESOURCE).open(encoding="ascii") as stream:
+                grant = stream.read(MAX_CODE + 1).strip()
+            decode_invite(grant, prefix=WORKSPACE_PREFIX)
+            return grant
+        except (OSError, ValueError):
+            pass
+    return None
+
+
+def join_workspace(root, grant):
+    return _join(root, grant, None, WORKSPACE_PREFIX)
+
+
 def join(root, invitation, folder, *, waiting=None, cancel=None):
+    prefix = SETUP_PREFIX if invitation.strip().startswith(SETUP_PREFIX) else PREFIX
+    return _join(root, invitation, folder, prefix, waiting=waiting, cancel=cancel)
+
+
+def _join(root, invitation, folder, prefix, *, waiting=None, cancel=None):
     from handoff_sync import atomic_write
     from model_groups import protect_key
     from project_library import set_project_root
 
-    automatic = invitation.strip().startswith(SETUP_PREFIX)
-    access, code = decode_invite(invitation, prefix=SETUP_PREFIX if automatic else PREFIX)
+    access, code = decode_invite(invitation, prefix=prefix)
     config_path = root / "local-config.json"
     config = json.loads(config_path.read_text(encoding="utf-8-sig")) if config_path.is_file() else {}
-    if not isinstance(config, dict) or not folder.is_dir():
+    if not isinstance(config, dict) or (folder is not None and not folder.is_dir()):
         raise ValueError("请确认本机配置正确，并选择可用的项目母目录。")
     # Keep the same device credentials for retries until the invitation expires.
     digest = hashlib.sha256(code.encode()).hexdigest()
@@ -120,7 +146,7 @@ def join(root, invitation, folder, *, waiting=None, cancel=None):
     }
     client = ControlClient(coordination, None)
     claim = {"code": code, "device": client.device, "token": token}
-    if automatic:
+    if prefix == SETUP_PREFIX:
         deadline = time.monotonic() + 1800
         while True:
             if cancel is not None and cancel.is_set():
@@ -139,11 +165,14 @@ def join(root, invitation, folder, *, waiting=None, cancel=None):
                 time.sleep(2)
             else:
                 cancel.wait(2)
+    elif prefix == WORKSPACE_PREFIX:
+        result = post(client, "join-workspace", claim)
     else:
         result = post(client, "redeem", claim)
     if result.get("device") != client.device:
         raise ValueError("服务器未确认本机配对，请重试。")
-    set_project_root(root, folder)
+    if folder is not None:
+        set_project_root(root, folder)
     settings = {**(config.get("personalSync") or {}), "exchange": None, "codeOnly": False, "memory": True}
     config.update(coordination=coordination, personalSync=settings)
     atomic_write(config_path, json.dumps(config, ensure_ascii=False).encode())

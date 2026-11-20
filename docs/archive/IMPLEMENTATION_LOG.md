@@ -2,6 +2,14 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-20 R33 一键连接云服务器
+
+- 以 R32 和源码 `4045823` 为基线。私人包每次先选「连接云服务器」或「本机使用」，未设置过项目母目录才弹目录选择器。顶部任务栏、主窗口左下角及测试窗口统一使用「连接云服务器」。已连接设备沿用原凭据，本机模式只在当前运行中暂停澜汐的云同步和云更新。包内授权绑定既有私人工作区，各设备先后加入且各有独立凭据。R32 的两台限制和邀请码流程继续供旧客户端使用。
+- Windows、Python 3.14.7。执行 `.venv\Scripts\python.exe -B -m unittest tests.test_desktop_storage tests.test_monitor tests.test_personal_flow`，20 项通过，22.831 秒。`tests/smoke_desktop.py --output build-exe/verification/portable-r33-20261120/qt` 通过，覆盖启动两种选择、已有目录复用、已有凭据的本机模式和顶部按钮。未单独测量 Qt 总耗时。
+- `.venv\Scripts\python.exe -B -m tests.smoke_cloud_coordinator --output build-exe/verification/portable-r33-20261120/cloud.json` 用隔离 HTTPS 验证四份设备配置、同一空间的记录、重复加入、撤回授权和服务重启，14.49 秒。限制私人包下载范围后，以 `cloud-scoped.json` 为输出复跑，14.42 秒，另确认缺少范围标记的新版包不可下载，另一工作区无法查看发布清单或按版本下载。
+- `.venv\Scripts\python.exe -B scripts/build-portable.py --work build-exe/verification/portable-r33-20261120/windows --pycharm 'C:\Program Files\JetBrains\PyCharm 2026.3' --workspace-grant build-exe/verification/portable-r33-20261120/lanxi-private-workspace.join` 构建 `release/Lanxi-R33-Windows-Private.zip`。大小 95,150,111 字节，SHA-256 为 `6e04106ac7c5b785a317f9f600174a8c51525a6ea5184197261e75e7617814ba`。同目录 `verify.py` 使用 R32 更新器校验并解压同一包，检查包内授权位于主程序资源，在未连接的隔离环境运行包内自检，6 项通过，16.08 秒。 [连接说明](../CLOUD_COORDINATOR.md#在澜汐中连接云服务器)
+- 私人 HTTPS 服务已部署加入接口和按工作区下载隔离，保留原数据卷和镜像。第二阶段首次部署指令因拼接缺换行在本机解析失败，修正后服务通过健康检查，错误授权返回 403。发布服务器复核同一 ZIP 的 SHA-256，已连接的 R32 更新检查可见 R33。四台验证用隔离配置，物理电脑的现场连接待实测。
+
 ## 2026-11-20 R32 双机自动配对
 
 - 以 R30 手工配对为基线。R32 两台设备用同一份私有设置文件申请。文件自签发可发起申请 30 分钟，等待中的设备无权访问个人空间。第二台申请后服务端在同一事务登记两个独立设备。重复请求继续使用原设备身份，第三台及过期文件被拒绝。手工配对码流程保留。

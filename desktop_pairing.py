@@ -9,8 +9,73 @@ from PySide6.QtWidgets import (
     QPushButton, QVBoxLayout,
 )
 
-from cloud_pairing import MAX_CODE, SETUP_PREFIX, create_invite, decode_invite, join
+from cloud_pairing import MAX_CODE, SETUP_PREFIX, create_invite, decode_invite, join, join_workspace
 from project_library import configured_root, set_project_root
+
+
+CONNECT_CLOUD = "连接云服务器"
+
+
+class WorkspaceConnectDialog(QDialog):
+    completed = Signal(str)
+
+    def __init__(self, parent, root, grant, *, enrolled=False, startup=False):
+        super().__init__(parent)
+        self.root = root
+        self.grant = grant
+        self.enrolled = enrolled
+        self.online = False
+        self.busy = False
+        self.setWindowTitle("选择启动方式" if startup else CONNECT_CLOUD)
+        box = QVBoxLayout(self)
+        self.status = QLabel("连接后，可以在同一个私人工作区接续其他电脑上的项目和会话。")
+        self.status.setWordWrap(True)
+        box.addWidget(self.status)
+        row = QHBoxLayout()
+        self.local = QPushButton("本机使用" if startup else "取消")
+        self.local.clicked.connect(self.accept if startup else self.reject)
+        row.addWidget(self.local)
+        row.addStretch()
+        self.connect = QPushButton(CONNECT_CLOUD)
+        self.connect.setDefault(True)
+        self.connect.clicked.connect(self.connect_workspace)
+        row.addWidget(self.connect)
+        box.addLayout(row)
+        self.completed.connect(self.finish)
+        self.resize(440, self.sizeHint().height())
+
+    def connect_workspace(self):
+        if self.enrolled:
+            self.finish("")
+            return
+        self.busy = True
+        self.connect.setEnabled(False)
+        self.local.setEnabled(False)
+        self.status.setText("正在连接云服务器…")
+
+        def work():
+            try:
+                join_workspace(self.root, self.grant)
+            except (OSError, ValueError, KeyError, TypeError, RuntimeError) as error:
+                self.completed.emit(str(error) or "连接失败，请重试。")
+            else:
+                self.completed.emit("")
+
+        threading.Thread(target=work, daemon=True, name="lanxi-workspace-connect").start()
+
+    def reject(self):
+        if not self.busy:
+            super().reject()
+
+    def finish(self, message):
+        self.busy = False
+        if message:
+            self.status.setText(message)
+            self.connect.setEnabled(True)
+            self.local.setEnabled(True)
+        else:
+            self.online = True
+            super().accept()
 
 
 class PairingDialog(QDialog):
@@ -29,18 +94,18 @@ class PairingDialog(QDialog):
         box = QVBoxLayout(self)
         if coordination:
             self.setWindowTitle("邀请另一台电脑")
-            instructions = "在另一台电脑粘贴此配对码。配对码十分钟内有效。"
+            instructions = "在另一台电脑粘贴此邀请码。邀请码十分钟内有效。"
         elif first:
             self.setWindowTitle("设置项目母目录")
             instructions = "选择这台电脑存放各个项目的上一级文件夹。"
         else:
-            self.setWindowTitle("连接澜汐")
-            instructions = "导入双机设置文件，或输入已配对电脑生成的配对码。"
+            self.setWindowTitle(CONNECT_CLOUD)
+            instructions = "输入已连接电脑生成的邀请码。"
         box.addWidget(QLabel(instructions))
         self.code = QLineEdit()
         self.code.setMaxLength(MAX_CODE)
         self.code.setReadOnly(bool(coordination))
-        self.code.setPlaceholderText("配对码（有另一台已配对电脑时填写）" if first else "配对码")
+        self.code.setPlaceholderText("邀请码（选填）" if first else "邀请码")
         if coordination:
             box.addWidget(self.code)
         if coordination is None:
@@ -68,7 +133,7 @@ class PairingDialog(QDialog):
         self.close_button.clicked.connect(self.reject)
         buttons.addWidget(self.close_button)
         buttons.addStretch()
-        self.action = QPushButton("生成配对码" if coordination else "开始使用" if first else "连接并同步")
+        self.action = QPushButton("生成邀请码" if coordination else "开始使用" if first else "连接并同步")
         if not coordination:
             self.code.textChanged.connect(self.update_join_action)
         self.action.clicked.connect(self.submit)
@@ -104,7 +169,7 @@ class PairingDialog(QDialog):
     def submit(self):
         if self.coordination and self.code.text():
             QApplication.clipboard().setText(self.code.text())
-            self.status.setText("已复制配对码。")
+            self.status.setText("已复制邀请码。")
             return
         if self.coordination is None:
             invitation = self.code.text().strip()
@@ -168,8 +233,8 @@ class PairingDialog(QDialog):
         elif self.coordination:
             self.code.setText(text)
             self.code.selectAll()
-            self.status.setText("配对码已生成。")
-            self.action.setText("复制配对码")
+            self.status.setText("邀请码已生成。")
+            self.action.setText("复制邀请码")
         else:
             self.paired = True
             super().accept()

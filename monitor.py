@@ -26,6 +26,11 @@ def _runtime_root():
 PROGRAM_ROOT=_runtime_root()
 ROOT=PROGRAM_ROOT
 _workspace=None
+_workspace_online=True
+
+def set_workspace_online(enabled):
+ global _workspace_online
+ _workspace_online=enabled
 
 def prepare_desktop_data(select_legacy,source_override=None):
  global ROOT,_workspace
@@ -66,6 +71,7 @@ def enable_personal_sync(settings, stop, workers):
 
 
 def personal_settings(settings):
+ if not _workspace_online:return None
  personal=settings.get('personalSync')
  pair_file=ROOT/'personal-sync.json'
  if pair_file.is_file():
@@ -118,9 +124,14 @@ def snapshot():
  return result
 def update(**values):
  with state_lock:state.update(values)
-def config():
+def saved_config():
  path=ROOT/'local-config.json'
  return json.loads(path.read_text(encoding='utf-8-sig')) if path.exists() else {}
+def config():
+ settings=saved_config()
+ if not _workspace_online:
+  return {key:value for key,value in settings.items() if key not in ('coordination','personalSync','handoffSync')}
+ return settings
 def clean_limits(x):
  def window(w):return {k:w.get(k) for k in ('usedPercent','windowDurationMins','resetsAt')} if isinstance(w,dict) else None
  def one(v):return {**{key:v.get(key) for key in ('spendControlReached','rateLimitReachedType','individualLimit')},'primary':window(v.get('primary')),'secondary':window(v.get('secondary'))}

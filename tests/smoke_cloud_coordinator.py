@@ -20,10 +20,10 @@ from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 from zipfile import ZipFile
 
-from cloud_pairing import SETUP_PREFIX, create_invite, decode_invite, join, post
+from cloud_pairing import WORKSPACE_PREFIX, SETUP_PREFIX, create_invite, decode_invite, join, join_workspace, post
 from coordination_client import ControlClient, device_token
 from personal_relay import EMPTY, MAX_RECORD, Changed, RemoteRecords
-from portable_update import latest, prepare
+from portable_update import endpoint, latest, prepare
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -147,6 +147,46 @@ def automatic_pairing(root, url, cert, record, payload):
     return paired
 
 
+def workspace_devices(root, url, cert, record, payload):
+    database = str(root / "coordination.sqlite3")
+    command = admin(root, "workspace-grant", "first", "--url", url, "--certificate", str(cert),
+                    "--database", database)
+    assert command.returncode == 0, command.stderr
+    grant = command.stdout.strip()
+    profiles = [root / f"private-edition-{index}" for index in range(4)]
+
+    def connect(profile):
+        assert join_workspace(profile, grant)
+        config = json.loads((profile / "local-config.json").read_bytes())
+        assert "LANXI3." not in json.dumps(config)
+        assert not (profile / "project-library.json").exists()
+        return config["coordination"]
+
+    first = connect(profiles[0])
+    assert RemoteRecords(ControlClient(first, device_token(first))).read(record) == payload
+    with ThreadPoolExecutor(max_workers=3) as workers:
+        members = [first, *workers.map(connect, profiles[1:])]
+    assert len({member["device"] for member in members}) == len(members)
+    assert len({device_token(member) for member in members}) == len(members)
+    assert connect(profiles[0]) == first
+    for member in members:
+        assert RemoteRecords(ControlClient(member, device_token(member))).read(record) == payload
+    access, code = decode_invite(grant, prefix=WORKSPACE_PREFIX)
+    new_client = ControlClient({**access, "device": "lanxi-" + "f" * 24, "projects": {}}, None)
+    invalid = {"code": "A" * 43, "device": new_client.device, "token": "B" * 43}
+    for proof in (invalid, {**invalid, "code": code}):
+        if proof is not invalid:
+            revoked = admin(root, "workspace-revoke", "first", "--database", database)
+            assert revoked.returncode == 0, revoked.stderr
+        try:
+            post(new_client, "join-workspace", proof)
+        except ValueError as error:
+            assert "授权不可用" in str(error)
+        else:
+            raise AssertionError("An invalid or revoked workspace grant was accepted")
+    return members
+
+
 def clients_roundtrip(root, url, devices):
     # The production client uses native Windows writer locks for installed rollouts.
     from code_sync import value as git
@@ -251,6 +291,7 @@ def verify(root):
     port = available_port()
     paired = None
     automatic = []
+    workspace = []
     releases = root / "releases"
     releases.mkdir()
     archive = releases / "Lanxi-R999-Windows-Private.zip"
@@ -259,6 +300,7 @@ def verify(root):
     manifest = {"version": "999", "size": archive.stat().st_size,
                 "sha256": hashlib.sha256(archive.read_bytes()).hexdigest()}
     (releases / "latest.json").write_text(json.dumps(manifest))
+    scope = releases / "Lanxi-R999-Windows-Private.scope"
 
     def client(url, name, token=None):
         return RemoteRecords(
@@ -274,6 +316,10 @@ def verify(root):
                 devices["second"]["token"] in config.stdout and devices["first"]["token"] not in config.stdout
             )
             a, b, other = (client(url, name) for name in devices)
+            http_error(lambda: endpoint(a.client, "/999"), 404)
+            scope.write_text(hashlib.sha256(devices["first"]["personalSpace"].encode()).hexdigest(), encoding="ascii")
+            for suffix in ("", "/999"):
+                http_error(lambda: endpoint(other.client, suffix), 403)
             http_error(client(url, "first", "wrong").index, 403)
             a.put(key_id, EMPTY, payload)
             assert b.read(key_id) == payload
@@ -329,11 +375,12 @@ def verify(root):
                     else:
                         raise AssertionError("A second device reused a spent invitation")
                     automatic = automatic_pairing(root, url, cert, key_id, payload)
+                    workspace = workspace_devices(root, url, cert, key_id, payload)
         with serve(root, port) as url:
             assert client(url, "second").read(key_id) == payload
             if paired:
                 assert RemoteRecords(ControlClient(paired, device_token(paired))).read(key_id) == payload
-            for member in automatic:
+            for member in automatic + workspace:
                 assert RemoteRecords(ControlClient(member, device_token(member))).read(key_id) == payload
     return {
         "platform": sys.platform,
@@ -347,6 +394,7 @@ def verify(root):
         "windows_clients_roundtrip": os.name == "nt",
         "windows_pairing_restart_persistence": paired is not None,
         "automatic_pairing_restart_persistence": len(automatic) == 2,
+        "private_workspace_devices": len(workspace),
         "private_update_checksum_and_staging": paired is not None,
         "seconds": round(time.monotonic() - started, 2),
     }

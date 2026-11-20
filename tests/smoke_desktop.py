@@ -15,10 +15,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PySide6.QtCore import QEvent, QMimeData, QPoint, QPointF, QRect, QTimer, Qt, QUrl
 from PySide6.QtGui import QEnterEvent, QFontDatabase, QImage, QMouseEvent, QRawFont, QTextCursor, QTextDocument
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QDialog, QFrame, QLabel, QMenu, QMessageBox, QPushButton
+from PySide6.QtWidgets import QApplication, QDialog, QFrame, QLabel, QLineEdit, QMenu, QMessageBox, QPushButton
 
 import monitor
 from automation import Approvals
+from cloud_pairing import encode_setup
 from codex_activity import COMMAND_DELTA, MESSAGE_DELTA, CodexActivity
 from codex_history import read_codex_conversation
 from desktop_glass import FrostedPanel, OceanBackdrop
@@ -108,6 +109,34 @@ def check_diagnostics_pairing(window):
         QTest.mouseClick(dialog.self_test, Qt.MouseButton.LeftButton)
         run.assert_called_with(dialog, 'diagnostics')
         dialog.close()
+
+
+def check_automatic_pairing(window):
+    with tempfile.TemporaryDirectory() as directory:
+        profile = Path(directory)
+        document = encode_setup({'url': 'https://example.test'}, 'A' * 43)
+        setup = profile / 'fixture.lanxi-pairing'
+        setup.write_text(document, encoding='utf-8')
+        dialog = PairingDialog(window, profile)
+
+        def wait_for_peer(_profile, _setup, _folder, *, waiting, cancel):
+            waiting()
+            assert cancel.wait(5)
+            return False
+
+        with (patch('desktop_pairing.QFileDialog.getOpenFileName', return_value=(str(setup), '')),
+              patch('desktop_pairing.join', side_effect=wait_for_peer) as join):
+            dialog.show()
+            dialog.folder.setText(str(profile))
+            load = next(button for button in dialog.findChildren(QPushButton) if button.text() == '导入双机设置…')
+            QTest.mouseClick(load, Qt.MouseButton.LeftButton)
+            assert dialog.action.text() == '申请自动配对'
+            assert dialog.code.echoMode() == QLineEdit.EchoMode.Password
+            QTest.mouseClick(dialog.action, Qt.MouseButton.LeftButton)
+            assert wait_until(lambda: '已提交申请' in dialog.status.text())
+            assert join.call_args.args == (profile, document, profile)
+            QTest.mouseClick(dialog.close_button, Qt.MouseButton.LeftButton)
+            assert wait_until(lambda: not dialog.isVisible()) and not dialog.paired
 
 
 class FakeApprovalClient:
@@ -1090,6 +1119,7 @@ def main():
             check_model_settings(window, args.output)
             check_first_setup(window)
             check_diagnostics_pairing(window)
+            check_automatic_pairing(window)
             check_markdown(window, data, args.output)
             check_process_bubbles(window, args.output)
             from project_library import ENTRY_PREFIX, ProjectLibrary, configured_root

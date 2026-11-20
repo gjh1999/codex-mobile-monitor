@@ -4,6 +4,7 @@ deploy/coordinator/.env
 deploy/coordinator/tls/
 deploy/coordinator/releases/
 personal-sync.json
+*.lanxi-pairing
 local-model-api.json
 local-model-api-*.tmp
 claude-drafts.json

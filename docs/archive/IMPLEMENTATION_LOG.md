@@ -2,6 +2,13 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-20 R32 双机自动配对
+
+- 以 R30 手工配对为基线。R32 两台设备用同一份私有设置文件申请。文件自签发可发起申请 30 分钟，等待中的设备无权访问个人空间。第二台申请后服务端在同一事务登记两个独立设备。重复请求继续使用原设备身份，第三台及过期文件被拒绝。手工配对码流程保留。
+- Windows、Python 3.14.7。执行 `.venv\Scripts\python.exe -B -m tests.smoke_cloud_coordinator --output build-exe/verification/portable-r32-20261120/cloud.json`。首次因测试进程直接调用仓库子目录的管理脚本导致导入失败；第二次测试临时 SQLite 连接未关闭，Windows 清理失败。修正测试运行入口和连接关闭后，隔离 HTTPS 验收 11.41 秒，通过等待时拒绝访问、重试、完成配对、拒绝第三台及过期文件、重启读回，也经过原手工配对和升级测试。Qt `tests/smoke_desktop.py --output build-exe/verification/portable-r32-20261120/qt` 通过，覆盖设置文件载入、等待状态和取消等待。
+- 执行 `.venv\Scripts\python.exe -B scripts/build-portable.py --work build-exe/verification/portable-r32-20261120 --pycharm 'C:\Program Files\JetBrains\PyCharm 2026.3'`。便携 ZIP `release/Lanxi-R32-Windows-Private.zip` 为 95,145,244 字节，SHA-256 为 `a1f5955cdead805852ae1276af0a88e4ac6100772123c5ae14d7b1ea1655a0ae`。ZIP 文件清单、CRC、起步说明和配对模块均已核对。 [双机配对说明](../CLOUD_COORDINATOR.md#双机自动配对)
+- 验收目录内 `deploy_server.py` 将已校验的四个模块部署到私人 HTTPS 协调服务，保留原数据卷和旧镜像。实际服务健康，未授权设置请求返回 403。`publish.py` 发布同一 ZIP，已配对的 R30 更新检查可见 R32，管理员脚本成功在桌面签发设置文件。两台物理电脑尚待现场导入。设置文件和凭据留在本机。
+
 ## 2026-11-20 R30 首次配置项目母目录
 
 - 以 R29 和源码 `27ab71d` 为基线。源头电脑选择全新开始后，原流程先显示配对窗口，需要点「稍后」才进入目录选择。R30 直接显示「设置项目母目录」，可本机开始或填写已有配对码。主窗口和测试窗口均有配对按钮。空目录记录会再次提示配置，已有项目目录继续使用。未配对时运行本机自检，已经配对时额外验证云连接。

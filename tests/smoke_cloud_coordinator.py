@@ -8,23 +8,24 @@ import shutil
 import socket
 import subprocess
 import sys
+import sqlite3
 import tempfile
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 from zipfile import ZipFile
 
-from cloud_pairing import create_invite, join
+from cloud_pairing import SETUP_PREFIX, create_invite, decode_invite, join, post
 from coordination_client import ControlClient, device_token
 from personal_relay import EMPTY, MAX_RECORD, Changed, RemoteRecords
 from portable_update import latest, prepare
 
 REPO = Path(__file__).resolve().parents[1]
-ADMIN = REPO / "deploy/coordinator/cloud_admin.py"
 
 
 def available_port():
@@ -78,7 +79,8 @@ def serve(root, port):
 
 def admin(root, *args):
     return subprocess.run(
-        [sys.executable, "-B", str(ADMIN), "--file", str(root / "devices.json"), *args],
+        [sys.executable, "-B", "-m", "deploy.coordinator.cloud_admin", "--file", str(root / "devices.json"), *args],
+        cwd=REPO,
         capture_output=True,
         encoding="utf-8",
         env={**os.environ, "PYTHONIOENCODING": "utf-8"},
@@ -95,6 +97,54 @@ def http_error(action, expected):
         error.close()
     else:
         raise AssertionError(f"Expected HTTP {expected}")
+
+
+def automatic_pairing(root, url, cert, record, payload):
+    command = admin(root, "setup", "first", "--url", url, "--certificate", str(cert),
+                    "--database", str(root / "coordination.sqlite3"))
+    assert command.returncode == 0, command.stderr
+    setup = command.stdout.strip()
+    access, secret = decode_invite(setup, prefix=SETUP_PREFIX)
+    configs = [root / name for name in ("setup-first", "setup-second", "setup-extra")]
+    folders = [root / name for name in ("setup-projects-a", "setup-projects-b")]
+    for path in [*configs, *folders]:
+        path.mkdir()
+    waiting = threading.Event()
+    cancel = threading.Event()
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        first = executor.submit(join, configs[0], setup, folders[0], waiting=waiting.set, cancel=cancel)
+        try:
+            assert waiting.wait(8) and not first.done()
+            assert not (configs[0] / "local-config.json").exists()
+            pending = json.loads((configs[0] / ".local/pending-cloud-pairing.json").read_bytes())
+            client = ControlClient({**access, "device": pending["device"], "projects": {}}, device_token(pending))
+            http_error(RemoteRecords(client).index, 403)
+            claim = {"code": secret, "device": client.device, "token": client.token}
+            assert post(client, "join-setup", claim)["state"] == "waiting"
+            assert join(configs[1], setup, folders[1])
+            assert first.result(timeout=8)
+        finally:
+            cancel.set()
+    paired = [json.loads((path / "local-config.json").read_bytes())["coordination"] for path in configs[:2]]
+    assert paired[0]["device"] != paired[1]["device"]
+    assert device_token(paired[0]) != device_token(paired[1])
+    for coordination in paired:
+        assert RemoteRecords(ControlClient(coordination, device_token(coordination))).read(record) == payload
+    try:
+        join(configs[2], setup, folders[1])
+    except ValueError as error:
+        assert "已用于两台电脑" in str(error)
+    else:
+        raise AssertionError("A third device joined a completed setup")
+    with closing(sqlite3.connect(root / "coordination.sqlite3")) as db, db:
+        db.execute("UPDATE device_setups SET expires=0")
+    try:
+        join(configs[2], setup, folders[1])
+    except ValueError as error:
+        assert "已过期" in str(error)
+    else:
+        raise AssertionError("An expired setup was accepted")
+    return paired
 
 
 def clients_roundtrip(root, url, devices):
@@ -200,6 +250,7 @@ def verify(root):
     key_id = "fixture/persistent"
     port = available_port()
     paired = None
+    automatic = []
     releases = root / "releases"
     releases.mkdir()
     archive = releases / "Lanxi-R999-Windows-Private.zip"
@@ -277,10 +328,13 @@ def verify(root):
                         assert "已过期或已使用" in str(error)
                     else:
                         raise AssertionError("A second device reused a spent invitation")
+                    automatic = automatic_pairing(root, url, cert, key_id, payload)
         with serve(root, port) as url:
             assert client(url, "second").read(key_id) == payload
             if paired:
                 assert RemoteRecords(ControlClient(paired, device_token(paired))).read(key_id) == payload
+            for member in automatic:
+                assert RemoteRecords(ControlClient(member, device_token(member))).read(key_id) == payload
     return {
         "platform": sys.platform,
         "python": sys.version.split()[0],
@@ -292,6 +346,7 @@ def verify(root):
         "oversize_http": 413,
         "windows_clients_roundtrip": os.name == "nt",
         "windows_pairing_restart_persistence": paired is not None,
+        "automatic_pairing_restart_persistence": len(automatic) == 2,
         "private_update_checksum_and_staging": paired is not None,
         "seconds": round(time.monotonic() - started, 2),
     }

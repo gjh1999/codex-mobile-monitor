@@ -12,6 +12,16 @@
 
 配对码带服务地址。私人证书写进配对码，只从可信的已配对设备或自己的服务器管理员接收。设备令牌在本机由 Windows DPAPI 保护。
 
+### 双机自动配对
+
+两台均未配对时，可在 R32 的「配对」窗口各自选择本机项目母目录，再导入同一份 `.lanxi-pairing` 设置文件并点击「申请自动配对」。先申请的电脑会等待，第二台提交后，两台同时加入设置文件指定的私人空间。服务器只接收两台不同的设备，文件自签发起 30 分钟内可用于首次申请。设备继续使用各自的独立凭据。
+
+服务管理员可从协调主机签发文件。以下命令把输出的一行设置凭据保存在本地文件中。只把该文件交给要配对的两台电脑。
+
+```bash
+sudo docker compose -f compose.private-https.yaml exec -T personal-https python cloud_admin.py setup desktop --url https://服务器公网IP --certificate /run/lanxi-tls/server.crt > 两台电脑.lanxi-pairing
+```
+
 ### 服务器管理员为首台设备生成配对码
 
 已有 HTTPS 域名时，用新版协调服务镜像。无域名的私人部署可使用 `compose.private-https.yaml`，将为公网 IP 签发且含 IP SAN 的证书与私钥分别放到 `deploy/coordinator/tls/server.crt` 和 `server.key`。容器使用 UID/GID 10001，给该用户读取私钥的权限。确认 TCP 443 可达。这个入口只提供个人同步和设备配对，沿用 `lanxi-coordinator` 的持久卷。

@@ -17,7 +17,8 @@ from unittest.mock import patch
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
-from coordination_client import ControlClient
+from cloud_pairing import create_invite, join
+from coordination_client import ControlClient, device_token
 from personal_relay import EMPTY, MAX_RECORD, Changed, RemoteRecords
 
 REPO = Path(__file__).resolve().parents[1]
@@ -194,6 +195,7 @@ def verify(root):
     large = b"x" * (MAX_RECORD - 1)
     key_id = "fixture/persistent"
     port = available_port()
+    paired = None
 
     def client(url, name, token=None):
         return RemoteRecords(
@@ -225,8 +227,38 @@ def verify(root):
             http_error(lambda: a.put("fixture/too-large", EMPTY, large + b"x"), 413)
             if os.name == "nt":
                 clients_roundtrip(root, url, devices)
+                desktop = {"url": url, "device": "first", "projects": {},
+                           "trustedCertificate": cert.read_text(encoding="ascii")}
+                laptop, folder = root / "laptop-config", root / "laptop-projects"
+                laptop.mkdir()
+                folder.mkdir()
+                (laptop / "local-config.json").write_text('{"desktopWallpaperMinutes":15}', encoding="utf-8")
+                with patch.dict(os.environ, LANXI_DEVICE_TOKEN=devices["first"]["token"]):
+                    invitation = create_invite(desktop)
+                # The new client uses only the certificate in its invitation.
+                with patch.dict(os.environ, SSL_CERT_FILE=str(root / "missing.pem"), LANXI_DEVICE_TOKEN=""):
+                    join(laptop, invitation, folder)
+                    join(laptop, invitation, folder)
+                    saved = json.loads((laptop / "local-config.json").read_bytes())
+                    assert saved["desktopWallpaperMinutes"] == 15
+                    assert Path(json.loads((laptop / "project-library.json").read_bytes())["root"]) == folder
+                    paired = saved["coordination"]
+                    assert paired["device"] != "first"
+                    assert device_token(paired) not in json.dumps(saved)
+                    paired_records = RemoteRecords(ControlClient(paired, device_token(paired)))
+                    assert paired_records.read(key_id) == payload
+                    duplicate = root / "different-device"
+                    duplicate.mkdir()
+                    try:
+                        join(duplicate, invitation, folder)
+                    except ValueError as error:
+                        assert "已过期或已使用" in str(error)
+                    else:
+                        raise AssertionError("A second device reused a spent invitation")
         with serve(root, port) as url:
             assert client(url, "second").read(key_id) == payload
+            if paired:
+                assert RemoteRecords(ControlClient(paired, device_token(paired))).read(key_id) == payload
     return {
         "platform": sys.platform,
         "python": sys.version.split()[0],
@@ -237,6 +269,7 @@ def verify(root):
         "accepted_bytes": len(large),
         "oversize_http": 413,
         "windows_clients_roundtrip": os.name == "nt",
+        "windows_pairing_restart_persistence": paired is not None,
         "seconds": round(time.monotonic() - started, 2),
     }
 

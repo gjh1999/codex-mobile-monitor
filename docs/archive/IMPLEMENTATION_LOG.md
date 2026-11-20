@@ -2,6 +2,15 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-20 R23 首次配对向导
+
+- 以 R21.2 为基线。首次打开应用，同屏填写配对码和项目母目录。台式机可在托盘邀请其他设备，笔记本保存自己的 Windows DPAPI 凭据。服务端用 SQLite 记录配对码哈希及单次领取状态，十分钟后过期。同一台设备可重试尚未超时的请求。配对成功后托盘报告连接与重试状态。
+- Windows Python 3.14.7 运行 `python -B -m tests.smoke_cloud_coordinator --output build-exe/verification/cloud-pairing-20261120/coordinator.json`，5.05 秒通过。验证证书约束、令牌落盘保护、同设备重试、不同设备重复领取拒绝、既有配置合并及 HTTPS 服务重启后凭据继续有效。
+- 新入口以独立 Compose 服务部署在阿里云 TCP 443，TLS 证书含公网 IP SAN，只挂载个人同步与配对路由。新旧容器共用持久卷，现有回环 SSH 方式继续可用。实际 HTTPS 上用两个临时 Windows 配置打开 Qt 配对窗口，随后由首台设备签发第二台的配对码，测试记录收发通过。输出 `live.json`。笔记本现场登录、网络切换和真实仓库同步尚待验证。 [部署与配对](../CLOUD_COORDINATOR.md)
+- 构建 `release/Lanxi-R23-Portable/`，真实便携程序本机自检六项通过，10.38 秒。旧 R20 升级测试与本机自检并行时首次遇到 SQLite 只读错误，串行复跑 5.17 秒通过，验证配置、路径、随记、待办和回复均保留。输出 `portable.json` 和 `upgrade.json`。R23 私人 ZIP 大小 78,222,469 字节，SHA-256 为 `60a465a589104ecc70258cae9bf796e7c8b7359396144ec95c8347f1825c052a`。
+- 运行 `python -B -m unittest tests.test_coordination tests.test_personal_flow tests.test_monitor tests.test_model_groups tests.test_desktop_storage`，修正测试新增用例的位置后 33 项通过，22.843 秒。下载脚本从阿里云取回同一 ZIP，SHA-256、CRC 和六份包内文件清单全部一致。
+- 验收目录为 `build-exe/verification/cloud-pairing-20261120/`。首次配对码由服务器管理员按需生成，正式配对完成后从澜汐托盘生成新码。真实设备配置、下载凭据和 TLS 私钥未写入 Git。
+
 ## 2026-11-20 R21.2 阿里云验收菜单与笔记本报告
 
 - 笔记本的 R21.1 本机自检六项通过，耗时 25.29 秒。三份云接收报告的检查项均为空，原因都是 Windows 用户数据目录缺少 `local-config.json`。失败发生在 SSH 和服务器检查之前。新版将缺少该文件报告为「本机尚未配置阿里云配对」，并指向随包的配对步骤。原始现场报告保留在本机。

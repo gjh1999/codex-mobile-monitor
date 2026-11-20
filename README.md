@@ -6,7 +6,7 @@ Windows 原生桌面软件，用于集中查看和控制本机 Codex / Claude Co
 
 ## 快速开始
 
-把 `release/Lanxi-R21-Portable/` 整个复制到目标 Windows 电脑。该目录包含澜汐、双击验收脚本和使用说明。R21 支持旧数据迁移、固定用户数据目录和项目母目录自动发现。 [安装、升级与验收](docs/PORTABLE_CHECK.md)
+在 Windows 上解压澜汐便携包，双击桌面程序。首次启动可输入一次性配对码并选择项目母目录。便携目录还包含验收脚本和使用说明，用户数据保存于固定的 Windows 用户目录。 [安装、升级与验收](docs/PORTABLE_CHECK.md)
 
 桌面支持 Markdown 对谈、Codex 终端历史、本地壁纸轮换和跨机接续。首次从托盘「跨机接续」配对，后台会自动克隆缺少的项目、跟随 GitHub 更新，并在两台电脑上保持相同的项目记忆相对路径。 [个人设备自动接续](docs/PERSONAL_SYNC.md)
 

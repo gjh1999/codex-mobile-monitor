@@ -28,6 +28,7 @@ import monitor
 from desktop_glass import ClientSwitch, FrostedPanel, OceanBackdrop, motion_enabled
 from desktop_model_api import ModelApiDialog
 from desktop_notebook import NotebookStore, NotebookWorkspace
+from desktop_pairing import PairingDialog
 from desktop_poetry import COVER_VERSES
 from desktop_projects import SessionTitles, folder_name, project_group
 from desktop_theme import (
@@ -908,28 +909,38 @@ class MainWindow(QMainWindow):
     def fill_sync_menu(self, menu):
         menu.clear()
         flow = monitor.personal_sync
+        coordination = monitor.config().get('coordination') or {}
+        if coordination.get('url', '').startswith('https://'):
+            menu.addAction('邀请另一台电脑…', lambda: PairingDialog(self, monitor.ROOT, coordination).exec())
+        menu.addAction('使用配对码连接…', self.open_cloud_pairing)
         if flow:
             view = flow.snapshot()
+            if view.get('connection'):
+                menu.addAction(view['connection']).setEnabled(False)
             for project in sorted(view['projects']):
                 label = project + ' · ' + view['status'].get(project, '准备中')
                 menu.addAction(label, lambda checked=False, p=project: self.request_project(p))
-            for key in ('配对', '记忆'):
+            for key in (('记忆',) if view.get('connection') else ('配对', '记忆')):
                 if key in view['status']:
                     menu.addAction(key+' · '+view['status'][key]).setEnabled(False)
             if not view['projects']:
                 menu.addAction('等待项目登记').setEnabled(False)
         if (not flow or flow.settings.get('codeOnly') or
                 not flow.settings.get('exchange') and not flow.coordination):
-            menu.addAction('选择两台电脑共用的私人目录…', self.pair_folder)
-            if monitor.config().get('coordination'):
+            if coordination:
                 menu.addAction('通过已配置的澜汐协调服务配对', lambda: self.enable_flow({'codeOnly':False}))
         if not flow:
             menu.addAction('仅启用已登记项目的 GitHub 同步', lambda: self.enable_flow({'codeOnly':True}))
 
-    def pair_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, '选择所有设备均可访问的个人共享目录')
-        if folder:
-            self.enable_flow({'exchange':folder,'codeOnly':False})
+    def open_cloud_pairing(self, first=False):
+        if PairingDialog(self, monitor.ROOT).exec() == QDialog.DialogCode.Accepted:
+            try:
+                monitor.activate_cloud_pairing(self.stop, self.worker)
+                self.control_message.setText('本机已配对，正在同步项目')
+            except (OSError, ValueError, KeyError, TypeError) as error:
+                self._popup('跨机接续', str(error))
+        elif first:
+            self.choose_project_root(first=True)
 
     def enable_flow(self, settings):
         from handoff_sync import atomic_write
@@ -1867,7 +1878,10 @@ def main():
         app.aboutToQuit.connect(window.shutdown)
         window.show()
         if getattr(sys, 'frozen', False) and not verification and not (monitor.ROOT / PROJECT_LIBRARY_FILE).is_file():
-            QTimer.singleShot(0, lambda: window.choose_project_root(first=True))
+            if monitor.config().get('coordination'):
+                QTimer.singleShot(0, lambda: window.choose_project_root(first=True))
+            else:
+                QTimer.singleShot(0, lambda: window.open_cloud_pairing(first=True))
         return app.exec()
     finally:
         try:

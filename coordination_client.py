@@ -1,9 +1,11 @@
 """Device-side project mapping, foreground activity, and Codex write reservations."""
 import argparse
+import base64
 import json
 import os
 import queue
 import re
+import ssl
 import subprocess
 import sys
 import time
@@ -14,7 +16,7 @@ from http.client import HTTPException
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
-from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
+from urllib.request import HTTPSHandler, HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 from rpc_errors import RPCError
 
@@ -39,7 +41,17 @@ class ControlClient:
         self.url = url
         self.device = config['device']
         self.token = token
-        self.opener = build_opener(NoRedirect(), *([ProxyHandler({})] if loopback else []))
+        handlers = [NoRedirect()]
+        certificate = config.get('trustedCertificate')
+        if loopback or certificate:
+            handlers.append(ProxyHandler({}))
+        if certificate:
+            if parts.scheme != 'https':
+                raise ValueError('固定证书需要 HTTPS')
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            context.load_verify_locations(cadata=certificate)
+            handlers.append(HTTPSHandler(context=context))
+        self.opener = build_opener(*handlers)
         self.paths = {}
         self.threads = {}
         for project, mapping in config['projects'].items():
@@ -250,8 +262,17 @@ class ProjectWrites:
             del self.tickets[project, thread]
 
 
+def device_token(coordination):
+    protected = coordination.get('protectedToken')
+    if protected:
+        from model_groups import protect_key
+        return protect_key(base64.b64decode(protected, validate=True), decrypt=True).decode('ascii')
+    return os.environ.get('LANXI_DEVICE_TOKEN')
+
+
 def device_client(config):
-    return ControlClient(config['coordination'], os.environ.get('LANXI_DEVICE_TOKEN')) if 'coordination' in config else None
+    coordination = config.get('coordination')
+    return ControlClient(coordination, device_token(coordination)) if coordination else None
 
 
 def terminal(client, cwd, args, resume=False, *, outbox=None):

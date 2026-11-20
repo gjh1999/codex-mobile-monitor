@@ -59,6 +59,25 @@ def enable_personal_sync(settings, stop, workers):
  workers.threads.append(thread)
  thread.start()
 
+
+def personal_settings(settings):
+ personal=settings.get('personalSync')
+ pair_file=ROOT/'personal-sync.json'
+ if pair_file.is_file():
+  personal={**(personal or {}),**json.loads(pair_file.read_text(encoding='utf-8-sig'))}
+ if (settings.get('coordination') or {}).get('protectedToken'):
+  personal={**(personal or {}),'exchange':None,'codeOnly':False,'memory':True}
+ return personal
+
+
+def activate_cloud_pairing(stop, workers):
+ settings=config()
+ personal=personal_settings(settings)
+ if personal_sync is None:
+  enable_personal_sync(personal,stop,workers)
+ else:
+  personal_sync.reconfigure(personal,settings['coordination'])
+
 def client_snapshot(snap,client='codex'):
  if client not in ('codex','claude'):raise ValueError('无效客户端。')
  if client=='codex':
@@ -289,11 +308,8 @@ def start_background_service(stop=None, embed_web=None):
  group=ServiceWorkers(workers,service_lock)
  global personal_sync
  personal_sync=None
- pair_file=ROOT/'personal-sync.json'
  try:
-  personal=settings.get('personalSync') if isinstance(settings,dict) else None
-  if pair_file.is_file():
-   personal={**(personal or {}),**json.loads(pair_file.read_text(encoding='utf-8-sig'))}
+  personal=personal_settings(settings) if isinstance(settings,dict) else None
   if isinstance(personal,dict):
    enable_personal_sync(personal,stop,group)
  except (ValueError,OSError,KeyError,TypeError):

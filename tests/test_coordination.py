@@ -14,6 +14,7 @@ from automation import Approvals, Scheduler
 from coordination import Conflict, Ownership
 from coordination_client import ControlDenied, ProjectWrites, terminal
 from coordination_server import create_app
+from device_enrollment import INVITE_SECONDS
 from universal_rpc import CodexRPC
 
 
@@ -49,6 +50,23 @@ class CoordinationTests(unittest.TestCase):
         self.assertNotEqual(next_ticket, ticket)
         with self.assertRaises(Conflict):
             restarted.release('vision', 'A', ticket)
+
+    def test_expired_invitation_and_public_route_boundary(self):
+        devices = {'desktop': {'personalSpace': 'owner', 'token': 'a' * 43, 'projects': ['vision']}}
+        with TestClient(create_app(self.path, devices, personal_only=True)) as client:
+            issue = '/api/v1/pairing/invite'
+            redeem = '/api/v1/pairing/redeem'
+            self.assertEqual(client.post(issue).status_code, 403)
+            with patch('device_enrollment.time.time', return_value=1000):
+                result = client.post(issue, headers={
+                    'X-Lanxi-Device': 'desktop', 'Authorization': 'Bearer ' + 'a' * 43,
+                })
+            self.assertEqual(result.status_code, 200)
+            claim = {'code': result.json()['code'], 'token': 'b' * 43, 'device': 'lanxi-' + 'c' * 24}
+            with patch('device_enrollment.time.time', return_value=1000 + INVITE_SECONDS):
+                self.assertEqual(client.post(redeem, json=claim).status_code, 403)
+            self.assertEqual(client.post(redeem, content=b'x' * 513).status_code, 413)
+            self.assertEqual(client.get('/api/v1/projects/vision/status').status_code, 404)
 
     def test_simultaneous_background_claim_and_manual_recovery(self):
         def claim(device):

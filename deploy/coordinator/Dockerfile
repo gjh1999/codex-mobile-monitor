@@ -8,8 +8,8 @@ RUN pip install --no-cache-dir -r requirements-web.txt \
     && useradd --uid 10001 --gid lanxi --home-dir /var/lib/lanxi --no-create-home lanxi \
     && install -d -m 0700 -o lanxi -g lanxi /var/lib/lanxi
 
-COPY coordination_server.py coordination.py compute_queue.py compute_artifacts.py personal_relay.py ./
-COPY handoff.py handoff_sync.py lfs_assets.py service_lock.py coordination_client.py rpc_errors.py ./
+COPY coordination_server.py coordination.py compute_queue.py compute_artifacts.py personal_relay.py device_enrollment.py ./
+COPY handoff.py handoff_sync.py lfs_assets.py service_lock.py coordination_client.py cloud_pairing.py rpc_errors.py ./
 COPY deploy/coordinator/cloud_admin.py ./
 
 USER 10001:10001

@@ -2,6 +2,7 @@
 !requirements-web.txt
 !coordination_server.py
 !coordination.py
+!device_enrollment.py
 !compute_queue.py
 !compute_artifacts.py
 !personal_relay.py
@@ -10,7 +11,11 @@
 !lfs_assets.py
 !service_lock.py
 !coordination_client.py
+!cloud_pairing.py
 !rpc_errors.py
-!deploy/
-!deploy/coordinator/
+!deploy
+deploy/*
+!deploy/coordinator
+deploy/coordinator/*
+!deploy/coordinator/Dockerfile
 !deploy/coordinator/cloud_admin.py

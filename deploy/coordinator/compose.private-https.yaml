@@ -1,0 +1,31 @@
+name: lanxi-coordinator
+services:
+  personal-https:
+    extends:
+      file: compose.coordinator.yaml
+      service: coordinator
+    ports:
+      - "443:8770"
+    volumes:
+      - ./tls:/run/lanxi-tls:ro
+    command:
+      - coordination_server.py
+      - --devices
+      - /var/lib/lanxi/devices.json
+      - --database
+      - /var/lib/lanxi/coordination.sqlite3
+      - --host
+      - 0.0.0.0
+      - --personal-only
+      - --tls-cert
+      - /run/lanxi-tls/server.crt
+      - --tls-key
+      - /run/lanxi-tls/server.key
+      - --no-access-log
+      - --limit-concurrency
+      - "24"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8770), timeout=3).close()"]
+
+volumes:
+  coordinator-data:

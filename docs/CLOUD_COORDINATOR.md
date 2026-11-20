@@ -1,8 +1,29 @@
 # 澜汐云协调服务
 
-台式机和笔记本使用各自的设备令牌，通过同一个 HTTPS 域名，或分别经 SSH 隧道访问协调服务。协调服务保存项目清单、Codex 记忆和会话。代码继续从 GitHub 同步。
+台式机和笔记本使用各自的设备令牌访问协调服务。R23 可用一次性配对码连接 HTTPS，私人部署也可使用带服务器证书的公网 IP。协调服务保存项目清单、Codex 记忆和会话。代码继续从 GitHub 同步。
+
+## 在澜汐中配对
+
+1. 已配对的电脑从托盘选择「跨机接续 → 邀请另一台电脑」，生成并复制配对码。配对码十分钟内有效，只能由一个新设备领取。
+2. 在另一台电脑首次打开 R23，在同一个窗口粘贴配对码并选择本机项目母目录，点「连接并同步」。已经用过澜汐时，从托盘选择「跨机接续 → 使用配对码连接」打开同一个窗口。
+3. 在托盘查看「已连接协调服务」。网络恢复后后台会重试。项目会按各自母目录下的相对路径恢复，GitHub 和 Codex CLI 各自沿用本机登录。
+
+配对码带服务地址。私人证书写进配对码，只从可信的已配对设备或自己的服务器管理员接收。设备令牌在本机由 Windows DPAPI 保护。
+
+### 服务器管理员为首台设备生成配对码
+
+已有 HTTPS 域名时，用新版协调服务镜像。无域名的私人部署可使用 `compose.private-https.yaml`，将为公网 IP 签发且含 IP SAN 的证书与私钥分别放到 `deploy/coordinator/tls/server.crt` 和 `server.key`。容器使用 UID/GID 10001，给该用户读取私钥的权限。确认 TCP 443 可达。这个入口只提供个人同步和设备配对，沿用 `lanxi-coordinator` 的持久卷。
+
+```bash
+sudo docker compose -f compose.private-https.yaml up -d --build --wait personal-https
+sudo docker compose -f compose.private-https.yaml exec -T personal-https python cloud_admin.py invite desktop --url https://服务器公网IP --certificate /run/lanxi-tls/server.crt
+```
+
+将命令输出的整行配对码粘贴到首台设备。公开受信证书的域名部署可使用 `coordinator` 服务执行同一命令，省略 `--certificate`。服务器的证书更换后，用新证书生成配对码重新配对。
 
 ## 无域名的私人部署
+
+以下是支持旧版客户端的手工 SSH 隧道配对流程。
 
 在 Linux 服务器的 `deploy/coordinator` 目录使用 `compose.ssh.yaml`。它在服务器回环地址 `127.0.0.1:8770` 运行后端。使用已有的 SSH 入站规则即可，协调接口保留在服务器内部。
 

@@ -97,7 +97,7 @@ def artifact_operation(operation, *args):
         raise HTTPException(503, '产物暂时无法读写') from error
 
 
-def create_app(path, devices, clock=None, compute=None, artifact_dir=None):
+def create_app(path, devices, clock=None, compute=None, artifact_dir=None, personal_only=False):
     tokens = [entry['token'].encode() for entry in devices.values()]
     if any(len(token) < 32 for token in tokens) or len(set(tokens)) != len(tokens):
         raise ValueError('每台设备需要独立的随机令牌，至少 32 字节')
@@ -116,8 +116,13 @@ def create_app(path, devices, clock=None, compute=None, artifact_dir=None):
         return JSONResponse({'status': 'ready'}, headers={'Cache-Control': 'no-store'})
 
     if any(entry.get('personalSpace') for entry in devices.values()):
+        from device_enrollment import Enrollment, install_pairing
         from personal_relay import install_routes
-        install_routes(app, path, devices)
+        enrollment = Enrollment(path, devices)
+        install_routes(app, path, enrollment)
+        install_pairing(app, enrollment)
+    if personal_only:
+        return app
 
     @app.exception_handler(Conflict)
     async def conflict(_, error):
@@ -252,6 +257,7 @@ if __name__ == '__main__':
     parser.add_argument('--port', type=int, default=8770)
     parser.add_argument('--tls-cert', type=Path)
     parser.add_argument('--tls-key', type=Path)
+    parser.add_argument('--personal-only', action='store_true')
     parser.add_argument('--no-access-log', action='store_true')
     parser.add_argument('--limit-concurrency', type=int)
     action = parser.add_mutually_exclusive_group()
@@ -282,6 +288,7 @@ if __name__ == '__main__':
             parser.error('--limit-concurrency 至少为 2')
         devices = json.loads(args.devices.read_text(encoding='utf-8-sig'))
         compute = json.loads(args.compute.read_text(encoding='utf-8-sig')) if args.compute else None
-        uvicorn.run(create_app(args.database, devices, compute=compute, artifact_dir=args.artifact_dir),
+        uvicorn.run(create_app(args.database, devices, compute=compute, artifact_dir=args.artifact_dir,
+                               personal_only=args.personal_only),
                     host=args.host, port=args.port, access_log=not args.no_access_log,
                     limit_concurrency=args.limit_concurrency, ssl_certfile=args.tls_cert, ssl_keyfile=args.tls_key)

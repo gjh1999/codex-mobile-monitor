@@ -1,6 +1,7 @@
 # Private configuration and local state
 local-config.json
 deploy/coordinator/.env
+deploy/coordinator/tls/
 personal-sync.json
 local-model-api.json
 local-model-api-*.tmp

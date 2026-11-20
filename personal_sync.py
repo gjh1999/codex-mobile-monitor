@@ -17,7 +17,7 @@ from code_sync import (
     value,
     verify_checkout,
 )
-from coordination_client import ControlClient
+from coordination_client import ControlClient, device_token
 from handoff_sync import atomic_write
 from personal_memory import Mirror, pack, safe_path, sync_memories
 from personal_relay import EMPTY, Records, RemoteRecords, digest
@@ -41,10 +41,12 @@ class PersonalSync:
         self.completed = {}
         self.epoch = 0
         self.coordination = coordination
+        self.pending_settings = None
         self.priority = None
         self.poll_cache = {}
         self.local_state = self.root / ".local" / "personal-sync"
         self.scope = None
+        self.connection = None
 
     def store(self):
         if self.settings.get("codeOnly"):
@@ -57,7 +59,7 @@ class PersonalSync:
                 raise SyncIssue("私人共享目录必须位于 Git 项目之外")
             return Records(share / "lanxi-personal.sqlite", "personal")
         if self.coordination:
-            client = ControlClient(self.coordination, os.environ.get("LANXI_DEVICE_TOKEN"))
+            client = ControlClient(self.coordination, device_token(self.coordination))
             return RemoteRecords(client)
         return None
 
@@ -69,7 +71,13 @@ class PersonalSync:
                 "status": dict(self.status),
                 "completed": dict(self.completed),
                 "epoch": self.epoch,
+                "connection": self.connection,
             }
+
+    def reconfigure(self, settings, coordination):
+        with self.lock:
+            self.pending_settings = settings, coordination
+        self.wake.set()
 
     def request(self, project):
         with self.lock:
@@ -197,6 +205,10 @@ class PersonalSync:
         return local, remote_specs
 
     def cycle(self, stop):
+        with self.lock:
+            if self.pending_settings:
+                self.settings, self.coordination = self.pending_settings
+                self.pending_settings = None
         errors = {}
         channel = (
             ""
@@ -216,12 +228,18 @@ class PersonalSync:
         cached = json.loads(catalog.read_bytes()) if catalog.is_file() else {}
         published = json.loads(preferences.read_bytes()) if preferences.is_file() else {}
         store, index = None, {}
+        cloud = self.coordination and not self.settings.get("exchange") and not self.settings.get("codeOnly")
+        connection = None
         try:
             store = self.store()
             index = store.index() if store else {}
             local, specs = self.bindings(store, index, cached, published, errors)
+            if cloud:
+                connection = "已连接协调服务"
         except (OSError, ValueError, sqlite3.Error):
-            errors["配对"] = "个人同步通道暂不可用"
+            errors["配对"] = "协调服务暂不可用，后台将重试" if self.coordination else "个人同步通道暂不可用"
+            if cloud:
+                connection = "协调服务暂不可用，后台将重试"
             store = None
             local, specs = self.bindings(None, {}, cached, published, errors)
         if store:
@@ -311,6 +329,7 @@ class PersonalSync:
                 self.completed[project] = self.completed.get(project, 0) + 1
             self.epoch += 1
             self.status = errors
+            self.connection = connection
 
     def worker(self, stop):
         interval = max(2, min(300, int(self.settings.get("intervalSeconds", 10))))
@@ -322,6 +341,8 @@ class PersonalSync:
                 with self.lock:
                     self.epoch += 1
                     self.status = {"配对": "个人同步暂不可用，请检查项目登记和配对连接"}
+                    if self.connection:
+                        self.connection = self.status["配对"]
             for _ in range(interval * 4):
                 if stop.wait(0.25) or self.wake.is_set():
                     break

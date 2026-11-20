@@ -21,7 +21,7 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 
 from code_sync import run
-from coordination_client import ControlClient
+from coordination_client import ControlClient, device_token
 from desktop_storage import user_data_root
 from personal_relay import EMPTY, Records, RemoteRecords, digest
 
@@ -291,16 +291,18 @@ def cloud_roundtrip(mode, data_dir, code, passed):
     override = data_dir / "personal-sync.json"
     if override.is_file():
         settings = {**(settings or {}), **json.loads(override.read_text(encoding="utf-8-sig"))}
-    check(isinstance(settings, dict) and not settings.get("exchange") and not settings.get("codeOnly")
-          and settings.get("memory", True), "请先在本机配置澜汐协调服务并启用个人记忆同步。")
     cfg = config.get("coordination") or {}
-    check(cfg.get("url", "").rstrip("/") == "http://127.0.0.1:18770", "当前配对地址应为 http://127.0.0.1:18770。")
-    token = os.environ.get("LANXI_DEVICE_TOKEN")
-    check(token, "当前 Windows 用户尚未加载 LANXI_DEVICE_TOKEN。")
+    check(bool(cfg), "本机尚未配置阿里云配对，请先在澜汐中完成配对。")
+    check(cfg.get("protectedToken") or (
+        isinstance(settings, dict) and not settings.get("exchange") and not settings.get("codeOnly")
+        and settings.get("memory", True)
+    ), "请先在本机配置澜汐协调服务并启用个人记忆同步。")
+    token = device_token(cfg)
+    check(token, "本机缺少协调服务的设备令牌，请检查配对。")
     client = ControlClient(cfg, token)
     with client.opener.open(client.url + "/healthz", timeout=5) as response:
         check(json.load(response) == {"status": "ready"}, "协调服务尚未就绪。")
-    passed("本机隧道已连接协调服务")
+    passed("本机已连接协调服务")
     store = RemoteRecords(client)
     source = mode == "cloud-source"
     code = uuid.uuid4().hex if source else (code or input("源电脑显示的测试码：")).strip()

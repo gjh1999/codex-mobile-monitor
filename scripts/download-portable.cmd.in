@@ -71,7 +71,7 @@ try {
     if (!(Confirm-Archive $partial)) { throw '下载内容的 SHA-256 校验失败，请重新运行脚本。' }
     [IO.File]::Move($partial, $destination)
     Write-Host "下载完成，SHA-256 校验通过：$destination"
-    Write-Host '解压 ZIP，双击 Lanxi-Glass-R21-Portable.exe 即可启动澜汐。'
+    Write-Host '解压 ZIP，双击其中的澜汐程序即可启动。'
 } catch {
     [Console]::Error.WriteLine($_.Exception.Message)
     exit 1

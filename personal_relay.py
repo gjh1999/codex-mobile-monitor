@@ -3,7 +3,6 @@
 import hashlib
 import json
 import re
-import secrets
 import sqlite3
 from contextlib import closing
 from urllib.error import HTTPError
@@ -98,19 +97,17 @@ class RemoteRecords:
         )
 
 
-def install_routes(app, path, devices):
+def install_routes(app, path, enrollment):
     from fastapi import Depends, Header, HTTPException
     from fastapi import Request as APIRequest
     from fastapi.responses import Response
     from starlette.concurrency import run_in_threadpool
 
     def authorize(x_lanxi_device: str = Header(default=""), authorization: str = Header(default="")):
-        entry = devices.get(x_lanxi_device) or {}
-        if not entry.get("personalSpace") or not secrets.compare_digest(
-            authorization.encode(), ("Bearer " + entry["token"]).encode()
-        ):
+        space = enrollment.space(x_lanxi_device, authorization)
+        if not space:
             raise HTTPException(403, "此设备未配对个人空间")
-        return Records(path, entry["personalSpace"])
+        return Records(path, space)
 
     authorized = Depends(authorize)
 

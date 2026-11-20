@@ -67,12 +67,17 @@ def main():
     show = commands.add_parser("pair")
     show.add_argument("device")
     show.add_argument("--url", required=True)
+    invite = commands.add_parser("invite")
+    invite.add_argument("device")
+    invite.add_argument("--url", required=True)
+    invite.add_argument("--certificate", type=Path)
+    invite.add_argument("--database", type=Path, default=Path("/var/lib/lanxi/coordination.sqlite3"))
     options = parser.parse_args()
     try:
         if options.command == "init":
             initialize_devices(options.file, options.devices)
             print("已登记设备 " + "、".join(options.devices))
-        else:
+        elif options.command == "pair":
             config, token = pairing(options.file, options.device, options.url)
             print(json.dumps(config, ensure_ascii=False, indent=2))
             quoted = token.replace("'", "''")
@@ -80,6 +85,18 @@ def main():
             print(
                 "[Environment]::SetEnvironmentVariable('LANXI_DEVICE_TOKEN', $env:LANXI_DEVICE_TOKEN, 'User')"
             )
+        else:
+            from cloud_pairing import encode_invite, public_access
+            from device_enrollment import Enrollment
+
+            cert = options.certificate.read_text(encoding="ascii") if options.certificate else ""
+            access = public_access(options.url, cert)
+            devices = json.loads(options.file.read_text(encoding="utf-8"))
+            space = devices.get(options.device, {}).get("personalSpace")
+            if not space:
+                raise ValueError(f"没有登记个人设备 {options.device}")
+            secret = Enrollment(options.database, devices).issue(options.device, space)["code"]
+            print(encode_invite(access, secret))
     except (OSError, ValueError) as error:
         parser.exit(1, f"{error}\n")
 

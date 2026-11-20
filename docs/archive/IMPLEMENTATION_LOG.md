@@ -2,6 +2,13 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-20 R29 主窗口测试与便携包整理
+
+- 以 R28 和源码 `6db575a` 为基线。笔记本已通过下载脚本取得 R28，测试入口仅位于托盘。R29 在 Codex 和 Claude Code 工作区左下角加入「测试」，与托盘共用验收窗口。便携 ZIP 顶层由 11 项减为 3 项，验收 EXE 内置，IDE 插件和上报工具合为一个可选 ZIP。首次候选构建后发现测试输出仍引用早期随包文档和菜单编号，更新文案后在独立目录重新构建并保留首版候选。
+- Windows、Python 3.14.7、PyCharm 263。执行 `.venv\Scripts\python.exe -B scripts/build-portable.py --work build-exe/verification/portable-r29-20261120-final --pycharm 'C:\Program Files\JetBrains\PyCharm 2026.3'`。最终包 `release/Lanxi-R29-Windows-Private.zip` 为 95,140,224 字节，SHA-256 为 `67d2cd6fb1782d8842664560f8aff63823139938a20fc0e9fb842d85f530d36a`。R28 为 95,167,375 字节。最终包及内层 IDE 工具包的文件清单与 CRC 均通过。
+- 执行 `.venv\Scripts\python.exe -B -m unittest tests.test_desktop_storage tests.test_desktop_shutdown tests.test_ide_activity tests.test_personal_flow`，19 项通过，28.648 秒。`tests/smoke_desktop.py --output build-exe/verification/portable-r29-20261120/qt-smoke` 通过，未单独记录总耗时。最终目录的 `verify.py` 在隔离数据和回环协调服务中点击生产 Qt 按钮并运行从发布包取出的内置测试程序，7 项通过，17.34 秒。R28 更新器用相同候选 ZIP 验证并解压成功，已有数据标记保留。托盘与主窗口打开同一个测试窗口。
+- `publish.py` 首次在沙箱内无法访问 SSH，授权后上传同一 ZIP。服务端复核 SHA-256 后切换更新清单，已配对的 R28 客户端能够看到 R29。`verify_live.py` 用隔离的笔记本配对和未修改的下载脚本从阿里云下载，36.50 秒通过大小、哈希和 ZIP 校验。内置验收程序使用同一台 Windows 电脑的两套配对发起和回传，3.13 秒通过。实际笔记本启动 R29 及两台物理机器同时操作待现场确认。脚本、报告和构建输出在 `build-exe/verification/portable-r29-20261120-final/`。 [使用说明](../PORTABLE_CHECK.md)
+
 ## 2026-11-20 笔记本最新版下载脚本
 
 - 旧脚本用限时 SSH 凭据读取固定版本。新脚本从当前 Windows 用户的本地 HTTPS 配对配置读取证书和 DPAPI 凭据，用发布清单识别最新版本并校验完整 ZIP。验收时 Windows 11 自带 PowerShell 5.1，服务器最新包为 R28。

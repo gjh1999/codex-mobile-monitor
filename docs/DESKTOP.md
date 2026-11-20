@@ -10,6 +10,8 @@
 
 澜汐用原生 Qt 绘制整窗壁纸和两块同材质的毛玻璃。顶部居中的胶囊在 Codex、Claude Code 和「吉光片羽」间切换。左侧「案头诸事」可以搜索和选择任务，右侧「灯下对谈」保留可滚动消息与固定输入区。托盘菜单可打开「运行与额度」。
 
+从 R29 起，Codex 或 Claude Code 主窗口左下角的「测试」可打开本机自检和双机测试。Windows 右下角的澜汐托盘菜单也提供同一入口。 [验收步骤](PORTABLE_CHECK.md#运行验收)
+
 顶部滑块可点击或拖动，按下时立即变亮，拖动时跟随指针，释放后以弹簧曲线停靠。再次切换时会从当前位置继续。系统关闭动画效果时立即切换。
 
 鼠标碰到窗口内顶边时，菜单栏淡入，离开菜单栏后淡出。顶栏依次为「澜汐」「任务」「显示」「设置」「窗口」。展开菜单时顶栏保持可见。「任务」里可以打开「运行与额度」或「待你定夺」，「窗口」里可以最大化、还原或收起到托盘。
@@ -32,19 +34,7 @@
 
 ## EXE 与数据
 
-R20 可复制整套安装包到另一台 Windows 电脑。右键点击左侧「案头诸事」中的 Codex 会话，选择「查看会话 ID」。弹窗显示完整 ID，可点击「复制 ID」用于终端续接。 [安装与验收](PORTABLE_CHECK.md)
-
-R21 首次迁移旧版设置和历史，之后从固定的本机用户数据目录读取。托盘可打开该目录，或重设项目母目录。新发现的项目会进入 Codex 案头。 [升级与首次配置](PORTABLE_CHECK.md#升级与首次配置)
-
-带命令过程气泡的预览版为 `release/Lanxi-Glass-R22-LiveOutput.exe`，沿用 R21 的 Windows 用户数据目录。
-
-R19 的集成包为 `release/Lanxi-Glass-R19-Integrated.exe`，包含下列历史版本的前端、后台和壁纸功能，以及 R18 的项目代码与记忆同步。
-
-包含本机 Codex 历史接续的构建为 `release/Lanxi-Glass-R17-History.exe`。
-
-带聊天 Markdown 渲染的毛玻璃版交付文件为 `release/Lanxi-Glass-R16-Markdown.exe`。默认构建名为 `release/Lanxi.exe`。
-
-本次壁纸版交付文件为 `release/Lanxi-Glass-R14.exe`，基于 `def5d64` 构建，包含顶部菜单和大模型归组。
+在 Windows 上解压运行当前便携包。已配对设备可用托盘「检查更新」安装新版。托盘还可打开用户数据目录或重设项目母目录。新发现的项目会进入 Codex 案头。默认源码构建名为 `release/Lanxi.exe`。 [安装、升级与验收](PORTABLE_CHECK.md) · [历史构建记录](archive/IMPLEMENTATION_LOG.md)
 
 首页从 25 联唐诗里每小时轮换一句，并同步显示作者与篇名。重开窗口沿用当前小时的诗句，电脑唤醒后直接显示当时的一句。诗句可离线轮换，副标题沿用开发方案封面原文。选诗参考 [Wscats/poetry-skills](https://github.com/Wscats/poetry-skills) 使用的 [chinese-poetry《唐诗三百首》](https://github.com/chinese-poetry/chinese-poetry/blob/master/全唐诗/唐诗三百首.json)，并参考 [常建《题破山寺后禅院》](https://zh.wikisource.org/wiki/破山寺後禪院) 与 [钱起《省试湘灵鼓瑟》](https://ctext.org/text.pl?if=gb&node=153790) 的原文。
 
@@ -54,13 +44,15 @@ R19 的集成包为 `release/Lanxi-Glass-R19-Integrated.exe`，包含下列历�
 
 源码和 EXE 共用当前用户的图片库。新电脑上可复制整个 `澜汐/macOS` 文件夹，未安装图库时使用内置的 Mavericks 海浪、Big Sur 白昼和 Catalina 夜景。可用 `desktopWallpaperMinutes` 调整间隔，设为 0 固定显示 Mavericks。系统关闭动画效果时直接切换。[内置壁纸来源](https://512pixels.net/projects/default-mac-wallpapers-in-5k/)
 
-R21 将 `local-config.json`、任务数据库、回复记录和草稿保存在 `%LOCALAPPDATA%\Lanxi\data`。源码运行继续使用项目根目录。 [配置说明](CONFIGURATION.md)
+R21 起，便携 EXE 将 `local-config.json`、任务数据库、回复记录和草稿保存在 `%LOCALAPPDATA%\Lanxi\data`。源码运行继续使用项目根目录。 [配置说明](CONFIGURATION.md)
 
 正式使用前应检查源码与 EXE 使用的数据根目录。构建预览版时可指定不同文件名。完整步骤见 [运行与维护](RUNBOOK.md)。
 
 ## 任务操作
 
 在「案头诸事」选中同一条 Codex 会话后，「灯下对谈」会补显示 VS Code 终端里已落盘的消息。两端使用同一个本机 Codex 数据目录。终端占用期间可查看历史，释放写入权后可从澜汐继续该会话。 [桌面与 VS Code 终端续接](MULTI_CLIENT.md#codex-桌面与-vs-code-终端续接)
+
+右键点击「案头诸事」中的 Codex 会话，选「查看会话 ID」，再点「复制 ID」即可在终端恢复原线程。跨机接入同一 GitHub 项目前，先等另一设备完成当前轮次并交还任务。 [终端续接步骤](PORTABLE_CHECK.md#终端和澜汐接着同一段对话) · [项目占用与交还](PROJECT_CONTROL.md#个人版项目占用)
 
 独立终端运行期间，澜汐读取 Codex 已保存的命令完成记录。实时增量来自澜汐连接的 App Server，取决于当前 CLI 提供的事件。正在显示的过程输出仅在本机桌面使用，澜汐不另行写入回复日志或推送到通知和 Web。
 
@@ -94,7 +86,7 @@ Claude 的“自动推进”由本监控定时器实现：默认关闭，手动�
 
 点待办左侧方框打勾，再点一次即可取消。勾过的条目留在原位，字色淡成灰蓝。选中条目后也可按空格切换。随记可在右栏「⋯」收入旧笺、翻看归档和恢复。
 
-笔记和待办保存在桌面实例数据目录的 `lanxi-notebook.sqlite3`，源码运行时为项目根目录，EXE 运行时为其所在目录。
+笔记和待办保存在实例数据目录的 `lanxi-notebook.sqlite3`。已配对设备从 R25 起逐条同步随记、待办、完成状态、归档和手动分组。两边同时改动同一正文时，可在「吉光片羽」查看冲突副本。模型自动分组由各机本地生成。 [个人同步说明](PERSONAL_SYNC.md)
 
 ## 大模型归组
 

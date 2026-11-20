@@ -59,6 +59,14 @@ if (-not (Test-Path './local-config.json')) {
 & './scripts/build-exe.ps1' -AppName Lanxi-preview
 ```
 
+正式便携 ZIP 使用版本化打包命令。`--work` 每次传入一个新目录，`--pycharm` 指向本机用于构建插件的 PyCharm 263 安装目录。
+
+```powershell
+& './.venv/Scripts/python.exe' -B scripts/build-portable.py --work build-exe/release-candidate --pycharm 'C:\Program Files\JetBrains\PyCharm 2026.3'
+```
+
+包名与 `portable_update.py` 的版本一致，ZIP 写入 `release/`。构建日志和用于发布的 `windows-release.json` 位于 `--work` 目录。主程序内置验收工具，ZIP 根目录还有简明使用说明及可选 IDE 工具包。验收通过后发布同一份 ZIP。
+
 0.7.3 的后台版本标识为 `0.7.3-desktop-only`，修复先隐藏窗口到托盘、再选择退出时 Qt 主循环残留的问题。退出时显式结束应用循环，清理后台与托盘，并在主循环结束后释放单实例锁。保留 0.7.2 的 Codex 继续按钮修复，以及 0.7.1 的暂停误报与额度恢复功能。新版使用独立文件名交付，旧 EXE 未被覆盖。
 
 构建脚本只在 `release/` 尚无 `local-config.json` 时复制根目录配置；不会同步或覆盖已有的发布配置，也不会复制数据库。分享 EXE 时不要连同私密配置、数据库和会话草稿一起分享。替换正在使用的 EXE 前，先从托盘退出程序。

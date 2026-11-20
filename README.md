@@ -6,11 +6,13 @@ Windows 原生桌面软件，用于集中查看和控制本机 Codex / Claude Co
 
 ## 快速开始
 
-在 Windows 上解压澜汐便携包，双击桌面程序。首次启动可输入一次性配对码并选择项目母目录。便携目录还包含验收脚本和使用说明，用户数据保存于固定的 Windows 用户目录。 [安装、升级与验收](docs/PORTABLE_CHECK.md)
+已发布的 Windows 便携版为 R29。解压后双击桌面程序，首次启动可输入一次性配对码并选择本机项目母目录。已配对设备可从托盘「检查更新」下载新版，也可双击独立的「下载澜汐最新版.cmd」获取 ZIP。配置、历史和随记可沿用。 [安装、升级与验收](docs/PORTABLE_CHECK.md)
 
-桌面支持 Markdown 对谈、Codex 终端历史、本地壁纸轮换和跨机接续。首次从托盘「跨机接续」配对，后台会自动克隆缺少的项目、跟随 GitHub 更新，并在两台电脑上保持相同的项目记忆相对路径。 [个人设备自动接续](docs/PERSONAL_SYNC.md)
+- 从托盘「跨机接续」邀请或配对设备。项目按母目录下的相对路径对齐，代码经 GitHub 同步，项目记忆和已完成的 Codex 会话经协调服务接续。「吉光片羽」的随记、待办、归档及手动分组也会同步。 [个人设备自动接续](docs/PERSONAL_SYNC.md)
+- 同一项目可以在设备间交还和接入，也可通过 VS Code 或 PyCharm 插件上报 IDE 占用。达到 100 MiB 的文件可以查看清单，按需借用和回传。 [项目占用](docs/PROJECT_CONTROL.md#个人版项目占用) · [借用与回传](docs/PORTABLE_CHECK.md#跨机借用与回传大文件)
+- 「灯下对谈」支持 Markdown 和 Codex 终端历史。澜汐接入的 Codex 会话会流式显示正文，也会在「执行札记」显示命令进度。主窗口左下角和托盘的「测试」提供本机自检和双机回执。 [桌面使用说明](docs/DESKTOP.md) · [运行验收](docs/PORTABLE_CHECK.md#运行验收)
 
-在 Windows 上双击桌面包打开澜汐原生窗口。默认源码构建名为 `release/Lanxi.exe`。把 JPG 或 PNG 原图放进 Windows「图片」下的 `澜汐/macOS`，下次启动就会轮换其中的横版和方形壁纸。关闭窗口后程序留在系统托盘，从托盘选择“退出程序”即可停止后台。独立 Web 工作台的运行与 iPhone 局域网调试见 [Web 工作台说明](docs/WEB.md)。
+关闭窗口后程序留在系统托盘，从托盘选择「退出程序」即可停止后台。独立 Web 工作台的运行与 iPhone 局域网调试见 [Web 工作台说明](docs/WEB.md)。
 
 在 PowerShell 中从项目根目录启动：
 
@@ -18,13 +20,14 @@ Windows 原生桌面软件，用于集中查看和控制本机 Codex / Claude Co
 & './.venv/Scripts/python.exe' './desktop_app.py'
 ```
 
-`desktop_app.py` 是原生桌面入口，`monitor.py` 在同一进程管理后台。R21 桌面包的用户数据保存在 `%LOCALAPPDATA%\Lanxi\data`。构建、登录启动与故障检查见 [运行与维护](docs/RUNBOOK.md)。
+`desktop_app.py` 是原生桌面入口，`monitor.py` 在同一进程管理后台。构建、登录启动与故障检查见 [运行与维护](docs/RUNBOOK.md)。
 
 ## 文档导航
 
 | 要做的事 | 文档 |
 |---|---|
 | 查找全部说明 | [文档索引](docs/README.md) |
+| 查看最新交付、候选版和剩余验收 | [跨设备方案交付进度](docs/DELIVERY_STATUS.md) |
 | 在云服务器运行设备配对和记忆同步 | [澜汐云协调服务](docs/CLOUD_COORDINATOR.md) |
 | 启动、安装依赖、打包、测试、登录启动 | [运行与维护](docs/RUNBOOK.md) |
 | 配置键、默认值、环境变量和数据位置 | [配置说明](docs/CONFIGURATION.md) |
@@ -60,7 +63,7 @@ mobile-monitor/
 └── release/                    # EXE 及其独立运行数据（忽略）
 ```
 
-源码运行的配置、SQLite 数据库和日志保留在项目根目录；EXE 使用自身所在目录。`.venv/` 和这些本机文件均由 `.gitignore` 排除。一次性工具说明见 [归档索引](archive/README.md)。
+源码运行的配置、SQLite 数据库和日志位于项目根目录。R21 起，便携 EXE 使用 `%LOCALAPPDATA%\Lanxi\data`，换安装目录也会读回原数据。`.venv/` 和这些本机文件均由 `.gitignore` 排除。 [配置说明](docs/CONFIGURATION.md) · [归档索引](archive/README.md)
 
 ## 功能边界
 

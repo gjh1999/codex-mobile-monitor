@@ -8,7 +8,7 @@ R24 使用 GitHub 仓库 `owner/repo` 识别同一个项目。通过澜汐接入
 
 VS Code 与 PyCharm 安装便携包里的澜汐活动插件后，在打开 GitHub 项目时上报占用，在窗口关闭时归还。两个插件使用同一个本机配对身份和相同仓库标识，遇到别的设备占用时会提示。活动上报覆盖工作区打开期间。第三方 Codex 聊天扩展仍使用自己的发送入口，请按占用提示操作。
 
-在各机解压便携包后运行 `启用IDE上报.cmd`，从 VS Code 扩展菜单安装 `lanxi-activity.vsix`，或从 PyCharm 插件设置选择从磁盘安装 `lanxi-activity-pycharm.zip`。重启对应 IDE。PyCharm 包匹配 263 系列。插件需要澜汐已完成 R23 或之后的云配对。 [便携版](PORTABLE_CHECK.md)
+在各机解压便携包内的 `IDE上报工具.zip` 到固定位置，运行其中的 `启用IDE上报.cmd`。从 VS Code 扩展菜单安装 `lanxi-activity.vsix`，或从 PyCharm 插件设置选择从磁盘安装 `lanxi-activity-pycharm.zip`。重启对应 IDE。PyCharm 包匹配 263 系列。插件需要澜汐已完成 R23 或之后的云配对。R24 至 R28 的这些文件位于便携包根目录。 [便携版](PORTABLE_CHECK.md)
 
 ## 已登记项目的控制与调度
 

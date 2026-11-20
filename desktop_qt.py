@@ -38,6 +38,7 @@ from desktop_theme import (
 )
 from desktop_update import DesktopUpdates
 from model_groups import Organizer
+from portable_update import VERSION
 from project_library import ENTRY_PREFIX, SETTINGS as PROJECT_LIBRARY_FILE, configured_root, set_project_root
 from rpc_errors import RPCError
 
@@ -709,7 +710,13 @@ class MainWindow(QMainWindow):
         side.addWidget(self.task_empty)
         self.live = label('○ 正在连接', 9, color=MUTED)
         self.live.setObjectName('status')
-        side.addWidget(self.live)
+        footer = QHBoxLayout()
+        footer.addWidget(self.live, 1)
+        diagnostics = ActionButton('测试')
+        diagnostics.setToolTip('检查本机同步与双机连接')
+        diagnostics.clicked.connect(self.open_diagnostics)
+        footer.addWidget(diagnostics)
+        side.addLayout(footer)
         middle.addWidget(self.task_panel)
 
         self.conversation_card = FrostedPanel(root)
@@ -831,7 +838,7 @@ class MainWindow(QMainWindow):
         review.setEnabled(bool(self._pending_approvals))
 
     def about_lanxi(self):
-        self._popup('关于澜汐', '澜汐 · 开发工作台\n一处开始，处处继续。')
+        self._popup('关于澜汐', f'澜汐 R{VERSION} · 开发工作台\n一处开始，处处继续。')
 
     def toggle_maximized(self):
         self.showNormal() if self.isMaximized() else self.showMaximized()
@@ -1098,7 +1105,7 @@ class MainWindow(QMainWindow):
 
     def open_diagnostics(self):
         if self.diagnostics is None:
-            self.diagnostics = DiagnosticsDialog(self, monitor.PROGRAM_ROOT)
+            self.diagnostics = DiagnosticsDialog(self)
         self.diagnostics.show()
         self.diagnostics.raise_()
         self.diagnostics.activateWindow()

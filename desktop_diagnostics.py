@@ -14,9 +14,8 @@ from PySide6.QtWidgets import (
 
 
 class DiagnosticsDialog(QDialog):
-    def __init__(self, parent, directory):
+    def __init__(self, parent):
         super().__init__(parent)
-        self.directory = directory
         self.setWindowTitle("澜汐测试")
         self.resize(670, 400)
         self.runner = QProcess(self)
@@ -68,9 +67,12 @@ class DiagnosticsDialog(QDialog):
         if self.runner.state() != QProcess.ProcessState.NotRunning:
             return
         executable = Path(sys.executable)
-        helper = self.directory / "Lanxi-Verify.exe"
-        if not getattr(sys, "frozen", False) or not helper.is_file():
-            self.status.setText("请在完整的澜汐便携包中运行测试。")
+        if not getattr(sys, "frozen", False):
+            self.status.setText("请在澜汐 Windows EXE 中运行测试。")
+            return
+        helper = Path(sys._MEIPASS) / "Lanxi-Verify.exe"
+        if not helper.is_file():
+            self.status.setText("内置测试程序缺失，请重新下载澜汐。")
             return
         self.output.clear()
         self.decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
@@ -106,4 +108,4 @@ class DiagnosticsDialog(QDialog):
     def process_error(self, error):
         if error == QProcess.ProcessError.FailedToStart:
             self.set_busy(False)
-            self.status.setText("无法运行测试，请确认便携包中的验收程序完整。")
+            self.status.setText("无法启动内置测试程序，请重新下载澜汐。")

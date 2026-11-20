@@ -287,10 +287,7 @@ def cloud_client(data_dir):
     try:
         config = json.loads((data_dir / "local-config.json").read_text(encoding="utf-8-sig"))
     except FileNotFoundError as error:
-        raise RuntimeError(
-            "本机尚未配置阿里云配对。请按包内 CLOUD_COORDINATOR.md 的「配对两台电脑」"
-            "设置本机设备配置和令牌，再连接 SSH 隧道后重新验收。"
-        ) from error
+        raise RuntimeError("本机尚未配对。请从澜汐托盘选择「跨机接续 → 使用配对码连接」，再运行测试。") from error
     settings = config.get("personalSync")
     override = data_dir / "personal-sync.json"
     if override.is_file():
@@ -330,7 +327,7 @@ def cloud_roundtrip(mode, data_dir, code, passed):
     offer = json.dumps(request).encode()
     store.put(key, EMPTY, offer)
     passed("源设备令牌已验证，已写入独立测试记录")
-    print(f"请在接收电脑选择 3，输入测试码 {code}", flush=True)
+    print(f"请在另一台电脑的测试窗口输入测试码 {code}，然后点「回传测试」。", flush=True)
     current = offer
     try:
         deadline = time.monotonic() + 20 * 60

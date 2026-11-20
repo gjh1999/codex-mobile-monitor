@@ -13,6 +13,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from conversation import MESSAGE_LIMIT, TEXT_LIMIT, read_conversation
+from codex_activity import command_record
 
 
 SCAN_INTERVAL = 3
@@ -54,6 +55,7 @@ class Rollout:
     turn: str | None = None
     tail: bytes = b''
     completed: deque = field(default_factory=lambda: deque(maxlen=MESSAGE_LIMIT * 2))
+    commands: deque = field(default_factory=lambda: deque(maxlen=MESSAGE_LIMIT))
     legacy: deque = field(default_factory=lambda: deque(maxlen=MESSAGE_LIMIT * 2))
     removed: deque = field(default_factory=lambda: deque(maxlen=MESSAGE_LIMIT * 2))
 
@@ -78,7 +80,14 @@ class Rollout:
             self.add(self.legacy, LEGACY_ROLES[kind], payload.get('message'), event_time(event, fallback), turn)
         elif kind == 'item_completed':
             item = payload.get('item')
-            if not isinstance(item, dict) or not isinstance(item.get('type'), str) or item['type'] not in ITEM_ROLES:
+            if not isinstance(item, dict) or not isinstance(item.get('type'), str):
+                return
+            if item['type'] == 'CommandExecution':
+                command = command_record(item, turn, event_time(event, fallback), native=True)
+                if command is not None:
+                    self.commands.append({**command, 'position': self.offset})
+                return
+            if item['type'] not in ITEM_ROLES:
                 return
             pieces = item.get('content')
             if isinstance(pieces, list) and isinstance(item.get('id'), str):
@@ -99,7 +108,7 @@ class Rollout:
                               if message['turnId'] and message['role'] == 'user')
         removed = set(list(turns)[-count:])
         self.removed.extend(removed)
-        for messages in (self.completed, self.legacy):
+        for messages in (self.completed, self.legacy, self.commands):
             kept = [message for message in messages if message['turnId'] not in removed]
             messages.clear()
             messages.extend(kept)
@@ -159,7 +168,7 @@ class CodexHistory:
         self.next_scan = now + SCAN_INTERVAL
         return paths.get(tid)
 
-    def read(self, tid):
+    def read(self, tid, *, include_commands=False):
         if not valid_thread_id(tid):
             return [], [], ()
         with self.lock:
@@ -182,7 +191,10 @@ class CodexHistory:
                 self.cache.move_to_end(tid)
                 if len(self.cache) > CACHE_LIMIT:
                     self.cache.popitem(last=False)
-                return list(current.completed), list(current.legacy), tuple(current.removed)
+                completed = list(current.completed)
+                if include_commands:
+                    completed.extend(current.commands)
+                return completed, list(current.legacy), tuple(current.removed)
             except (OSError, ValueError):
                 return [], [], ()
 
@@ -214,12 +226,13 @@ def history_for(home):
     return CodexHistory(home)
 
 
-def merge_messages(completed, legacy, recorded, removed):
+def merge_messages(completed, legacy, recorded, removed, activity=()):
     exact = OrderedDict(((message['turnId'], message['id']), message) for message in completed)
     modern = {(turn, message['role']) for (turn, _), message in exact.items() if turn}
     legacy = [message for message in legacy if (message['turnId'], message['role']) not in modern]
     legacy_keys = Counter((m['turnId'], m['role'], m['text']) for m in legacy if m['turnId'])
     extra = []
+    absorbed = set()
     removed = set(removed)
     for message in recorded:
         turn, item = message.get('turnId'), message.get('id')
@@ -228,19 +241,40 @@ def merge_messages(completed, legacy, recorded, removed):
         key = (turn, message['role'], message['text'])
         if legacy_keys[key]:
             legacy_keys[key] -= 1
+            absorbed.add((turn, item))
         else:
             extra.append(message)
-    messages = sorted((*exact.values(), *legacy, *extra), key=lambda m: (m['time'], m.get('position', 0)))[-MESSAGE_LIMIT:]
-    return [{key: message[key] for key in ('role', 'text', 'time', 'truncated')} for message in messages]
+    keyed = {**{(m['turnId'], m['id']): m for m in extra}, **exact}
+    for item in activity:
+        turn, item_id = item['turnId'], item['id']
+        if turn in removed or (turn, item_id) in absorbed:
+            continue
+        key = turn, item_id
+        durable = keyed.get(key)
+        if durable is None:
+            keyed[key] = item
+        elif durable['role'] == item['role']:
+            if durable['role'] == 'process' and item['status'] in ('completed', 'failed', 'declined'):
+                durable = {**durable, **item}
+            keyed[key] = {**durable, 'time': min(durable['time'], item['time'])}
+    messages = sorted((*keyed.values(), *legacy), key=lambda m: (m['time'], m.get('position', 0)))[-MESSAGE_LIMIT:]
+    result = []
+    for message in messages:
+        fields = ('role', 'text', 'time', 'truncated')
+        if message['role'] == 'process':
+            fields += ('command', 'status', 'exitCode', 'durationMs')
+        result.append({key: message[key] for key in fields})
+    return result
 
 
-def read_codex_conversation(path, tid):
+def read_codex_conversation(path, tid, *, activity=None):
     home = Path(os.environ.get('CODEX_HOME') or Path.home() / '.codex')
-    completed, legacy, removed = history_for(home).read(tid)
+    completed, legacy, removed = history_for(home).read(tid, include_commands=activity is not None)
     try:
         journal = read_conversation(path, tid, include_ids=True, include_turns=True)
     except sqlite3.Error:
-        if not completed and not legacy:
+        if not completed and not legacy and not activity:
             raise
         journal = {'messages': [], 'events': []}
-    return {'messages': merge_messages(completed, legacy, journal['messages'], removed), 'events': journal['events']}
+    return {'messages': merge_messages(completed, legacy, journal['messages'], removed, activity or ()),
+            'events': journal['events']}

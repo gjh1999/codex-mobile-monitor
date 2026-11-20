@@ -11,6 +11,14 @@
 - 单文件下载脚本由 `scripts/issue-portable-download.py` 生成，私下交付 `release/笔记本下载/下载澜汐.cmd`。服务端强制只读指定 ZIP，七天后凭据失效。首次连接被 OpenSSH 8.0 的到期时间格式拒绝，按服务器本地时间登记后，使用同一份脚本真实下载成功。重复运行复用了已有 ZIP。文件 78,192,492 字节，SHA-256 为 `828e813e03268f2fa19929490b247a2ecf86e98623a37f7f44310c3603f06f6c`，下载副本的 CRC 及六个包内哈希全部符合。下载脚本含专用凭据，仅将无凭据的模板和生成工具纳入 Git。
 - 输出目录 `build-exe/verification/notebook-relative-20261120/` 含本轮日志、JSON 和下载副本。本次属于私人候选包验收。两台物理电脑现场联测、托盘人工操作及正在开发的前端整合均未验收；正式版本标签待整体验收后创建。
 
+## 2026-11-20 Codex 流式回复与命令过程气泡
+
+- 基线 `1975aa1`，Windows 11 x64、Python 3.14.7、PySide6 6.12.0、Codex CLI 0.170.0。原版正文等单条消息完成后才显示，命令过程未进入对话。新版按会话、轮次和运行项合并已有消息和增量，命令以「执行札记」呈现。用 `codex app-server generate-json-schema --out ../schema --experimental` 对照 CLI 事件。桌面每 200 毫秒检查所选会话是否有新增量，输出最多保留 6,000 字符并显示末尾 30 行。命令过程只使用本机内存和原生会话已有的完成记录。[Codex 原生历史写入策略](https://github.com/openai/codex/blob/rust-v0.170.0/codex-rs/rollout/src/policy.rs)
+- 隔离验收目录为 `build-exe/verification/lanxi-live-output`。在其 `worktree` 设置 `QT_QPA_PLATFORM=windows`，执行 `python tests/smoke_desktop.py --output ../windows-01`。以虚构命令和两次更新验证「运行中 → 已完成」，同一个气泡保留并接收尾部输出，正文保持 Markdown。首轮实测收到命令增量到界面可见约 202.7 毫秒。已核对灰蓝色过程气泡、失败退出码数据、CLI 完成记录与实时事件合并、旧会话去重、输出边界及 Web 读取隔离。
+- 使用 `python ../appserver_roundtrip.py ../appserver-03` 从真实 Codex App Server 接回环模拟供应商，观察到 `item/agentMessage/delta`。Windows 只读沙箱拒绝启动试验 PowerShell，三次均未得到真实命令增量。各轮保留在 `appserver-01` 至 `appserver-03`，依次使用嵌套 PowerShell、直接输出和只读两行文件。命令增量的界面验收采用符合 CLI Schema 的合成事件。真实供应商耗时和独立终端的实时增量未测。
+- 复跑 `python tests/smoke_desktop.py --output ../windows-final` 通过，实测命令增量到界面可见约 63.7 毫秒，时间随 200 毫秒检查周期的相位而变，两次采样未测分位数。运行 `python -m unittest -q tests.test_codex_activity tests.test_codex_history tests.test_conversation tests.test_daemon_support tests.test_monitor tests.test_task_control tests.test_desktop_shutdown tests.test_claude tests.test_web`，首轮有一项测试仍断言旧接口参数，更新夹具后通过。补充旧终端记录去重后最终 81 项通过，耗时 10.522 秒。开发方案校验 19 个 ID 和 19 个页内链接。
+- 用 PyInstaller 6.22.3 执行 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-exe.ps1 -AppName Lanxi-Glass-R22-LiveOutput`。首包保存在 `package-first`，最终构建约 36.25 秒。交付 `release/Lanxi-Glass-R22-LiveOutput.exe`，61,625,714 字节，复制前后 SHA-256 一致。用 `python -m tests.smoke_desktop_upgrade --old <R20 EXE> --new <R22 EXE> --output ../r22-upgrade.json` 执行隔离升级验收，5.66 秒通过。已核对旧配置、配对项目路径、随记、待办及回复保留，并从另一个目录再次打开同一 Windows 用户的固定数据。
+
 ## 2026-11-20 R21 方案审查与私人分发
 
 - 基线 `1edf06e`，Windows、Python 3.14.7、Git for Windows 2.56.0。按原方案逐项核对七个里程碑，核对部署容器内协调、设备控制、个人记录、计算队列、产物及配对管理六个模块与仓库文件的 SHA-256。现网使用私人 SSH 配置。已记录项目母目录与克隆目录脱节、隧道手动恢复、索引全量读取等问题。 [审查结果](../DELIVERY_STATUS.md#2026-11-20-个人版与云服务审查)

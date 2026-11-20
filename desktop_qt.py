@@ -315,8 +315,9 @@ class EdgeMenu(QWidget):
             menu.aboutToShow.connect(lambda menu=menu: self.menu_opened(menu))
             menu.aboutToHide.connect(self.menu_closed)
             row.addWidget(button)
-        for caption, callback in actions:
+        for caption, callback, tooltip in actions:
             button = self.button(caption)
+            button.setToolTip(tooltip)
             button.clicked.connect(callback)
             row.addWidget(button)
         row.addStretch()
@@ -502,6 +503,60 @@ class Composer(QTextEdit):
         super().keyPressEvent(event)
 
 
+class ManualSyncDialog(QDialog):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowTitle('合流 · 手动同步')
+        self.resize(540, 330)
+        self.body = QTextBrowser(self)
+        QVBoxLayout(self).addWidget(self.body)
+        self.timer = QTimer(self)
+        self.timer.setInterval(250)
+        self.timer.timeout.connect(self.refresh_result)
+
+    def observe(self, future):
+        self.future = future
+        self.refresh_result()
+        if not future.done():
+            self.timer.start()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def refresh_result(self):
+        future = self.future
+        if not future.done():
+            self.body.setPlainText('正在检查代码、记忆和文件清单…' if future.running() else '已安排新一轮同步，等待后台开始…')
+            return
+        self.timer.stop()
+        result = None if future.cancelled() else future.result()
+        if result is None:
+            self.body.setPlainText('这轮同步未完成。请检查连接和项目登记后重试。')
+            return
+        status = result['status']
+        synced = sum(value == '已同步' for value in status.values())
+        lines = [f"项目 {result['projects']} 个，已同步 {synced} 个。"]
+        if result['connection']:
+            lines.append(result['connection'])
+        if result['memoryChecked'] and '记忆' not in status:
+            lines.append('项目记忆已检查。')
+        elif not result['memoryChecked']:
+            lines.append('本轮未检查项目记忆。')
+        inventory = result['largeInventory']
+        if inventory is None:
+            lines.append('本轮未取得大文件清单。')
+        elif inventory:
+            lines.append(f'大文件清单有 {sum(map(len, inventory.values()))} 个文件需核对。')
+            for project, entries in sorted(inventory.items()):
+                for name, entry in sorted(entries.items()):
+                    state = '本机缺少' if entry['localSize'] is None else '大小不同'
+                    lines.append(f'{project}/{name} · {state}')
+        elif '大文件' not in status:
+            lines.append('大文件清单未发现缺少或大小不同的文件。')
+        lines.extend(f'{key} · {value}' for key, value in sorted(status.items()) if value != '已同步')
+        self.body.setPlainText('\n'.join(lines))
+
+
 class MainWindow(QMainWindow):
     history_ready = Signal(object, object)
     codex_options_ready = Signal(object, object)
@@ -541,6 +596,7 @@ class MainWindow(QMainWindow):
         self._sync_project = None
         self.notebook = None
         self.diagnostics = None
+        self.manual_sync_dialog = None
         self._notebook_revision = 0
         self._last_snapshot = {}
         self._history_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='lanxi-history')
@@ -716,17 +772,7 @@ class MainWindow(QMainWindow):
         side.addWidget(self.task_empty)
         self.live = label('○ 正在连接', 9, color=MUTED)
         self.live.setObjectName('status')
-        footer = QHBoxLayout()
-        footer.addWidget(self.live, 1)
-        pairing = ActionButton(CONNECT_CLOUD)
-        pairing.setToolTip('连接或邀请另一台电脑')
-        pairing.clicked.connect(lambda: self.open_device_pairing(self))
-        footer.addWidget(pairing)
-        diagnostics = ActionButton('测试')
-        diagnostics.setToolTip('检查本机同步与双机连接')
-        diagnostics.clicked.connect(self.open_diagnostics)
-        footer.addWidget(diagnostics)
-        side.addLayout(footer)
+        side.addWidget(self.live)
         middle.addWidget(self.task_panel)
 
         self.conversation_card = FrostedPanel(root)
@@ -836,7 +882,11 @@ class MainWindow(QMainWindow):
                    ('吉光片羽', self.open_notebook)],
             '设置': [('大模型 API…', self.open_model_api)],
             '窗口': [('最大化／还原', self.toggle_maximized), ('收起到托盘', self.close)],
-        }, actions=[(CONNECT_CLOUD, lambda: self.open_device_pairing(self))])
+        }, actions=[
+            (CONNECT_CLOUD, lambda: self.open_device_pairing(self), '连接云服务器或查看连接状态'),
+            ('测试', self.open_diagnostics, '检查本机同步与双机连接'),
+            ('合流', self.open_manual_sync, '手动同步代码、记忆和文件清单'),
+        ])
         self.populate_app_menu(self.edge_menu.menus[WINDOW_TITLE], include_about=True)
         task_menu = self.edge_menu.menus['任务']
         task_menu.aboutToShow.connect(self.refresh_task_menu)
@@ -1146,6 +1196,15 @@ class MainWindow(QMainWindow):
         self.diagnostics.show()
         self.diagnostics.raise_()
         self.diagnostics.activateWindow()
+
+    def open_manual_sync(self):
+        flow = monitor.personal_sync
+        if flow is None:
+            self._popup('合流 · 手动同步', '请先连接云服务器。')
+            return
+        if self.manual_sync_dialog is None:
+            self.manual_sync_dialog = ManualSyncDialog(self)
+        self.manual_sync_dialog.observe(flow.request_manual_sync())
 
     def show_details(self):
         self.refresh()

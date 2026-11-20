@@ -7,6 +7,7 @@
 - 以 R27 为基线。借用端从配对设备清单选项目和文件，来源端在线后分块上传。两端用 SHA-256 验证原版和回传版，台式机原文件发生变化时保留两份本机内容。成功或冲突回执写入 SQLite 后清除协调服务器临时目录。正常后台同步继续只登记 100 MiB 及以上文件的清单。
 - Windows Python 3.14.7 执行 `python -B -m unittest tests.test_temporary_files tests.test_large_inventory tests.test_notebook_sync tests.test_personal_project_lock tests.test_coordination tests.test_monitor`。首次测试发现字面量回执路由被变量路由遮挡，调整路由后 23 项通过，3.843 秒。覆盖错设备拒绝、分块续传、回传确认后清除字节、源端冲突保留双方文件。
 - 输出目录 `build-exe/verification/file-exchange-r28-20261120/`。用两套隔离配置从 Windows 经真实阿里云完成 100 MiB 借用、客户端下载、修改回传、源端应用，88.64 秒。生产容器确认测试记录仍存在且临时文件目录已清理。R28 便携包本机六项验收通过。更新 ZIP 大小 95,167,375 字节，SHA-256 为 `bc849c56a57ac67e6650aea3b414c9e45ec895ae62d2429444f6f881beba343b`。两台物理机器及真实项目文件的现场验收待测。 [借用与回传](../PORTABLE_CHECK.md)
+- 已发布 R28 至阿里云。Windows 上运行 `python -B build-exe/verification/file-exchange-r28-20261120/verify_update.py`，以配对笔记本身份模拟 R24 客户端，读取正式更新清单，下载、校验及解压 R28 共 16.27 秒，已有配置和历史的测试文件保留。SSH 标准输入方式未执行发布脚本，改为上传脚本并按路径执行后，服务器包哈希与更新接口均通过复核。
 
 ## 2026-11-20 R24 至 R27 项目占用、软件内更新、吉光片羽与文件清单
 

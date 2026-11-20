@@ -265,4 +265,3 @@ def install_temporary_files(app, store, directory: DiskPath, enrollment):
     @app.get(api + "/{key}/{part}")
     def download(key: Id, part: Part, offset: Annotated[int, Query(ge=0)], auth=user):
         return Response(guarded(relay.download, *auth, key, part, offset), media_type="application/octet-stream")
-

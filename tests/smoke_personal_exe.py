@@ -26,7 +26,7 @@ REMOTE = "https://github.com/lanxi-check/fixture.git"
 PROJECT = "lanxi-check/fixture"
 MEMORY = Path("notes/Codex")
 BIG_FILE = "fixture-large.bin"
-SHARE_PREFIX = "Lanxi-R20-test-"
+SHARE_PREFIX = "Lanxi-R21-test-"
 TIMEOUT = 90
 
 
@@ -58,6 +58,8 @@ def wait_for(label, condition, proc, seconds=TIMEOUT):
     deadline = time.monotonic() + seconds
     while True:
         if proc.poll() is not None:
+            if proc.startup_error.is_file():
+                raise RuntimeError(proc.startup_error.read_text(encoding="utf-8"))
             raise RuntimeError(
                 f"{label}时澜汐提前退出，退出码 {proc.returncode}。请确认其他澜汐已从托盘退出。"
             )
@@ -159,7 +161,7 @@ def prepare_runtime(exe, runtime, exchange, source=None):
 
 
 @contextmanager
-def running(exe, runtime):
+def running(exe, runtime, *, local_appdata=None, arguments=()):
     windows = Path(os.environ["SystemRoot"])
     git_dir = Path(shutil.which("git")).parent
     env = {
@@ -173,7 +175,7 @@ def running(exe, runtime):
         CODEX_HOME=str(runtime / "codex"),
         USERPROFILE=str(runtime),
         APPDATA=str(runtime),
-        LOCALAPPDATA=str(runtime),
+        LOCALAPPDATA=str(local_appdata or runtime.with_name(runtime.name + "-user-data")),
         QT_QPA_PLATFORM="offscreen",
         LANXI_VERIFICATION_INSTANCE=probe,
         PYINSTALLER_RESET_ENVIRONMENT="1",
@@ -187,7 +189,8 @@ def running(exe, runtime):
     kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
     job = kernel.CreateJobObjectW(None, None)
     try:
-        proc = subprocess.Popen([str(runtime / exe.name)], env=env, cwd=runtime, startupinfo=startup)
+        proc = subprocess.Popen([str(runtime / exe.name), *arguments], env=env, cwd=runtime, startupinfo=startup)
+        proc.startup_error = runtime / ".lanxi-verification-error"
         assigned = job and kernel.AssignProcessToJobObject(job, int(proc._handle))
         try:
             yield proc

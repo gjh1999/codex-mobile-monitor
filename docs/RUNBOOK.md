@@ -63,7 +63,7 @@ if (-not (Test-Path './local-config.json')) {
 
 构建脚本只在 `release/` 尚无 `local-config.json` 时复制根目录配置；不会同步或覆盖已有的发布配置，也不会复制数据库。分享 EXE 时不要连同私密配置、数据库和会话草稿一起分享。替换正在使用的 EXE 前，先从托盘退出程序。
 
-EXE 已包含 Python 界面依赖，仍需要对应本机 CLI。其运行状态写在 EXE 同目录，保留该目录才能保留任务记录。
+EXE 已包含 Python 界面依赖，仍需要对应本机 CLI。R21 桌面包的运行状态写在 `%LOCALAPPDATA%\Lanxi\data`，首次可从旧版 EXE 同目录迁移。 [安装、升级与验收](PORTABLE_CHECK.md)
 
 ## Windows 登录启动
 

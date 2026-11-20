@@ -22,7 +22,21 @@ def _runtime_root():
   return Path(sys.executable).resolve().parent
  return Path(__file__).resolve().parent
 
-ROOT=_runtime_root()
+PROGRAM_ROOT=_runtime_root()
+ROOT=PROGRAM_ROOT
+_workspace=None
+
+def prepare_desktop_data(select_legacy,source_override=None):
+ global ROOT,_workspace
+ if not getattr(sys,'frozen',False):return True
+ from desktop_storage import prepare_data,user_data_root
+ destination=user_data_root()
+ workspace=prepare_data(PROGRAM_ROOT,destination,select_legacy,source_override)
+ if workspace is None:return False
+ ROOT=destination
+ _workspace=workspace
+ return True
+
 approvals=Approvals()
 state={'serviceVersion':'0.7.3-desktop-only','pid':os.getpid(),'updated':None,'quota':None,'quotaStatus':'unknown','threads':[],'schedule':[], 'connection':'starting','notification':'not_configured','wake':{'mode':'guarded','reason':'Only connection-owned threads with active goals are eligible.'},'claude':{'connection':'starting','threads':[],'controls':{'tasks':[],'operations':[]},'quotaStatus':'unknown','quota':None,'schedule':[]}}
 state_lock=threading.Lock()
@@ -117,7 +131,8 @@ def poll(stop):
  global controller,history_labels
  scheduler=Scheduler(str(ROOT/'scheduler.sqlite3'),approvals)
  notifications=Notifications(str(ROOT/'notifications.sqlite3'))
- managed=ManagedTasks(str(ROOT/'managed.sqlite3'),ROOT.parent)
+ workspace=_workspace or ROOT.parent
+ managed=ManagedTasks(str(ROOT/'managed.sqlite3'),workspace)
  rpc=None;channel=None;failures=0;drained=[]
  controller=TaskControl(ROOT/'task-control.sqlite3');controller.seed(config().get('autoAttachThreads',[]))
  journal=ReplyLog(str(ROOT/'replies.sqlite3'))
@@ -150,7 +165,7 @@ def poll(stop):
     update(managedTasks=managed_status)
     automatic_tasks=controller.automatic_tasks(rpc,cfg.get('tasks',[])+managed_jobs+controller.scheduled_tasks(rpc))
     collect(rpc,{**cfg,'tasks':automatic_tasks},scheduler)
-    policy=ScopedPolicy(ROOT.parent,cfg.get('autoApprovalRules',[]))
+    policy=ScopedPolicy(workspace,cfg.get('autoApprovalRules',[]))
     for token,value in list(approvals.items.items()):
      if value['decision'] is None and getattr(value['rpc'],'client_type','codex')=='codex':
       if value['rpc'] is rpc and policy.allows(rpc,value['request']):approvals.decide(token,True)
@@ -241,6 +256,9 @@ def start_background_service(stop=None, embed_web=None):
  worker=threading.Thread(target=poll,args=(stop,),daemon=True,name='monitor-worker')
  claude_worker=threading.Thread(target=poll_claude,args=(stop,),daemon=True,name='claude-monitor-worker')
  workers=[worker,claude_worker]
+ from project_library import ProjectLibrary
+ library=ProjectLibrary(ROOT,Path(os.environ.get('CODEX_HOME') or Path.home()/'.codex'))
+ workers.append(threading.Thread(target=library.run,args=(stop,update),daemon=True,name='project-library'))
  if web_worker:workers.append(web_worker)
  try:
   settings=config()

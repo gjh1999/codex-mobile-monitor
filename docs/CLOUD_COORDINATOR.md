@@ -34,9 +34,9 @@ docker compose exec coordinator python cloud_admin.py pair desktop --url https:/
 docker compose exec coordinator python cloud_admin.py pair laptop --url https://sync.example.com
 ```
 
-1. 把各自的 JSON 配置合并到对应电脑上澜汐 EXE 同目录的 `local-config.json`。
+1. 把各自的 JSON 配置合并到对应电脑的 `local-config.json`。R21 可在托盘选择「打开用户数据目录」，R20 的配置在 EXE 同目录。
 2. 在对应电脑的 PowerShell 中执行输出里的两行令牌设置。保存配置后，从托盘退出澜汐并重新启动。可从刚设置令牌的 PowerShell 启动 EXE。
-3. 以前用过共享目录或仅代码同步的设备，在 EXE 同目录的 `personal-sync.json` 把 `exchange` 设为 `null`，`codeOnly` 设为 `false`。如果有 `memory` 字段，将它设为 `true`。
+3. 以前用过共享目录或仅代码同步的设备，在同一数据目录的 `personal-sync.json` 把 `exchange` 设为 `null`，`codeOnly` 设为 `false`。如果有 `memory` 字段，将它设为 `true`。
 
 源电脑发布已登记的项目，接收电脑可从「跨机接续」查看项目及克隆状态。各机需具备 GitHub 仓库权限。 [项目登记和本机路径](PERSONAL_SYNC.md#项目目录与分支)
 

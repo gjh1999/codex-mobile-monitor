@@ -909,6 +909,31 @@ def main():
             check_edge_menu(window, args.output)
             check_model_settings(window, args.output)
             check_markdown(window, data, args.output)
+            from project_library import ENTRY_PREFIX, ProjectLibrary, configured_root
+            with tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                project = root / 'projects' / 'new-project'
+                project.mkdir(parents=True)
+                (project / 'pyproject.toml').touch()
+                with patch.object(monitor, 'ROOT', root), patch('desktop_qt.QFileDialog.getExistingDirectory', return_value=str(project.parent)):
+                    window.choose_project_root(first=True)
+                assert configured_root(root) == project.parent
+                library = ProjectLibrary(root, root / 'codex')
+                monitor.update(indexedProjects=library.snapshot())
+                window.refresh()
+                key = ENTRY_PREFIX + str(project)
+                item = window.task_items[key]
+                assert item.text(0).startswith(project.name)
+                window.task_choice.scrollToItem(item)
+                calls = len(codex.calls)
+                QTest.mouseClick(window.task_choice.viewport(), Qt.MouseButton.LeftButton,
+                                 pos=window.task_choice.visualItemRect(item).center())
+                assert window.selected_thread == key and len(codex.calls) == calls
+                assert window.action_buttons['open_project'].isEnabled()
+                assert not window.action_buttons['attach'].isEnabled()
+                assert str(project) in window.conversation.toPlainText()
+                monitor.update(indexedProjects=[])
+                window.refresh()
             print('Qt smoke passed: Markdown, glass, rotation, hover/focus, approval, dual-client controls, drafts, rename, failure dialogs, Chinese glyphs, layout and tray.')
     finally:
         if window is not None:

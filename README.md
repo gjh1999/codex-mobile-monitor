@@ -6,7 +6,7 @@ Windows 原生桌面软件，用于集中查看和控制本机 Codex / Claude Co
 
 ## 快速开始
 
-把 `release/Lanxi-R20-Portable/` 整个复制到目标 Windows 电脑。该目录包含澜汐、双击验收脚本和使用说明。R20 可右键查看并复制 Codex 会话 ID。 [安装与验收](docs/PORTABLE_CHECK.md)
+把 `release/Lanxi-R21-Portable/` 整个复制到目标 Windows 电脑。该目录包含澜汐、双击验收脚本和使用说明。R21 支持旧数据迁移、固定用户数据目录和项目母目录自动发现。 [安装、升级与验收](docs/PORTABLE_CHECK.md)
 
 桌面支持 Markdown 对谈、Codex 终端历史、本地壁纸轮换和跨机接续。首次从托盘「跨机接续」配对，后台会自动克隆缺少的项目、跟随 GitHub 更新，并在两台电脑上保持相同的项目记忆相对路径。 [个人设备自动接续](docs/PERSONAL_SYNC.md)
 
@@ -18,7 +18,7 @@ Windows 原生桌面软件，用于集中查看和控制本机 Codex / Claude Co
 & './.venv/Scripts/python.exe' './desktop_app.py'
 ```
 
-`desktop_app.py` 是原生桌面入口，`monitor.py` 在同一进程管理后台。配置和运行数据保存在 EXE 同目录。构建、登录启动与故障检查见 [运行与维护](docs/RUNBOOK.md)。
+`desktop_app.py` 是原生桌面入口，`monitor.py` 在同一进程管理后台。R21 桌面包的用户数据保存在 `%LOCALAPPDATA%\Lanxi\data`。构建、登录启动与故障检查见 [运行与维护](docs/RUNBOOK.md)。
 
 ## 文档导航
 

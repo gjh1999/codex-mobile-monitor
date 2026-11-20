@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
@@ -44,6 +45,24 @@ def verify_desktop_resume(exe, machine, thread, directory):
                     raise AssertionError("Live native thread allowed a second writer")
             except HandoffError:
                 pass
+            result = rpc.call(
+                "turn/start",
+                {"threadId": thread, "input": [{"type": "text", "text": "Continue in Lanxi"}]},
+            )
+            turn = result["turn"]["id"]
+            (transcript,) = find_session(machine.home, thread)
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline:
+                data = transcript.read_bytes()
+                try:
+                    _, completed, _ = session_info(data)
+                except HandoffError:
+                    completed = None
+                if completed == turn and b"reply-on-B" in data:
+                    break
+                time.sleep(0.1)
+            else:
+                raise AssertionError("Lanxi did not persist its reply in the original session")
         finally:
             rpc.close()
             if process.poll() is None:
@@ -95,7 +114,6 @@ def verify(root):
             shutil.copyfile(laptop.home / "config.toml", desktop.home / "config.toml")
             verify_desktop_resume(exe, desktop, tid, b)
             (b / "source.py").write_text("edited on desktop\n")
-            assert native_turn(exe, desktop.home, b, endpoint.server_port, tid) == tid
             desktop.cycle(stop)
             laptop.cycle(stop)
             assert latest_session(a) == (tid, a), laptop.status
@@ -109,6 +127,7 @@ def verify(root):
                 "rounds": 3,
                 "same_thread": True,
                 "app_server_local_cwd": True,
+                "app_server_appended_to_original_thread": True,
                 "live_writer_excluded": True,
                 "code_head_equal": git(a, "rev-parse", "HEAD") == git(b, "rev-parse", "HEAD"),
                 "relative_memory_path": ".codex/memories",

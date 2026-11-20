@@ -32,6 +32,8 @@
 
 R20 可复制整套安装包到另一台 Windows 电脑。右键点击左侧「案头诸事」中的 Codex 会话，选择「查看会话 ID」。弹窗显示完整 ID，可点击「复制 ID」用于终端续接。 [安装与验收](PORTABLE_CHECK.md)
 
+R21 首次迁移旧版设置和历史，之后从固定的本机用户数据目录读取。托盘可打开该目录，或重设项目母目录。新发现的项目会进入 Codex 案头。 [升级与首次配置](PORTABLE_CHECK.md#升级与首次配置)
+
 R19 的集成包为 `release/Lanxi-Glass-R19-Integrated.exe`，包含下列历史版本的前端、后台和壁纸功能，以及 R18 的项目代码与记忆同步。
 
 包含本机 Codex 历史接续的构建为 `release/Lanxi-Glass-R17-History.exe`。
@@ -42,13 +44,13 @@ R19 的集成包为 `release/Lanxi-Glass-R19-Integrated.exe`，包含下列历�
 
 首页从 25 联唐诗里每小时轮换一句，并同步显示作者与篇名。重开窗口沿用当前小时的诗句，电脑唤醒后直接显示当时的一句。诗句可离线轮换，副标题沿用开发方案封面原文。选诗参考 [Wscats/poetry-skills](https://github.com/Wscats/poetry-skills) 使用的 [chinese-poetry《唐诗三百首》](https://github.com/chinese-poetry/chinese-poetry/blob/master/全唐诗/唐诗三百首.json)，并参考 [常建《题破山寺后禅院》](https://zh.wikisource.org/wiki/破山寺後禪院) 与 [钱起《省试湘灵鼓瑟》](https://ctext.org/text.pl?if=gb&node=153790) 的原文。
 
-同目录的桌面包使用相同配置和状态。上一版仍在运行时，先从托盘退出再打开新版。单文件内含 Python、Qt 和壁纸。运行任务需本机已安装并登录对应的 Codex / Claude CLI。
+上一版仍在运行时，先从托盘退出再打开新版。R21 和后续同一数据版本的桌面包共用当前 Windows 用户的数据目录。单文件内含 Python、Qt 和壁纸。运行任务需本机已安装并登录对应的 Codex / Claude CLI。
 
 澜汐启动时会读取 Windows「图片」下的 `澜汐/macOS`，包括各版本子目录。横版和方形 JPG、PNG 原图用于全窗背景，窗口取画面中央等比裁切。默认每 30 分钟换一张。图库里有 `10.9 Mavericks` 时从这张海浪开始，其余按路径排序。原图可从每张壁纸详情页的下载按钮取得。[AppleWalls macOS 合集](https://applewalls.com/zh/macos-wallpapers)
 
 源码和 EXE 共用当前用户的图片库。新电脑上可复制整个 `澜汐/macOS` 文件夹，未安装图库时使用内置的 Mavericks 海浪、Big Sur 白昼和 Catalina 夜景。可用 `desktopWallpaperMinutes` 调整间隔，设为 0 固定显示 Mavericks。系统关闭动画效果时直接切换。[内置壁纸来源](https://512pixels.net/projects/default-mac-wallpapers-in-5k/)
 
-EXE 的 `local-config.json`、任务数据库、回复记录和草稿位于 EXE 同目录。源码运行则使用项目根目录，二者不会自动同步状态。`local-config.json` 是可选配置；数据清单见 [配置说明](CONFIGURATION.md)。
+R21 将 `local-config.json`、任务数据库、回复记录和草稿保存在 `%LOCALAPPDATA%\Lanxi\data`。源码运行继续使用项目根目录。 [配置说明](CONFIGURATION.md)
 
 正式使用前应检查源码与 EXE 使用的数据根目录。构建预览版时可指定不同文件名。完整步骤见 [运行与维护](RUNBOOK.md)。
 

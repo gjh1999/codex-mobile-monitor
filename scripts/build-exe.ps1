@@ -23,8 +23,7 @@ if (-not (Test-Path $python)) { throw "找不到虚拟环境 Python：$python" }
   (Join-Path $project 'desktop_app.py')
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller 构建失败，退出码：$LASTEXITCODE" }
 
-# The EXE keeps user state next to itself. Copy the optional local configuration
-# only for the first packaged run, preserving any existing release configuration.
+# A configuration next to the EXE can seed the first profile migration.
 foreach ($name in @('local-config.json')) {
   $source = Join-Path $project $name
   if ((Test-Path $source) -and -not (Test-Path (Join-Path $dist $name))) { Copy-Item $source (Join-Path $dist $name) }

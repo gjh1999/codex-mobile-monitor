@@ -9,9 +9,10 @@
 | 运行方式 | 根目录 |
 |---|---|
 | 源码 `desktop_app.py` | 内部模块 `monitor.py` 所在目录，即本项目根目录 |
-| PyInstaller EXE | `sys.executable` 所在目录；通常为 `release/` |
+| R21 Qt 桌面 EXE | `%LOCALAPPDATA%\Lanxi\data` |
+| R20 及以前的 EXE | EXE 所在目录 |
 
-源码运行和 EXE 都读各自根目录的 `local-config.json`。文件不存在时使用空配置和各调用点的默认值；配置须为有效 JSON，支持 UTF-8 BOM。PyInstaller 的临时资源目录 `_MEIPASS` 只用于打包资源，不保存持久状态。应用由 `desktop_app.py` 或桌面 EXE 启动，`monitor.py` 只提供进程内后台功能。
+各运行方式从对应的数据根目录读取 `local-config.json`。配置须为有效 JSON，支持 UTF-8 BOM。R21 首次可迁移旧版文件。迁移成功后，`desktop-profile.json` 记录原工作区基准，`project-library.json` 保存本机的项目母目录。PyInstaller 的 `_MEIPASS` 用于打包资源。应用由 `desktop_app.py` 或桌面 EXE 启动，`monitor.py` 在进程内提供后台功能。 [升级与首次配置](PORTABLE_CHECK.md#升级与首次配置)
 
 ## 顶层配置键
 
@@ -33,7 +34,7 @@
 
 `tasks` 的条目包含 `threadId`、`prompt`、`interval`、`enabled`、`exclusiveOwner`，可用 `completed` 停止后续调度。`interval` 缺省为 3600 秒，显式值最小为 60 秒。只有启用、独占、本连接拥有的 Codex 线程才可能发送续跑；仍需实时 idle、active goal、无待审批、稳定版本及发送前持久预留。
 
-`managedTasks` 用于创建本服务的新线程，不使用外部 `threadId` 声明所有权。条目必须填写 `name`、`objective`、`prompt`，并同时设置 `enabled: true`、`exclusiveOwner: true`。`cwd` 默认 `"."`，相对 `ROOT.parent` 解释，且必须是该工作区内已存在的目录。源码运行时这一工作区是 `To_Do_List`；EXE 位于 `release/` 时则是项目目录，移动 EXE 会改变此边界。
+`managedTasks` 用于创建本服务的新线程。条目必须填写 `name`、`objective`、`prompt`，同时设置 `enabled: true` 和 `exclusiveOwner: true`。`cwd` 默认 `"."`，相对原来的工作区基准解释，且必须是该工作区内已存在的目录。R21 迁移沿用旧数据目录的父目录作为基准。项目母目录用于案头发现。
 
 示例受管任务显式使用 600 秒周期，并默认禁用；这是示例值，代码默认仍为 3600 秒。目标或 prompt 的配置指纹变化会阻止同名恢复；创建结果不确定时保留记录，避免重复创建。普通任务注册不会将暂停、完成或受限目标重新激活。Codex 额度恢复由独立的持久等待流程处理：只对明确开启自动推进且有控制权的原任务，在官方额度重新确认允许后恢复 `usageLimited`，不重写目标、清零用量或提高预算。
 

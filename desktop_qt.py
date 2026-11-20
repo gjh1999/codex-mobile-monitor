@@ -1,4 +1,5 @@
 """Native task workspace: light cards, soft-blue actions and explicit failures."""
+import argparse
 import json
 import os
 import re
@@ -13,7 +14,7 @@ from collections import Counter, OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QEasingCurve, QPoint, QPropertyAnimation, QRectF, QSharedMemory, QSignalBlocker, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QEasingCurve, QPoint, QPropertyAnimation, QRectF, QSharedMemory, QSignalBlocker, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QCursor, QDesktopServices, QFont, QIcon, QKeySequence, QPainter, QPainterPath, QPen, QShortcut, QTextDocument
 from PySide6.QtWidgets import (
     QApplication, QCompleter, QDialog, QFrame, QGraphicsDropShadowEffect, QGraphicsOpacityEffect,
@@ -34,6 +35,7 @@ from desktop_theme import (
     message_html, ui_font, warning_html, web_link,
 )
 from model_groups import Organizer
+from project_library import ENTRY_PREFIX, SETTINGS as PROJECT_LIBRARY_FILE, configured_root, set_project_root
 from rpc_errors import RPCError
 
 MUTED = '#24495f'
@@ -866,12 +868,26 @@ class MainWindow(QMainWindow):
         sync_menu = menu.addMenu('跨机接续')
         sync_menu.aboutToShow.connect(lambda: self.fill_sync_menu(sync_menu))
         menu.addAction('查看待审批请求', lambda: self.offer_approval(force=True))
+        menu.addAction('打开用户数据目录', lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(monitor.ROOT))))
+        menu.addAction('设置项目母目录…', lambda: self.choose_project_root())
         menu.addSeparator()
         menu.addAction('退出程序', self.quit_app)
         self.tray.setContextMenu(menu)
         self.tray.activated.connect(lambda reason: self.show_window() if reason in (
             QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick) else None)
         self.tray.show()
+
+    def choose_project_root(self, first=False):
+        base = configured_root(monitor.ROOT) or Path.home()
+        selected = QFileDialog.getExistingDirectory(self, '选择集中存放项目的母文件夹', str(base))
+        if not selected and not first:
+            return
+        try:
+            set_project_root(monitor.ROOT, Path(selected) if selected else None)
+            if selected:
+                self.control_message.setText('已保存项目母目录，正在扫描项目')
+        except OSError as error:
+            self._popup('无法保存项目母目录', str(error))
 
     def fill_sync_menu(self, menu):
         menu.clear()
@@ -988,7 +1004,7 @@ class MainWindow(QMainWindow):
             self._codex_request = None
             if self._codex_menu:
                 self._codex_menu.close()
-            self.message_edit.codex_slash = client == 'codex'
+            self.message_edit.codex_slash = client == 'codex' and not tid.startswith(ENTRY_PREFIX)
             self.task_drafts[previous] = self.message_edit.toPlainText()
             self.client, self.selected_thread = selected
             self.message_edit.setPlainText(self.task_drafts.get(selected, ''))
@@ -997,7 +1013,7 @@ class MainWindow(QMainWindow):
         if item is None:
             return
         tid = item.data(0, Qt.ItemDataRole.UserRole)
-        if not tid:
+        if not tid or tid.startswith(ENTRY_PREFIX):
             return
         last = next((operation for (client, _), operation in reversed(self._pending_operations.items())
                      if client == self.client and operation['action'] == 'focus'), None)
@@ -1043,7 +1059,15 @@ class MainWindow(QMainWindow):
         if not thread:
             return
         menu = QMenu(self.task_choice)
-        menu.addAction('查看会话 ID', lambda: self.show_session_id(thread))
+        if thread.startswith(ENTRY_PREFIX):
+            entry = next((row for row in self._last_snapshot.get('indexedProjects', []) if row['id'] == thread), None)
+            if not entry:
+                return
+            menu.addAction('启卷', lambda: self.launch_project(Path(entry['cwd'])))
+            if entry.get('memory'):
+                menu.addAction('打开项目记忆目录', lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(entry['memory'])))
+        else:
+            menu.addAction('查看会话 ID', lambda: self.show_session_id(thread))
         menu.aboutToHide.connect(menu.deleteLater)
         menu.popup(self.task_choice.viewport().mapToGlobal(position))
 
@@ -1074,7 +1098,9 @@ class MainWindow(QMainWindow):
         for tid, (title, directory) in projects.items():
             control = active_controls.get(tid) or {}
             status = (control.get('threadStatus') or {}).get('type') or thread_status.get(tid)
-            if tid in attaching or control.get('status') == 'connecting':
+            if tid.startswith(ENTRY_PREFIX):
+                caption = '项目入口'
+            elif tid in attaching or control.get('status') == 'connecting':
                 caption = '执舟中'
             elif not control.get('canControl'):
                 caption = '待执舟 · 只读' if control.get('mode') == 'observe' else '待执舟'
@@ -1140,9 +1166,9 @@ class MainWindow(QMainWindow):
             thread = threads.get(tid, {})
             control = registered.get(tid, {})
             history = labels.get(tid, {})
-            directory = next((value for value in (thread.get('cwd'), control.get('cwd'), history.get('cwd'))
+            directory = next((value for value in (thread.get('projectRoot'), thread.get('cwd'), control.get('cwd'), history.get('cwd'))
                               if isinstance(value, str) and value), '')
-            title = names.get(tid)
+            title = thread.get('title') if tid.startswith(ENTRY_PREFIX) else names.get(tid)
             if not title:
                 project = project_group(directory)[1]
                 title = display_text(self.session_titles.title(
@@ -1175,6 +1201,12 @@ class MainWindow(QMainWindow):
         self.refresh_verse()
         snapshot = monitor.snapshot()
         snap = monitor.client_snapshot(snapshot, self.client)
+        if self.client == 'codex' and snap.get('indexedProjects'):
+            threads = {t['id']: t for t in snap.get('threads', [])}
+            for indexed in snap['indexedProjects']:
+                tid = indexed['id']
+                threads[tid] = {**indexed, **threads.get(tid, {}), 'projectRoot': indexed['cwd']}
+            snap['threads'] = list(threads.values())
         flow = monitor.personal_sync
         if flow:
             view = flow.snapshot()
@@ -1211,7 +1243,8 @@ class MainWindow(QMainWindow):
             for client in ('codex', 'claude'):
                 candidates = projects if client == self.client else self.all_tasks(monitor.client_snapshot(snapshot, client), client)
                 for key, (title, directory) in candidates.items():
-                    self.organizer.observe('task:' + client, key, title, project=project_group(directory)[1])
+                    if not key.startswith(ENTRY_PREFIX):
+                        self.organizer.observe('task:' + client, key, title, project=project_group(directory)[1])
         running = {task.get('id') for task in threads if (task.get('status') or {}).get('type') == 'active'}
         for task in controls.get('tasks') or []:
             tid = task.get('threadId')
@@ -1231,8 +1264,11 @@ class MainWindow(QMainWindow):
             self.cancel_rename()
         task_title = self.task_title() or '未尽的话，可以接着说。'
         self.conversation_heading.setText(task_title)
-        self.conversation_heading.setToolTip(f'{task_title}\n双击标题或按 F2 改名' if self.selected_thread else '')
-        self.conversation_heading.setAccessibleDescription('双击标题或按 F2 改名' if self.selected_thread else '')
+        project_entry = self.selected_thread.startswith(ENTRY_PREFIX)
+        renameable = self.selected_thread and not project_entry
+        self.conversation_heading.setToolTip(f'{task_title}\n双击标题或按 F2 改名' if renameable else '')
+        self.conversation_heading.setAccessibleDescription('双击标题或按 F2 改名' if renameable else '')
+        self.message_edit.setReadOnly(project_entry)
         item = self.task_items.get(self.selected_thread)
         directory = item.data(0, TASK_DIRECTORY_ROLE) if item is not None else ''
         self._project_directory = Path(directory) if directory and Path(directory).is_absolute() else None
@@ -1247,7 +1283,7 @@ class MainWindow(QMainWindow):
         self.refresh_conversation()
 
     def begin_rename(self):
-        if not self.selected_thread:
+        if not self.selected_thread or self.selected_thread.startswith(ENTRY_PREFIX):
             return
         self._rename_target = (self.client, self.selected_thread)
         self.title_editor.setText(self.task_title())
@@ -1317,7 +1353,7 @@ class MainWindow(QMainWindow):
             self.operate('message')
 
     def open_codex_options(self, command):
-        if self.client != 'codex' or not self.selected_thread:
+        if self.client != 'codex' or not self.selected_thread or self.selected_thread.startswith(ENTRY_PREFIX):
             self._popup('请先选择任务', '在案头选择一个 Codex 会话。')
             return
         controller = monitor.get_controller('codex')
@@ -1397,6 +1433,8 @@ class MainWindow(QMainWindow):
                 self.message_edit.show_slash()
                 return
         target = self.selected_thread if tid is None else tid
+        if target and target.startswith(ENTRY_PREFIX) and action != 'create_test':
+            return
         if action != 'create_test' and not target:
             self._popup('无法操作', '请先选择一个任务。')
             return
@@ -1458,7 +1496,7 @@ class MainWindow(QMainWindow):
         buttons = self.action_buttons
         buttons['manage'].setVisible(not managed)
         buttons['unmanage'].setVisible(managed)
-        buttons['attach'].setEnabled(bool(self.selected_thread))
+        buttons['attach'].setEnabled(bool(self.selected_thread) and not self.selected_thread.startswith(ENTRY_PREFIX))
         buttons['pause'].setEnabled(controlled and not paused)
         buttons['resume'].setEnabled(manageable and paused and (self.client == 'codex' or not active))
         buttons['resume'].setToolTip(
@@ -1614,6 +1652,23 @@ class MainWindow(QMainWindow):
 
     def refresh_conversation(self):
         key = (self.client, self.selected_thread)
+        if self.selected_thread.startswith(ENTRY_PREFIX):
+            if key != self._visible_history:
+                self.save_history_scroll()
+            self._visible_history = key
+            entry = next((row for row in self._last_snapshot.get('indexedProjects', []) if row['id'] == key[1]), None)
+            if entry:
+                lines = [entry['cwd']]
+                if entry.get('branch'):
+                    lines.append('分支 · ' + entry['branch'])
+                if entry.get('memory'):
+                    lines.append('项目记忆 · ' + entry['memory'])
+                if entry.get('notes'):
+                    lines.append('本机记忆文件 · ' + '、'.join(entry['notes']))
+                lines.append('点击「启卷」在 VS Code 打开项目。')
+                self._history_placeholder.setPlainText('\n\n'.join(lines))
+                self.conversation.setDocument(self._history_placeholder)
+            return
         cached = self._history_cache.get(key)
         if key != self._visible_history:
             self.save_history_scroll()
@@ -1716,14 +1771,40 @@ class MainWindow(QMainWindow):
         event.accept()
 
 
+def select_legacy_data(candidates):
+    from desktop_storage import has_legacy_data
+    dialog = QMessageBox()
+    dialog.setWindowTitle('澜汐用户数据')
+    dialog.setText('首次建立固定的用户数据目录。已经使用过澜汐，可以选择旧版 EXE 所在文件夹。')
+    choose = dialog.addButton('选择旧版目录', QMessageBox.ButtonRole.AcceptRole)
+    fresh = dialog.addButton('全新开始', QMessageBox.ButtonRole.ActionRole)
+    dialog.addButton('取消', QMessageBox.ButtonRole.RejectRole)
+    dialog.setDefaultButton(choose)
+    directory = str(candidates[-1]) if candidates else str(Path.home())
+    while True:
+        dialog.exec()
+        if dialog.clickedButton() == fresh:
+            return False
+        if dialog.clickedButton() != choose:
+            return None
+        selected = QFileDialog.getExistingDirectory(dialog, '选择旧版澜汐 EXE 所在的文件夹', directory)
+        if selected:
+            directory = selected
+            if has_legacy_data(Path(selected)):
+                return Path(selected)
+            QMessageBox.information(dialog, '澜汐用户数据', '该文件夹中没有找到旧版澜汐数据。')
+
+
 def main():
     app = QApplication(sys.argv)
     instance_key = 'CodexMobileMonitor.QtDesktop'
+    verification = False
     probe = os.environ.get('LANXI_VERIFICATION_INSTANCE', '')
     if (re.fullmatch(r'[0-9a-f]{32}', probe) and app.platformName() == 'offscreen'
-            and Path(os.environ.get('CODEX_HOME', '')) == monitor.ROOT / 'codex'):
+            and Path(os.environ.get('CODEX_HOME', '')) == monitor.PROGRAM_ROOT / 'codex'):
         try:
-            if (monitor.ROOT / '.lanxi-verification').read_text(encoding='ascii') == probe:
+            if (monitor.PROGRAM_ROOT / '.lanxi-verification').read_text(encoding='ascii') == probe:
+                verification = True
                 instance_key += '.verification.' + probe
         except (OSError, UnicodeError):
             pass
@@ -1741,9 +1822,23 @@ def main():
         return 1
     window = None
     try:
+        try:
+            parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+            parser.add_argument('--import-data-from', type=Path)
+            options, _ = parser.parse_known_args()
+            if not monitor.prepare_desktop_data(select_legacy_data, options.import_data_from):
+                return 0
+        except (OSError, RuntimeError, ValueError, KeyError, TypeError, sqlite3.Error) as error:
+            if verification:
+                (monitor.PROGRAM_ROOT / '.lanxi-verification-error').write_text(str(error), encoding='utf-8')
+                return 1
+            QMessageBox.critical(None, '无法启动澜汐', f'打开或迁移用户数据失败。\n{error}')
+            return 1
         window = MainWindow(shared)
         app.aboutToQuit.connect(window.shutdown)
         window.show()
+        if getattr(sys, 'frozen', False) and not verification and not (monitor.ROOT / PROJECT_LIBRARY_FILE).is_file():
+            QTimer.singleShot(0, lambda: window.choose_project_root(first=True))
         return app.exec()
     finally:
         try:

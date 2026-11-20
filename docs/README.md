@@ -10,7 +10,7 @@
 | [架构与文件说明](ARCHITECTURE.md) | 正式入口、模块职责、双客户端后台与目录维护规则 |
 | [个人版 Python 后端审查](archive/IMPLEMENTATION_LOG.md#2026-11-19-个人版-python-后端审查) | 六项问题的触发条件、修复和回归结果 |
 | [个人设备自动接续](PERSONAL_SYNC.md) | GitHub 后台克隆与双向代码同步、跳过大文件、项目相对记忆目录和原线程续接 |
-| [R20 安装与验收](PORTABLE_CHECK.md) | 独立分发目录、双击验收、两台电脑互测和终端恢复会话 |
+| [R21 安装、升级与验收](PORTABLE_CHECK.md) | 数据迁移、项目母目录、双击验收和终端恢复会话 |
 | [澜汐云协调服务](CLOUD_COORDINATOR.md) | Linux HTTPS 部署、两台 Windows 电脑配对和持久数据备份 |
 | [代码与会话交接](HANDOFF.md) | 封存 Git 与已完成轮次、目标目录恢复、终端续接与前端查询接口 |
 | [跨设备项目控制](PROJECT_CONTROL.md) | 协调中心、设备登记、IDE 活动接口、原生控制权交还与桌面共用 Web |

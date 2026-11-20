@@ -2,6 +2,14 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-20 R21 用户数据迁移、项目发现与原会话接续
+
+- 以 `c4b1564` 和上一版 R20 便携包为基线。R20 从 EXE 目录读取配置和数据库。R21 首次启动可迁移旧数据，此后从 `%LOCALAPPDATA%\Lanxi\data` 加载，旧文件保留。SQLite 迁移测试覆盖已提交的 WAL 数据、旧版仍在使用时等待退出、失败后重试及更换程序目录。后台约每五秒扫描项目母目录，按项目显示本机路径、记忆位置和原 Codex 会话，并为新发现的项目创建可启卷的案头条目。 [跨设备开发工作台方案](../跨设备开发工作台方案.html#overview) · [安装、升级与验收](../PORTABLE_CHECK.md)
+- Windows 11、Python 3.14.7、Git 2.56.0.windows.4、Codex CLI 0.170.0。输入使用隔离的 Windows 用户数据目录、R20 生成的数据库、合成设置、项目和 Codex 记录。用 `python -B -m unittest discover -s tests -t . -p 'test_*.py' -v` 跑完整回归，235 项通过、2 项跳过，182.937 秒。跳过项分别需要可用的 Windows DPAPI 用户配置和可选钉钉 Stream SDK。首轮新增项目后台后，Web 测试的固定线程数断言失败，改为检查实际需要的四个工作线程后通过。用 `python -B tests/smoke_desktop.py --output build-exe/verification/desktop-upgrade-20261120/qt-r21` 验证真实 Qt 界面选择母目录、显示新项目和打开原会话条目。
+- 按 `scripts/build-exe.ps1 -AppName Lanxi-Glass-R21-Portable` 的 PyInstaller 参数隔离构建。首轮有一处壁纸文件名拼写错误，修正后成功。旧版迁移首轮超时，复验时给隔离启动增加错误报告。便携自检随后报告测试用用户目录落在旧程序目录内部，改用独立同级目录后通过。正式目录 `release/Lanxi-R21-Portable/` 包内有逐文件 `SHA256.txt`，应用 SHA-256 为 `c4df2b8161980c2c0e56e33f4c96828b479a3e31e0a6d8001ff11df031aa520c`。
+- 用 `python -B -m tests.smoke_desktop_upgrade --old release/Lanxi-R20-Portable/Lanxi-Glass-R20-Portable.exe --new release/Lanxi-R21-Portable/Lanxi-Glass-R21-Portable.exe --output build-exe/verification/desktop-upgrade-20261120/upgrade.json` 运行实包迁移及异目录重启，5.19 秒通过。验证配置、配对、路径、随记、已完成待办、回复及新写入数据能继续读取。在最终目录执行 `验收.cmd --mode local --output build-exe/verification/desktop-upgrade-20261120/portable-r21.json`，6 项通过，10.13 秒。验证空工作区克隆、代码和记忆双向更新、全局规则、会话记录及 12 MiB 文件过滤。
+- 用 `python -B -m tests.smoke_personal_flow --output build-exe/verification/desktop-upgrade-20261120/terminal-lanxi-terminal.json` 验证从终端开始，经真实 Codex App Server 恢复并写入下一轮，再返回终端续写。使用两个独立项目路径、两个隔离 Codex 主目录和回环模型，三轮会话 ID 一致，第二写入者被锁挡住，最终 Git 提交相同。日志及报告位于 `build-exe/verification/desktop-upgrade-20261120/`。真实第二台电脑及其网络条件尚待现场验收。
+
 ## 2026-11-19 云协调服务与 HTTPS 部署
 
 - 基线 `70e320a` 已包含 R20 的个人同步协议和协调接口。本轮增加云端独立构建、Caddy HTTPS、设备登记工具、健康检查和持久卷。已有 Windows 客户端沿用 HTTPS 设备配置。服务启动默认沿用原本机地址。Compose 的 Python 实例在内部网络监听，并将并发请求上限设为 24。设备令牌由管理命令生成，首次登记失败或重复登记时保留已存在的设备文件。 [部署和验收说明](../CLOUD_COORDINATOR.md)

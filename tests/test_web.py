@@ -119,7 +119,10 @@ class WebTests(unittest.TestCase):
                         time.sleep(0.05)
                 with opener.open(url + '/api/state', timeout=1) as response:
                     self.assertIn(b'"shared_worker":true', response.read())
-                self.assertEqual(len(workers.threads), 3)
+                self.assertEqual(
+                    {worker.name for worker in workers.threads},
+                    {'monitor-worker', 'claude-monitor-worker', 'project-library', 'monitor-web'},
+                )
             finally:
                 stop.set()
                 workers.join(6)

@@ -4,9 +4,9 @@
 
 | 同一项目的文件 | 笔记本 | 台式机 |
 |---|---|---|
-| 代码 | `D:\Work\A\src\main.py` | `E:\Projects\owner\a\src\main.py` |
-| 默认项目记忆 | `D:\Work\A\.codex\memories\decision.md` | `E:\Projects\owner\a\.codex\memories\decision.md` |
-| 设置项目记忆目录为 `notes/Codex` | `D:\Work\A\notes\Codex\decision.md` | `E:\Projects\owner\a\notes\Codex\decision.md` |
+| 代码 | `D:\Work\客户甲\A\src\main.py` | `E:\Projects\客户甲\A\src\main.py` |
+| 默认项目记忆 | `D:\Work\客户甲\A\.codex\memories\decision.md` | `E:\Projects\客户甲\A\.codex\memories\decision.md` |
+| 设置项目记忆目录为 `notes/Codex` | `D:\Work\客户甲\A\notes\Codex\decision.md` | `E:\Projects\客户甲\A\notes\Codex\decision.md` |
 
 ## 两台电脑首次配对
 
@@ -14,7 +14,7 @@
 
 1. 在各机运行个人版安装包中的 `Lanxi-Glass-R21-Portable.exe`。使用同一人的 GitHub 仓库权限，各机的 Git 登录和提交身份需可用。
 2. 右击澜汐托盘图标，打开「跨机接续」。已有澜汐协调服务的用户可以选择「通过已配置的澜汐协调服务配对」，设备登记见下节。也可以在两台电脑上选择同一个私人网络共享目录，例如本人专用的 SMB 共享。两台机需要直接读写同一个支持文件锁的数据库文件 `lanxi-personal.sqlite`。各自独立的云盘镜像不能充当该数据库。
-3. 来源设备会读取本机 Codex 目录中的 `git-sync-projects.json`。新设备即使没有任何本地登记，也会从配对端取得项目清单并后台克隆。默认位置是用户目录下的 `LanxiProjects/<owner>/<repo>`，已在本机登记的路径优先。托盘列出各项目的状态，点击项目或任务中的「启卷」，会在本轮检查结束后打开 VS Code。
+3. 两台电脑各自选择项目母目录。来源设备自动发现其中已有 GitHub origin 的项目，发布仓库标识和母目录下的相对路径。接收机在自己的母目录下按相同路径克隆。已有本机项目映射或旧工作区继续使用；历史清单缺少相对路径时会以 `<owner>/<repo>` 作为后备位置。尚未选择母目录时使用本机 `checkoutRoot` 或用户目录下的 `LanxiProjects`。托盘列出各项目的状态。
 
 平时只需让澜汐在托盘运行。后台最多并行检查四个仓库，每轮完成后默认等待 10 秒。编辑器保存、GitHub 网页提交或任一设备推送后，其他在线设备会在后续检查收到改动。休眠、断网、Git 身份不可用时，恢复后自动重试。代码经 GitHub 传输，个人通道传递项目清单和记忆。只要本机已有项目清单，个人通道短暂离线时仍可同步代码。
 

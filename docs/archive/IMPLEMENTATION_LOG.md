@@ -2,6 +2,15 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-20 R21.1 笔记本候选包：项目相对目录与单文件下载
+
+- 复现原 R21 的问题：两端选择不同的项目母目录，源端的项目在 `客户甲/工具组/项目 A`，接收端却按 `checkoutRoot/lanxi-check/fixture` 克隆。预期是保留源端全部相对层级，在各自真实工作区直接修改代码。审查结论和产品规则分别维护在 [交付进度](../DELIVERY_STATUS.md) 和 [工作台方案](../跨设备开发工作台方案.html#personal-release)。
+- 在 Windows、Python 3.14.7、Git 2.56.0.windows.4 上，以 R21 为基线，在两个隔离配置中使用可过滤的测试 Git 远端。运行 `python -B -m unittest tests.test_personal_flow tests.test_project_library tests.test_desktop_storage`，15 项通过，耗时 20.721 秒。源端未手工登记项目时仍会发布相对目录，接收端按该路径克隆，第二次编辑在原目录回传。已有单机绑定继续使用。旧清单没有相对路径时可沿用原布局。
+- 用 `scripts/build-exe.ps1` 相同的 PyInstaller 参数构建桌面应用；首轮隔离构建使用相对资源路径，PyInstaller 从 spec 目录查找资源失败，改为项目绝对路径后成功。完整候选目录为 `release/Lanxi-R21.1-Portable/`。运行其中的 `验收.cmd --mode local`，10.40 秒通过六项，包括三级中文目录、代码、项目记忆、全局规则、会话文件及 12 MiB 文件过滤。
+- 实包升级使用 `python -B -m tests.smoke_desktop_upgrade --old release/Lanxi-R20-Portable/Lanxi-Glass-R20-Portable.exe --new release/Lanxi-R21.1-Portable/Lanxi-Glass-R21-Portable.exe --output build-exe/verification/notebook-relative-20261120/upgrade.json`，5.77 秒通过。另用上一版 R21 建立隔离用户数据后，两次从另一目录打开候选程序，实测配对、项目母目录、随记和既有工作区都保留。输出 `previous.json`。
+- 单文件下载脚本由 `scripts/issue-portable-download.py` 生成，私下交付 `release/笔记本下载/下载澜汐.cmd`。服务端强制只读指定 ZIP，七天后凭据失效。首次连接被 OpenSSH 8.0 的到期时间格式拒绝，按服务器本地时间登记后，使用同一份脚本真实下载成功。重复运行复用了已有 ZIP。文件 78,192,492 字节，SHA-256 为 `828e813e03268f2fa19929490b247a2ecf86e98623a37f7f44310c3603f06f6c`，下载副本的 CRC 及六个包内哈希全部符合。下载脚本含专用凭据，仅将无凭据的模板和生成工具纳入 Git。
+- 输出目录 `build-exe/verification/notebook-relative-20261120/` 含本轮日志、JSON 和下载副本。本次属于私人候选包验收。两台物理电脑现场联测、托盘人工操作及正在开发的前端整合均未验收；正式版本标签待整体验收后创建。
+
 ## 2026-11-20 R21 方案审查与私人分发
 
 - 基线 `1edf06e`，Windows、Python 3.14.7、Git for Windows 2.56.0。按原方案逐项核对七个里程碑，核对部署容器内协调、设备控制、个人记录、计算队列、产物及配对管理六个模块与仓库文件的 SHA-256。现网使用私人 SSH 配置。已记录项目母目录与克隆目录脱节、隧道手动恢复、索引全量读取等问题。 [审查结果](../DELIVERY_STATUS.md#2026-11-20-个人版与云服务审查)

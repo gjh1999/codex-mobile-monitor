@@ -1,0 +1,87 @@
+@echo off
+setlocal DisableDelayedExpansion
+set "LANXI_DOWNLOADER=%~f0"
+powershell.exe -NoLogo -NoProfile -Command "$s=[IO.File]::ReadAllText($env:LANXI_DOWNLOADER) -split '(?m)^:LANXI_SCRIPT\r?$',2; & ([ScriptBlock]::Create($s[1]))"
+set "result=%errorlevel%"
+pause
+exit /b %result%
+:LANXI_SCRIPT
+$ErrorActionPreference = 'Stop'
+$server = '__SERVER__'
+$account = '__ACCOUNT__'
+$knownHost = '__KNOWN_HOST__'
+$keyBase64 = '__READ_ONLY_KEY__'
+$archive = '__ARCHIVE__'
+$expected = '__SHA256__'
+$expires = '__EXPIRY_UTC__'
+$folder = [IO.Path]::GetDirectoryName($env:LANXI_DOWNLOADER)
+$destination = Join-Path $folder $archive
+$scratch = $null
+$partial = $null
+function Confirm-Archive($path) {
+    (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -eq $expected
+}
+try {
+    if ([IO.File]::Exists($destination)) {
+        if (!(Confirm-Archive $destination)) {
+            throw "已有同名文件，但校验值不同。请移走该文件后重试：$destination"
+        }
+        Write-Host "已有完整安装包，校验通过：$destination"
+        exit 0
+    }
+    if ([DateTimeOffset]::UtcNow -ge [DateTimeOffset]::Parse($expires)) {
+        throw "下载凭据已于 $expires (UTC) 到期，请向分发端获取新脚本。"
+    }
+    $ssh = Get-Command ssh.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (!$ssh) { throw '请在 Windows 设置的“可选功能”中安装 OpenSSH 客户端，再双击本脚本。' }
+
+    $work = Join-Path ([IO.Path]::GetTempPath()) ('lanxi-' + [guid]::NewGuid().ToString('N'))
+    $acl = New-Object Security.AccessControl.DirectorySecurity
+    $acl.SetAccessRuleProtection($true, $false)
+    $user = [Security.Principal.WindowsIdentity]::GetCurrent().User
+    $rule = [Security.AccessControl.FileSystemAccessRule]::new($user, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
+    $acl.AddAccessRule($rule)
+    $scratch = [IO.Directory]::CreateDirectory($work, $acl)
+    [IO.File]::WriteAllBytes((Join-Path $work 'key'), [Convert]::FromBase64String($keyBase64))
+    [IO.File]::WriteAllText((Join-Path $work 'known_hosts'), $knownHost + [char]10, [Text.Encoding]::ASCII)
+    [IO.File]::WriteAllText((Join-Path $work 'config'), '')
+
+    $partial = Join-Path $folder ($archive + '.' + [guid]::NewGuid().ToString('N') + '.part')
+    Write-Host "正在连接服务器并下载 $archive …"
+    $process = New-Object Diagnostics.Process
+    $process.StartInfo.FileName = $ssh.Source
+    $process.StartInfo.WorkingDirectory = $work
+    $process.StartInfo.UseShellExecute = $false
+    $process.StartInfo.RedirectStandardOutput = $true
+    $process.StartInfo.Arguments = "-F config -n -T -i key -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none -o UserKnownHostsFile=known_hosts -o GlobalKnownHostsFile=none -o StrictHostKeyChecking=yes -o HostKeyAlgorithms=ssh-ed25519 -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 $account@$server download"
+    $file = [IO.File]::Open($partial, 'CreateNew', 'Write', 'None')
+    try {
+        [void]$process.Start()
+        try {
+            $process.StandardOutput.BaseStream.CopyTo($file)
+            $process.WaitForExit()
+            if ($process.ExitCode -ne 0) { throw "SSH 下载失败。请查看上方连接错误，确认网络后重试。" }
+        } finally {
+            if (!$process.HasExited) { $process.Kill(); $process.WaitForExit() }
+        }
+    } finally {
+        $file.Dispose()
+        $process.Dispose()
+    }
+    if (!(Confirm-Archive $partial)) { throw '下载内容的 SHA-256 校验失败，请重新运行脚本。' }
+    [IO.File]::Move($partial, $destination)
+    Write-Host "下载完成，SHA-256 校验通过：$destination"
+    Write-Host '解压 ZIP，双击 Lanxi-Glass-R21-Portable.exe 即可启动澜汐。'
+} catch {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+} finally {
+    if ($partial -and [IO.File]::Exists($partial)) { [IO.File]::Delete($partial) }
+    if ($scratch) {
+        foreach ($name in 'key','known_hosts','config') {
+            [IO.File]::Delete((Join-Path $scratch.FullName $name))
+        }
+        $scratch.Delete()
+    }
+}
+exit 0

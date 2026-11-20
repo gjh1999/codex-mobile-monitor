@@ -21,6 +21,7 @@ from coordination_client import ControlClient
 from handoff_sync import atomic_write
 from personal_memory import Mirror, pack, safe_path, sync_memories
 from personal_relay import EMPTY, Records, RemoteRecords, digest
+from project_library import configured_root, discover
 
 
 class PersonalSync:
@@ -93,14 +94,28 @@ class PersonalSync:
                 return project, Path(self.projects[project])
         return None
 
-    def bindings(self, store, index, cached, published):
+    def bindings(self, store, index, cached, published, errors):
         local = {}
+        parent = configured_root(self.root)
+        found = {}
+        if parent and parent.is_dir():
+            for path in discover(parent, {}):
+                if not (path / ".git").exists():
+                    continue
+                try:
+                    remote = value(path, "config", "--get", "remote.origin.url")
+                except (OSError, SyncIssue, subprocess.TimeoutExpired):
+                    continue
+                identity = github_id(remote)
+                if identity:
+                    found.setdefault(identity, []).append({"path": str(path), "remote": remote})
+        discovered = [rows[0] for rows in found.values() if len(rows) == 1]
         entries = (
             json.loads(self.registry.read_text(encoding="utf-8-sig")).get("projects", [])
             if self.registry.is_file()
             else []
         )
-        entries = [*entries, *self.settings.get("projects", [])]
+        entries = [*discovered, *entries, *self.settings.get("projects", [])]
         remote_specs = {} if store else cached.copy()
         if store:
             for key, revision in index.items():
@@ -120,20 +135,47 @@ class PersonalSync:
             project = github_id(entry.get("remote"))
             if not project:
                 continue
-            target = (
-                Path(entry["path"])
-                if entry.get("path")
-                else local.get(project, self.checkout.joinpath(*project.split("/")))
-            )
-            if not target.is_absolute():
-                raise SyncIssue("项目映射需要本机绝对路径")
-            local[project] = target
+            if entry.get("path"):
+                target = Path(entry["path"])
+                if not target.is_absolute():
+                    raise SyncIssue("项目映射需要本机绝对路径")
+                if target.exists() or project not in local:
+                    local[project] = target
             remote_specs.setdefault(project, {"remote": entry["remote"], "memoryPath": ".codex/memories"})
             overrides.setdefault(project, {}).update(
                 {k: entry[k] for k in ("branch", "memoryPath") if k in entry}
             )
+        for project, spec in remote_specs.items():
+            if project in local:
+                continue
+            legacy = self.checkout.joinpath(*project.split("/"))
+            if len(found.get(project, [])) > 1:
+                errors[project] = "本机有多份相同仓库，请在个人同步配置中选择项目路径"
+            elif (legacy / ".git").exists():
+                local[project] = legacy
+            elif parent and not parent.is_dir():
+                errors[project] = "本机项目母目录暂不可用"
+            else:
+                relative = spec.get("relativePath", project)
+                try:
+                    if not isinstance(relative, str):
+                        raise ValueError
+                    base = parent or self.checkout
+                    dest = safe_path(base, relative)
+                    if any((d / ".git").exists() for d in dest.parents if d.is_relative_to(base)):
+                        raise ValueError
+                    local[project] = dest
+                except ValueError:
+                    errors[project] = "项目相对目录不可用，请核对母目录和仓库映射"
         for project, fields in overrides.items():
+            if project not in local:
+                continue
             spec = remote_specs[project].copy()
+            target = local[project]
+            if parent and target != parent and target.is_relative_to(parent) and (target / ".git").exists():
+                relative = target.relative_to(parent).as_posix()
+                safe_path(parent, relative)
+                spec.setdefault("relativePath", relative)
             for key, val in fields.items():
                 if project not in cached or published.get(project, {}).get(key) != val:
                     spec[key] = val
@@ -145,8 +187,13 @@ class PersonalSync:
                     store.put(key, index.get(key, EMPTY), data)
                 published[project] = fields
             remote_specs[project] = spec
-        for project in remote_specs:
-            local.setdefault(project, self.checkout.joinpath(*project.split("/")))
+        owners = {}
+        for project, path in local.items():
+            owners.setdefault(path, []).append(project)
+        for path, projects in owners.items():
+            if len(projects) > 1 or any(folder in owners and not folder.exists() for folder in path.parents):
+                for project in projects:
+                    errors[project] = "项目目标目录与另一仓库重叠，请核对项目映射"
         return local, remote_specs
 
     def cycle(self, stop):
@@ -172,11 +219,11 @@ class PersonalSync:
         try:
             store = self.store()
             index = store.index() if store else {}
-            local, specs = self.bindings(store, index, cached, published)
+            local, specs = self.bindings(store, index, cached, published, errors)
         except (OSError, ValueError, sqlite3.Error):
             errors["配对"] = "个人同步通道暂不可用"
             store = None
-            local, specs = self.bindings(None, {}, cached, published)
+            local, specs = self.bindings(None, {}, cached, published, errors)
         if store:
             for file, data in ((catalog, pack(specs)), (preferences, pack(published))):
                 if not file.is_file() or file.read_bytes() != data:
@@ -216,8 +263,9 @@ class PersonalSync:
                 errors[project] = str(error) if isinstance(error, ValueError) else "本机目录或网络暂不可用"
 
         jobs = queue.Queue()
-        for project in sorted(specs, key=lambda p: p != first):
-            jobs.put(project)
+        for project in sorted(local, key=lambda p: p != first):
+            if project not in errors:
+                jobs.put(project)
 
         def consume():
             while not stop.is_set():

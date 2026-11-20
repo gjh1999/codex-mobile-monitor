@@ -27,6 +27,7 @@ from personal_relay import EMPTY, Records, RemoteRecords, digest
 
 REMOTE = "https://github.com/lanxi-check/fixture.git"
 PROJECT = "lanxi-check/fixture"
+PROJECT_FOLDER = Path("客户甲/工具组/项目 A")
 MEMORY = Path("notes/Codex")
 BIG_FILE = "fixture-large.bin"
 SHARE_PREFIX = "Lanxi-R21-test-"
@@ -151,6 +152,9 @@ def prepare_runtime(exe, runtime, exchange, source=None):
     profile = runtime / "codex"
     profile.mkdir()
     projects = [{"remote": REMOTE, "path": str(source), "memoryPath": MEMORY.as_posix()}] if source else []
+    parent = runtime.parent / ("source-projects" if source else "receiver-projects")
+    parent.mkdir(exist_ok=True)
+    write_json(runtime / "project-library.json", {"root": str(parent)})
     write_json(
         runtime / "personal-sync.json",
         {
@@ -216,7 +220,7 @@ def running(exe, runtime, *, local_appdata=None, arguments=()):
 
 
 def verify(exe, root, exchange, mode, report):
-    source, receiver = root / "source-work", root / "receiver"
+    source, receiver = root / "source-projects" / PROJECT_FOLDER, root / "receiver"
     source_runtime = root / "source"
     note_key = f"notes/{PROJECT}/decision.md"
     ready = exchange / "source-ready.json"
@@ -261,12 +265,12 @@ def verify(exe, root, exchange, mode, report):
             check(not returned.exists(), "这组验收已回传。请在源机开启一组新验收。")
 
         profile = prepare_runtime(exe, receiver, exchange)
-        target = receiver / "projects" / Path(PROJECT)
+        target = root / "receiver-projects" / PROJECT_FOLDER
         note = target / MEMORY / "decision.md"
         with running(exe, receiver) as proc:
             wait_for("接收机自动克隆并收到同路径项目记忆", lambda: read_is(note, "source note"), proc)
             check(read_is(target / "app.py", "# source change"), "接收端克隆的代码内容无效。")
-            report("从空工作区自动克隆，项目记忆落在 notes/Codex/decision.md")
+            report("从空工作区按母目录相对路径克隆，项目记忆落在 notes/Codex/decision.md")
             wait_for(
                 "复制全局 AGENTS.md 和会话记录",
                 lambda: (

@@ -48,7 +48,7 @@ def folders(parent):
             child
             for child in parent.iterdir()
             if not child.name.startswith(".")
-            and child.name not in ("node_modules", "__pycache__", "build-exe")
+            and child.name not in ("node_modules", "__pycache__", "build-exe", "site-packages")
             and child.is_dir()
             and not child.is_symlink()
             and not getattr(child.lstat(), "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
@@ -103,21 +103,23 @@ def inspect_project(path, overrides):
 def discover(parent, overrides):
     projects = {}
 
-    def record(path, depth):
+    def record(path):
         project = inspect_project(path, overrides)
         if project:
             projects[path] = project
-        elif depth:
+        else:
             for child in folders(path):
-                record(child, depth - 1)
+                record(child)
 
     if (parent / ".git").exists():
-        record(parent, 0)
+        record(parent)
     else:
         for child in folders(parent):
-            record(child, 1)
+            record(child)
         if not projects:
-            record(parent, 0)
+            project = inspect_project(parent, overrides)
+            if project:
+                projects[parent] = project
     return projects
 
 

@@ -17,6 +17,7 @@ from code_sync import SyncIssue, run, sync_project
 from coordination_server import create_app
 from personal_memory import replace
 from personal_sync import PersonalSync
+from project_library import set_project_root
 
 
 def git(repo, *args):
@@ -50,6 +51,34 @@ class FlowTests(unittest.TestCase):
         git(self.a, "push", "-u", "origin", "main")
         self.share = root / "share"
         self.share.mkdir()
+
+    def test_projects_follow_relative_folder_on_new_device(self):
+        relative = Path("客户甲/研发/项目 A")
+        original = self.a
+        self.a = self.root / "source-library" / relative
+        self.a.parent.mkdir(parents=True)
+        original.rename(self.a)
+        workers = []
+        for machine in ("source", "receiver"):
+            data = self.root / (machine + "-data")
+            data.mkdir()
+            parent = self.root / (machine + "-library")
+            parent.mkdir(exist_ok=True)
+            set_project_root(data, parent)
+            workers.append(PersonalSync(data, {"exchange": str(self.share)}, home=data / "codex"))
+        stop = threading.Event()
+        sender, receiver = workers
+        sender.cycle(stop)
+        receiver.cycle(stop)
+        clone = self.root / "receiver-library" / relative
+        self.assertEqual((clone / "a.py").read_text(), "first\n")
+        catalog = json.loads(sender.store().read("repo/example/flow"))
+        self.assertEqual(catalog["relativePath"], relative.as_posix())
+        self.assertNotIn(str(self.root), json.dumps(catalog))
+        (clone / "a.py").write_text("from the other device\n")
+        receiver.cycle(stop)
+        sender.cycle(stop)
+        self.assertEqual((self.a / "a.py").read_text(), "from the other device\n")
 
     def test_bidirectional_filtered_clone_and_conflicts(self):
         data = os.urandom(32000)

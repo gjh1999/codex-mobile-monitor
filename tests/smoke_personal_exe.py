@@ -18,9 +18,12 @@ from ctypes import wintypes
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
+from urllib.error import HTTPError
 
 from code_sync import run
-from personal_relay import Records
+from coordination_client import ControlClient
+from desktop_storage import user_data_root
+from personal_relay import EMPTY, Records, RemoteRecords, digest
 
 REMOTE = "https://github.com/lanxi-check/fixture.git"
 PROJECT = "lanxi-check/fixture"
@@ -321,22 +324,76 @@ def verify_return(source, marker, fixture, proc, seconds):
     wait_for("源机收到回传的代码和记忆", returned, proc, seconds)
 
 
+def cloud_roundtrip(mode, data_dir, code, passed):
+    config = json.loads((data_dir / "local-config.json").read_text(encoding="utf-8-sig"))
+    settings = config.get("personalSync")
+    override = data_dir / "personal-sync.json"
+    if override.is_file():
+        settings = {**(settings or {}), **json.loads(override.read_text(encoding="utf-8-sig"))}
+    check(isinstance(settings, dict) and not settings.get("exchange") and not settings.get("codeOnly")
+          and settings.get("memory", True), "请先在本机配置澜汐协调服务并启用个人记忆同步。")
+    cfg = config.get("coordination") or {}
+    check(cfg.get("url", "").rstrip("/") == "http://127.0.0.1:18770", "当前配对地址应为 http://127.0.0.1:18770。")
+    token = os.environ.get("LANXI_DEVICE_TOKEN")
+    check(token, "当前 Windows 用户尚未加载 LANXI_DEVICE_TOKEN。")
+    client = ControlClient(cfg, token)
+    with client.opener.open(client.url + "/healthz", timeout=5) as response:
+        check(json.load(response) == {"status": "ready"}, "协调服务尚未就绪。")
+    passed("本机隧道已连接协调服务")
+    store = RemoteRecords(client)
+    source = mode == "cloud-source"
+    code = uuid.uuid4().hex if source else (code or input("源电脑显示的测试码：")).strip()
+    check(re.fullmatch("[0-9a-f]{32}", code), "测试码格式错误。")
+    key = "verification/" + code
+    if not source:
+        offer = store.read(key)
+        request = json.loads(offer)
+        check(set(request) == {"from", "code"} and request["code"] == code, "这组验收已结束或测试码错误。")
+        check(request["from"] != client.device, "两端使用了相同设备配置。")
+        reply = {**request, "reply": client.device}
+        store.put(key, digest(offer), json.dumps(reply).encode())
+        passed("已读取源设备的测试记录，并通过本机设备令牌回传")
+        return
+    request = {"from": client.device, "code": code}
+    offer = json.dumps(request).encode()
+    store.put(key, EMPTY, offer)
+    passed("源设备令牌已验证，已写入独立测试记录")
+    print(f"请在接收电脑选择 5，输入测试码 {code}", flush=True)
+    current = offer
+    try:
+        deadline = time.monotonic() + 20 * 60
+        while time.monotonic() < deadline:
+            current = store.read(key)
+            if current != offer:
+                reply = json.loads(current)
+                check(reply.get("from") == client.device and reply.get("code") == code
+                      and reply.get("reply") and reply["reply"] != client.device, "收到的回执与本轮不符。")
+                passed("已从另一设备收到同一测试码的回执")
+                return
+            time.sleep(2)
+        raise TimeoutError("等待另一台设备回传超时。")
+    finally:
+        store.put(key, digest(current), None)
+
+
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--exe", type=Path, required=True)
     parser.add_argument("--output", type=Path)
-    parser.add_argument("--mode", choices=("local", "source", "receiver"))
+    parser.add_argument("--mode", choices=("local", "source", "receiver", "cloud-source", "cloud-receiver"))
+    parser.add_argument("--data-dir", type=Path)
+    parser.add_argument("--code")
     parser.add_argument("--share")
     args = parser.parse_args()
     if getattr(sys, "frozen", False):
         ctypes.windll.kernel32.SetDllDirectoryW(None)
     mode = args.mode or ("local" if args.output else None)
     if mode is None:
-        print("1  本机自检（默认）\n2  跨机验收：源电脑\n3  跨机验收：接收电脑")
-        selected = input("选择 1、2 或 3，直接回车选择 1：").strip() or "1"
-        mode = {"1": "local", "2": "source", "3": "receiver"}.get(selected)
+        print("1  本机自检（默认）\n2  共享目录源电脑\n3  共享目录接收电脑\n4  SSH 云通道源电脑\n5  SSH 云通道接收电脑")
+        selected = input("选择模式，直接回车选择 1：").strip() or "1"
+        mode = dict(zip("12345", ("local", "source", "receiver", "cloud-source", "cloud-receiver"))).get(selected)
     started = time.monotonic()
     report = {"status": "failed", "mode": mode, "checks": []}
 
@@ -348,26 +405,20 @@ def main():
         check(mode is not None, "无效选择。")
         exe = args.exe.resolve()
         check(exe.is_file(), f"找不到澜汐程序\n{exe}")
-        check(
-            shutil.which("git") is not None, "找不到 Git。安装 Git for Windows 后，关闭此窗口并重新双击验收。"
-        )
-        report["git"] = git(None, "--version")
         report["app_sha256"] = hash_file(exe)
-        with tempfile.TemporaryDirectory(prefix="lanxi-check-", ignore_cleanup_errors=True) as temp:
-            root = Path(temp)
-            if mode == "local":
-                exchange = root / "relay"
-                exchange.mkdir()
-            else:
-                share = args.share or input("共享目录绝对路径（两端都能读写）：")
-                exchange = require_share(share)
-                if mode == "source":
-                    exchange /= SHARE_PREFIX + uuid.uuid4().hex[:12]
-                    exchange.mkdir()
-                report["shared_test_folder"] = str(exchange)
-            verify(exe, root, exchange, mode, passed)
+        if mode in ("cloud-source", "cloud-receiver"):
+            cloud_roundtrip(mode, args.data_dir or user_data_root(), args.code, passed)
+        else:
+            check(shutil.which("git") is not None, "本机和共享目录自检需要 Git for Windows。")
+            report["git"] = git(None, "--version")
+            with tempfile.TemporaryDirectory(prefix="lanxi-check-", ignore_cleanup_errors=True) as temp:
+                verify_fixture_mode(exe, Path(temp), mode, args.share, report, passed)
         report["status"] = "passed"
         print("\n验收通过。", flush=True)
+    except HTTPError as error:
+        report["error"] = f"协调服务返回 HTTP {error.code}，请检查设备配对和测试码。"
+        print(report["error"], file=sys.stderr)
+        error.close()
     except (
         OSError,
         RuntimeError,
@@ -388,6 +439,19 @@ def main():
     write_json(output, report)
     print(f"验收报告\n{output}", flush=True)
     return 0 if report["status"] == "passed" else 1
+
+
+def verify_fixture_mode(exe, root, mode, share, report, passed):
+    if mode == "local":
+        exchange = root / "relay"
+        exchange.mkdir()
+    else:
+        exchange = require_share(share or input("共享目录绝对路径（两端都能读写）："))
+        if mode == "source":
+            exchange /= SHARE_PREFIX + uuid.uuid4().hex[:12]
+            exchange.mkdir()
+        report["shared_test_folder"] = str(exchange)
+    verify(exe, root, exchange, mode, passed)
 
 
 if __name__ == "__main__":

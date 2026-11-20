@@ -2,6 +2,13 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-20 R21 方案审查与私人分发
+
+- 基线 `1edf06e`，Windows、Python 3.14.7、Git for Windows 2.56.0。按原方案逐项核对七个里程碑，核对部署容器内协调、设备控制、个人记录、计算队列、产物及配对管理六个模块与仓库文件的 SHA-256。现网使用私人 SSH 配置。已记录项目母目录与克隆目录脱节、隧道手动恢复、索引全量读取等问题。 [审查结果](../DELIVERY_STATUS.md#2026-11-20-个人版与云服务审查)
+- 验证输出均在 `build-exe/verification/workbench-review-20261120/`。运行 `python -B -m unittest -v tests.test_coordination tests.test_compute_queue tests.test_compute_worker tests.test_personal_flow tests.test_desktop_storage tests.test_project_library`，46 项通过，38.890 秒。运行 `python -B -m tests.smoke_cloud_coordinator --output build-exe/verification/workbench-review-20261120/server-https.json`，5.33 秒通过，覆盖 HTTPS、设备隔离、并发冲突、重启持久化与记录大小边界。运行 `python -B -m tests.smoke_personal_flow --output build-exe/verification/workbench-review-20261120/native.json`，两个独立环境往返三轮，真实 CLI 和应用服务沿用同一线程，模型为本机回环服务。
+- 旧包仅支持本机模拟或共享目录双机测试。本次重新构建 `Lanxi-Verify.exe`，更新随包指引。运行 `验收.cmd --mode local`，10.34 秒通过，验证新工作区克隆、Git 提交及同路径记忆往返、全局规则、会话文件与 12 MiB 大文件排除。两套独立临时配置分别运行 `--mode cloud-source` 和 `--mode cloud-receiver`，通过 SSH 访问实际阿里云。源端 2.51 秒、接收端 0.32 秒，同设备误配被拒绝。输出 `pack-local.json`、`pack-cloud-{source,receiver,same}.json`。此次使用一台物理 Windows 电脑，笔记本上的登录、断线重连和真实 GitHub 端到端时延仍待测。
+- 分发包 `release/Lanxi-R21-Windows-Private.zip` 共 78,192,263 字节，内含两个 EXE、启动验收脚本、三个使用文档及文件哈希。主程序沿用 R21。SSH 上传至服务器账号的私人目录后下载为 `downloaded.zip`，两端 SHA-256 与下载副本均为 `738ebb09568a41d8cb249b7ed4450d82901cc88e777c28cef89d21b280463ecd`，ZIP CRC 和六份清单条目逐一通过。 [笔记本验收步骤](../PORTABLE_CHECK.md)
+
 ## 2026-11-20 阿里云无域名私人协调服务
 
 - 以 `0bb30a6` 为基线，在杭州轻量应用服务器上部署私人协调服务。Alibaba Cloud Linux 3.2104 U10、x86_64、2 核、2 GiB、Docker 26.1.3、Compose 2.27.0。使用上一版服务器包和更新的 Compose 配置，上传后逐一核对 SHA-256。共享的协调服务配置移到 `compose.coordinator.yaml`，公网 HTTPS 和私人 SSH 两种模式共用挂载、健康检查及 `coordinator-data` 持久卷。首轮私人配置引用原公网文件时触发域名变量校验，拆出共享配置后两种模式均通过 Compose 检查。 [部署和配对](../CLOUD_COORDINATOR.md#无域名的私人部署)

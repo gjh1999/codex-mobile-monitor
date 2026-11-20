@@ -72,7 +72,7 @@ class Tests(unittest.TestCase):
    self.assertEqual(monitor.conversation_for(tid, 'claude')['messages'][0]['text'], 'Claude reply')
    reader.assert_not_called()
    self.assertEqual(monitor.conversation_for(tid, 'codex')['messages'][0]['text'], 'Codex reply')
-   reader.assert_called_once_with(monitor.ROOT / 'replies.sqlite3', tid)
+   reader.assert_called_once_with(monitor.ROOT / 'replies.sqlite3', tid, activity=[])
    for function, args in ((monitor.get_controller, ('invalid',)), (monitor.conversation_for, (tid, 'invalid'))):
     with self.assertRaises(ValueError):function(*args)
 

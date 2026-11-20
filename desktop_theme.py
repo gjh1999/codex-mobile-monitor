@@ -9,6 +9,8 @@ from PySide6.QtGui import (
     QTextDocument, QTextDocumentFragment, QTextFormat, QTextFrameFormat, QTextOption,
 )
 
+from codex_activity import terminal_text
+
 PALETTE = {
     'paper': '#f3f6fb', 'surface': '#ffffff', 'ink': '#24344d',
     'heading': '#1c3151', 'muted': '#61738c', 'line': '#e1e8f2',
@@ -216,13 +218,45 @@ def message_html(role, text, assistant):
         else:
             blocks.extend('<p style="color:#24344d;font-size:10pt;">' + _inline(paragraph) + '</p>'
                           for paragraph in part.strip().split('\n\n') if paragraph)
-    spacer = '<td width="7%"></td>'
-    bubble = ('<td width="93%" style="padding:10px;">'
-              '<p style="margin-top:0;margin-bottom:7px;font-size:9pt;color:#61738c;">'
-              f'<b>{escape(role)}</b></p>{"".join(blocks)}</td>')
+    title = ('<p style="margin-top:0;margin-bottom:7px;font-size:9pt;color:#61738c;">'
+             f'<b>{escape(role)}</b></p>')
+    return bubble_html(title + ''.join(blocks), assistant)
+
+
+def bubble_html(content, left, width=93):
+    spacer = f'<td width="{100 - width}%"></td>'
+    bubble = f'<td width="{width}%" style="padding:10px;">{content}</td>'
     return ('<table width="100%" cellspacing="0" cellpadding="0"><tr>' +
-            (bubble + spacer if assistant else spacer + bubble) +
+            (bubble + spacer if left else spacer + bubble) +
             '</tr></table><p style="margin:0;font-size:5pt;">&nbsp;</p>')
+
+
+def process_html(item):
+    status = item['status']
+    exit_code = item['exitCode']
+    failed = status in ('failed', 'declined') or (exit_code is not None and exit_code != 0)
+    caption = {'inProgress': '运行中', 'completed': '已完成', 'failed': '未完成',
+               'declined': '已取消', 'unknown': '执行状态待确认'}[status]
+    if status == 'completed' and failed:
+        caption = '未完成'
+    if failed and exit_code is not None:
+        caption += f' · 退出码 {exit_code}'
+    if item['durationMs'] is not None:
+        caption += f" · {item['durationMs'] / 1000:.2f} 秒"
+    state_color = '#854d28' if failed else '#21616f'
+    blocks = [f'<p style="margin-top:0;margin-bottom:5px;font-size:9pt;color:{state_color};">'
+              f'<b>执行札记 · {caption}</b></p>']
+    command = terminal_text(item['command']).strip()
+    if command:
+        blocks.append('<p style="font-family:Consolas;font-size:9pt;color:#173d54;white-space:pre-wrap;'
+                      'margin:0;"><b>› ' + escape(command).replace('\n', '<br/>') + '</b></p>')
+    output = terminal_text(item['text']).strip('\n').split('\n')
+    if item['truncated'] or len(output) > 30:
+        blocks.append('<p style="font-size:8pt;color:#415d70;margin:4px 0 0;">前面的输出已省略</p>')
+    if any(output):
+        blocks.append('<p style="font-family:Consolas;font-size:9pt;color:#29495e;white-space:pre-wrap;'
+                      'margin:4px 0 0;">' + '<br/>'.join(escape(line) for line in output[-30:]) + '</p>')
+    return bubble_html(''.join(blocks), True, width=89)
 
 
 def warning_html(text):

@@ -2,6 +2,7 @@
 import json, os, sqlite3, threading, time, sys
 from conversation import read_conversation
 from codex_history import read_codex_conversation
+from codex_activity import CodexActivity
 from pathlib import Path
 from automation import Approvals, Scheduler
 from channels_dingtalk import DingTalkWebhook
@@ -46,6 +47,7 @@ claude_rpc=None
 claude_journal=None
 history_labels={}
 personal_sync=None
+codex_activity=CodexActivity()
 
 def enable_personal_sync(settings, stop, workers):
  global personal_sync
@@ -75,8 +77,10 @@ def conversation_for(thread_id,client='codex',*,local_history=True):
  if client not in ('codex','claude'):raise ValueError('无效客户端。')
  if client=='claude':
   return claude_rpc.conversation(thread_id) if claude_rpc else {'messages':[],'events':[]}
- reader=read_codex_conversation if local_history else read_conversation
- return reader(ROOT/'replies.sqlite3',thread_id)
+ path=ROOT/'replies.sqlite3'
+ if local_history:
+  return read_codex_conversation(path,thread_id,activity=codex_activity.snapshot(thread_id))
+ return read_conversation(path,thread_id)
 def snapshot():
  with state_lock:result=json.loads(json.dumps(state))
  # Control intent and fast interrupts can change between polling rounds. Read the
@@ -135,7 +139,7 @@ def poll(stop):
  managed=ManagedTasks(str(ROOT/'managed.sqlite3'),workspace)
  rpc=None;channel=None;failures=0;drained=[]
  controller=TaskControl(ROOT/'task-control.sqlite3');controller.seed(config().get('autoAttachThreads',[]))
- journal=ReplyLog(str(ROOT/'replies.sqlite3'))
+ journal=ReplyLog(str(ROOT/'replies.sqlite3'),activity=codex_activity)
  native=WindowsNotifications(str(ROOT/'windows-notifications.sqlite3'))
  try:
   while not stop.is_set():
@@ -147,6 +151,7 @@ def poll(stop):
     if not history_labels:history_labels=load_labels()
     if rpc is None or rpc.closed:
      if rpc:
+      codex_activity.disconnect()
       rpc.close()
       if getattr(rpc,'draining',False):
        rpc.p.wait(timeout=3)
@@ -195,6 +200,7 @@ def poll(stop):
   if rpc:
    if getattr(rpc,'project_writes',None) and not rpc.closed:rpc.reconcile_writes(shutdown=True)
    rpc.close()
+  codex_activity.disconnect()
   if controller:controller.db.close()
   scheduler.db.close();notifications.db.close();managed.db.close()
 

@@ -19,6 +19,8 @@ from PySide6.QtWidgets import QApplication, QDialog, QFrame, QLabel, QMessageBox
 
 import monitor
 from automation import Approvals
+from codex_activity import COMMAND_DELTA, MESSAGE_DELTA, CodexActivity
+from codex_history import read_codex_conversation
 from desktop_glass import FrostedPanel, OceanBackdrop
 from desktop_model_api import ModelApiDialog
 from desktop_notebook import GROUP_HEADER, NotebookStore
@@ -26,6 +28,7 @@ from desktop_poetry import COVER_VERSES
 from desktop_qt import MainWindow
 from desktop_theme import configure_text, message_html, set_reading_html, ui_font
 from model_groups import Organizer, read_settings
+from reply_log import ReplyLog
 
 CODEX = '00000000-0000-4000-8000-000000000001'
 CLAUDE = '11111111-2222-4333-8444-555555555555'
@@ -117,6 +120,54 @@ def check_markdown(window, data, output):
     assert browser.horizontalScrollBar().maximum() == 0
     window.grab().save(str(output / 'markdown-desktop.png'))
     window.resize(size)
+
+
+def check_process_bubbles(window, output):
+    window.select_workspace('codex')
+    thread = window.selected_thread
+    assert thread
+    activity = CodexActivity()
+    with tempfile.TemporaryDirectory() as directory:
+        journal = ReplyLog(Path(directory) / 'replies.sqlite3', activity=activity)
+        path = Path(directory) / 'replies.sqlite3'
+        with closing(journal.db), patch.object(monitor, 'codex_activity', activity), \
+             patch.dict('os.environ', CODEX_HOME=directory), \
+             patch.object(monitor, 'conversation_for',
+                          side_effect=lambda tid, _: read_codex_conversation(path, tid, activity=activity.snapshot(tid))):
+            def event(method, **fields):
+                journal.record({'method': method, 'params': {'threadId': thread, 'turnId': 'process-test', **fields}},
+                               {thread})
+
+            window.resize(1280, 910)
+            chat = window.conversation
+            event('item/completed', item={'type': 'userMessage', 'id': 'input',
+                                         'content': [{'type': 'text', 'text': '检查这次桌面打包，给我看一下运行结果。'}]})
+            command = dict(id='check', type='commandExecution', status='inProgress',
+                           command=r'.\.venv\Scripts\python.exe build-exe/verify-lanxi-launch.py Lanxi-Glass-R16-Markdown.exe')
+            event('item/started', item=command)
+            assert wait_until(lambda: '执行札记 · 运行中' in chat.toPlainText())
+            started = time.perf_counter()
+            event(COMMAND_DELTA, itemId='check', delta='正在检查 Windows 原生窗口…\n')
+            assert wait_until(lambda: '正在检查 Windows 原生窗口' in chat.toPlainText())
+            delta_ms = (time.perf_counter() - started) * 1000
+            assert chat.toPlainText().count('执行札记') == 1
+            window.grab().save(str(output / 'process-running.png'))
+
+            event('item/completed', item={**command, 'status': 'completed', 'exitCode': 0, 'durationMs': 1630,
+                                          'aggregatedOutput': 'Native window and SQLite verified in 1.63s\n  └ 已在隔离目录核对启动。'})
+            assert wait_until(lambda: '执行札记 · 已完成 · 1.63 秒' in chat.toPlainText())
+            assert '  └ 已在隔离目录核对启动。' in chat.toPlainText()
+            assert chat.toPlainText().count('执行札记') == 1 and '运行中' not in chat.toPlainText()
+            event(MESSAGE_DELTA, itemId='answer', delta='## 验证结果\n\n')
+            assert wait_until(lambda: '验证结果' in chat.toPlainText())
+            event('item/completed', item={'id': 'answer', 'type': 'agentMessage',
+                                         'text': '## 验证结果\n\n**窗口与本地数据库均已通过验证。**'})
+            assert wait_until(lambda: '窗口与本地数据库均已通过验证。' in chat.toPlainText())
+            assert [role for _, role in chat.document().message_frames] == [False, 'process', True]
+            assert '<h2 ' in chat.document().toHtml()
+            assert chat.horizontalScrollBar().maximum() == 0
+            window.grab().save(str(output / 'process-completed.png'))
+            print(f'Command delta became visible in {delta_ms:.1f} ms in the native synthetic test.')
 
 
 def check_edge_menu(window, output):
@@ -909,6 +960,7 @@ def main():
             check_edge_menu(window, args.output)
             check_model_settings(window, args.output)
             check_markdown(window, data, args.output)
+            check_process_bubbles(window, args.output)
             from project_library import ENTRY_PREFIX, ProjectLibrary, configured_root
             with tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)

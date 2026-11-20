@@ -32,7 +32,7 @@ from desktop_poetry import COVER_VERSES
 from desktop_projects import SessionTitles, folder_name, project_group
 from desktop_theme import (
     SLASH_MENU_STYLE, STYLESHEET, configure_text, format_reading_document, insert_markdown,
-    message_html, ui_font, warning_html, web_link,
+    message_html, process_html, ui_font, warning_html, web_link,
 )
 from model_groups import Organizer
 from project_library import ENTRY_PREFIX, SETTINGS as PROJECT_LIBRARY_FILE, configured_root, set_project_root
@@ -61,6 +61,11 @@ def load_conversation(key, previous, font, option, width, gui_thread, stop):
     roles = []
     replies = []
     for message in data.get('messages') or []:
+        if message.get('role') == 'process':
+            bubbles.append(process_html(message))
+            roles.append('process')
+            replies.append('')
+            continue
         assistant = message.get('role') == 'assistant'
         role = ('Claude Code' if client == 'claude' else 'Codex') if assistant else '你'
         text = message.get('text', '')
@@ -88,7 +93,7 @@ def load_conversation(key, previous, font, option, width, gui_thread, stop):
     for (frame, assistant), text in zip(document.message_frames, replies):
         if stop.is_set():
             return None
-        if assistant:
+        if assistant is True:
             insert_markdown(frame.cellAt(0, 0).lastCursorPosition(), text)
     format_reading_document(document)
     document.setTextWidth(width)
@@ -217,8 +222,15 @@ class ConversationBrowser(QTextBrowser):
                         break
                     if not box.intersects(exposed):
                         continue
-                    painter.setBrush(QColor(235, 249, 255, 132) if assistant else QColor(218, 240, 253, 172))
-                    painter.drawRoundedRect(box, 11, 11)
+                    if assistant == 'process':
+                        painter.setBrush(QColor(207, 226, 234, 231))
+                        painter.drawRoundedRect(box, 8, 8)
+                        marker = QRectF(box.left() + 3, box.top() + 10, 2, 12)
+                        painter.setBrush(QColor('#4f8194'))
+                        painter.drawRoundedRect(marker, 1, 1)
+                    else:
+                        painter.setBrush(QColor(235, 249, 255, 132) if assistant else QColor(218, 240, 253, 172))
+                        painter.drawRoundedRect(box, 11, 11)
         super().paintEvent(event)
 
 
@@ -524,6 +536,7 @@ class MainWindow(QMainWindow):
         self._history_repeat = False
         self._history_cache = OrderedDict()
         self._history_scroll = {}
+        self._activity_seen = None
         self._visible_history = None
         self._codex_request = None
         self._codex_menu = None
@@ -547,6 +560,9 @@ class MainWindow(QMainWindow):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refresh)
         self.timer.start(1000)
+        self.activity_timer = QTimer(self)
+        self.activity_timer.timeout.connect(self.refresh_activity)
+        self.activity_timer.start(200)
         _stop, self.worker = monitor.start_background_service(self.stop)
         self.refresh()
 
@@ -957,6 +973,7 @@ class MainWindow(QMainWindow):
         self.stop.set()
         self.organizer.close()
         self.timer.stop()
+        self.activity_timer.stop()
         self._history_pool.shutdown(wait=True, cancel_futures=True)
         if self.worker:
             self.worker.join(timeout=8)
@@ -1649,6 +1666,18 @@ class MainWindow(QMainWindow):
         except (KeyError, ValueError) as error:
             self._popup('审批未完成', str(error))
         self.refresh()
+
+    def refresh_activity(self):
+        thread = self.selected_thread
+        if (self.client != 'codex' or not thread or thread.startswith(ENTRY_PREFIX)
+                or not self.task_workspace.isVisible()):
+            return
+        key = thread, monitor.codex_activity.revision(thread)
+        if key != self._activity_seen:
+            previous = self._activity_seen
+            self._activity_seen = key
+            if key[1] or (previous and previous[0] == thread and previous[1]):
+                self.refresh_conversation()
 
     def refresh_conversation(self):
         key = (self.client, self.selected_thread)

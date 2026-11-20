@@ -4,11 +4,13 @@ import re
 import sqlite3
 import threading
 import time
+from codex_activity import DELTAS
 
 
 class ReplyLog:
-    def __init__(self, path):
+    def __init__(self, path, activity=None):
         self.lock = threading.Lock()
+        self.activity = activity
         self.active_turns = set()
         self.db = sqlite3.connect(path, check_same_thread=False)
         with self.db:
@@ -39,7 +41,8 @@ class ReplyLog:
 
     def record(self, event, owned):
         method = event.get('method')
-        if method not in ('turn/started', 'turn/completed', 'thread/status/changed', 'thread/goal/updated', 'error', 'item/started', 'item/completed'):
+        if (method not in ('turn/started', 'turn/completed', 'thread/status/changed', 'thread/goal/updated',
+                           'error', 'item/started', 'item/completed') and method not in DELTAS):
             return False
         params = event.get('params') or {}
         thread = params.get('threadId')
@@ -47,6 +50,10 @@ class ReplyLog:
         key = thread, turn
         with self.lock, self.db:
             if thread not in owned and key not in self.active_turns:
+                return False
+            if self.activity and (method in DELTAS or method in ('turn/completed', 'item/started', 'item/completed')):
+                self.activity.record(method, params, thread, turn)
+            if method in DELTAS:
                 return False
             if turn and method in ('turn/started', 'item/started'):
                 self.active_turns.add(key)

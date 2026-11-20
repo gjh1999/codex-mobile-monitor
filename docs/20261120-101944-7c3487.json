@@ -1,0 +1,15 @@
+{
+  "status": "passed",
+  "mode": "local",
+  "checks": [
+    "源机启动并发布项目记忆",
+    "从空工作区按母目录相对路径克隆，项目记忆落在 notes/Codex/decision.md",
+    "全局 AGENTS.md 与已完成会话记录一致",
+    "12 MiB 大文件未进入工作区或 Git 对象库",
+    "接收机自动提交和回传代码、项目记忆",
+    "源端收到回传，双方 Git 提交一致"
+  ],
+  "app_sha256": "98327b3b63f8bc17d6e920ee7d0142033f6823d8517d29a1fca021ce94f4021f",
+  "git": "git version 2.50.1.windows.1",
+  "seconds": 25.29
+}

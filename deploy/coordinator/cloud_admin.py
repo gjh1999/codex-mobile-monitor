@@ -67,11 +67,12 @@ def main():
     show = commands.add_parser("pair")
     show.add_argument("device")
     show.add_argument("--url", required=True)
-    invite = commands.add_parser("invite")
-    invite.add_argument("device")
-    invite.add_argument("--url", required=True)
-    invite.add_argument("--certificate", type=Path)
-    invite.add_argument("--database", type=Path, default=Path("/var/lib/lanxi/coordination.sqlite3"))
+    for name in ("invite", "setup"):
+        issue = commands.add_parser(name)
+        issue.add_argument("device")
+        issue.add_argument("--url", required=True)
+        issue.add_argument("--certificate", type=Path)
+        issue.add_argument("--database", type=Path, default=Path("/var/lib/lanxi/coordination.sqlite3"))
     options = parser.parse_args()
     try:
         if options.command == "init":
@@ -86,7 +87,7 @@ def main():
                 "[Environment]::SetEnvironmentVariable('LANXI_DEVICE_TOKEN', $env:LANXI_DEVICE_TOKEN, 'User')"
             )
         else:
-            from cloud_pairing import encode_invite, public_access
+            from cloud_pairing import encode_invite, encode_setup, public_access
             from device_enrollment import Enrollment
 
             cert = options.certificate.read_text(encoding="ascii") if options.certificate else ""
@@ -95,8 +96,11 @@ def main():
             space = devices.get(options.device, {}).get("personalSpace")
             if not space:
                 raise ValueError(f"没有登记个人设备 {options.device}")
-            secret = Enrollment(options.database, devices).issue(options.device, space)["code"]
-            print(encode_invite(access, secret))
+            enrollment = Enrollment(options.database, devices)
+            if options.command == "setup":
+                print(encode_setup(access, enrollment.issue_setup(space)))
+            else:
+                print(encode_invite(access, enrollment.issue(options.device, space)["code"]))
     except (OSError, ValueError) as error:
         parser.exit(1, f"{error}\n")
 

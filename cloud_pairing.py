@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 import secrets
+import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request
@@ -12,6 +13,7 @@ from urllib.request import Request
 from coordination_client import ControlClient, device_token
 
 PREFIX = "LANXI1."
+SETUP_PREFIX = "LANXI2."
 MAX_CODE = 12000
 SECRET = re.compile(r"[A-Za-z0-9_-]{43}")
 
@@ -26,17 +28,21 @@ def public_access(url, certificate=""):
     return {"url": url.rstrip("/"), **({"trustedCertificate": certificate} if certificate else {})}
 
 
-def encode_invite(access, secret):
+def encode_invite(access, secret, *, prefix=PREFIX):
     body = json.dumps({**access, "code": secret}, separators=(",", ":")).encode()
-    return PREFIX + base64.urlsafe_b64encode(body).decode("ascii").rstrip("=")
+    return prefix + base64.urlsafe_b64encode(body).decode("ascii").rstrip("=")
 
 
-def decode_invite(value):
+def encode_setup(access, secret):
+    return encode_invite(access, secret, prefix=SETUP_PREFIX)
+
+
+def decode_invite(value, *, prefix=PREFIX):
     value = value.strip()
     try:
-        if len(value) > MAX_CODE or not value.startswith(PREFIX):
+        if len(value) > MAX_CODE or not value.startswith(prefix):
             raise ValueError
-        encoded = value.removeprefix(PREFIX)
+        encoded = value.removeprefix(prefix)
         body = json.loads(base64.b64decode(encoded + "=" * (-len(encoded) % 4), altchars=b"-_", validate=True))
         secret = body["code"]
         if not SECRET.fullmatch(secret):
@@ -61,7 +67,12 @@ def post(client, operation, payload=None):
     except HTTPError as error:
         error.close()
         if error.code == 403:
-            message = "配对码已过期或已使用。请重新生成。" if operation == "redeem" else "本机的配对凭据未获服务器认可。"
+            message = {
+                "redeem": "配对码已过期或已使用。请重新生成。",
+                "join-setup": "双机设置文件无效或已过期，请重新生成。",
+            }.get(operation, "本机的配对凭据未获服务器认可。")
+        elif error.code == 409 and operation == "join-setup":
+            message = "此设置文件已用于两台电脑，或当前设备与已有申请冲突。"
         elif error.code == 404:
             message = "协调服务未提供配对入口，请使用支持配对向导的版本。"
         else:
@@ -78,12 +89,13 @@ def create_invite(coordination):
     return encode_invite(access, result["code"])
 
 
-def join(root, invitation, folder):
+def join(root, invitation, folder, *, waiting=None, cancel=None):
     from handoff_sync import atomic_write
     from model_groups import protect_key
     from project_library import set_project_root
 
-    access, code = decode_invite(invitation)
+    automatic = invitation.strip().startswith(SETUP_PREFIX)
+    access, code = decode_invite(invitation, prefix=SETUP_PREFIX if automatic else PREFIX)
     config_path = root / "local-config.json"
     config = json.loads(config_path.read_text(encoding="utf-8-sig")) if config_path.is_file() else {}
     if not isinstance(config, dict) or not folder.is_dir():
@@ -107,10 +119,32 @@ def join(root, invitation, folder):
         **access, "device": pending["device"], "projects": projects, "protectedToken": pending["protectedToken"],
     }
     client = ControlClient(coordination, None)
-    result = post(client, "redeem", {"code": code, "device": client.device, "token": token})
+    claim = {"code": code, "device": client.device, "token": token}
+    if automatic:
+        deadline = time.monotonic() + 1800
+        while True:
+            if cancel is not None and cancel.is_set():
+                return False
+            result = post(client, "join-setup", claim)
+            if result.get("state") == "paired":
+                break
+            if result.get("state") != "waiting" or result.get("device") != client.device:
+                raise ValueError("服务器未确认本机申请，请重试。")
+            if time.monotonic() >= deadline:
+                raise ValueError("等待另一台电脑超时，请重新生成双机设置文件。")
+            if waiting is not None:
+                waiting()
+                waiting = None
+            if cancel is None:
+                time.sleep(2)
+            else:
+                cancel.wait(2)
+    else:
+        result = post(client, "redeem", claim)
     if result.get("device") != client.device:
         raise ValueError("服务器未确认本机配对，请重试。")
     set_project_root(root, folder)
     settings = {**(config.get("personalSync") or {}), "exchange": None, "codeOnly": False, "memory": True}
     config.update(coordination=coordination, personalSync=settings)
     atomic_write(config_path, json.dumps(config, ensure_ascii=False).encode())
+    return True

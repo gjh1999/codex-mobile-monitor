@@ -1,0 +1,8 @@
+{
+  "status": "failed",
+  "mode": "cloud-receiver",
+  "checks": [],
+  "app_sha256": "98327b3b63f8bc17d6e920ee7d0142033f6823d8517d29a1fca021ce94f4021f",
+  "error": "[Errno 2] No such file or directory: 'C:\\\\Users\\\\1\\\\AppData\\\\Local\\\\Lanxi\\\\data\\\\local-config.json'",
+  "seconds": 0.05
+}

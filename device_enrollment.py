@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, ValidationError
 from starlette.concurrency import run_in_threadpool
 
 INVITE_SECONDS = 600
+SETUP_SECONDS = 1800
 SECRET_PATTERN = r"^[A-Za-z0-9_-]{43}$"
 DEVICE_PATTERN = r"^lanxi-[0-9a-f]{24}$"
 
@@ -37,6 +38,12 @@ class Enrollment:
                 );
                 CREATE TABLE IF NOT EXISTS enrolled_devices (
                     device TEXT PRIMARY KEY, space TEXT NOT NULL, token_hash TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS device_setups (
+                    code_hash TEXT PRIMARY KEY, space TEXT NOT NULL, expires INTEGER NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS device_setup_members (
+                    device TEXT PRIMARY KEY, code_hash TEXT NOT NULL, token_hash TEXT NOT NULL
                 );
             """)
 
@@ -86,6 +93,50 @@ class Enrollment:
             db.execute("INSERT INTO enrolled_devices VALUES(?,?,?)", (claim.device, *credentials))
             db.execute("UPDATE device_invites SET used_by=? WHERE code_hash=?", (claim.device, sha(claim.code)))
 
+    def issue_setup(self, space):
+        code = secrets.token_urlsafe(32)
+        now = int(time.time())
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("DELETE FROM device_setup_members WHERE code_hash IN (SELECT code_hash FROM device_setups WHERE expires<=?)", (now,))
+            db.execute("DELETE FROM device_setups WHERE expires<=?", (now,))
+            db.execute("INSERT INTO device_setups VALUES(?,?,?)", (sha(code), space, now + SETUP_SECONDS))
+        return code
+
+    def join_setup(self, claim):
+        key, token = sha(claim.code), sha(claim.token)
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            setup = db.execute("SELECT space, expires FROM device_setups WHERE code_hash=?", (key,)).fetchone()
+            if not setup or setup[1] <= time.time():
+                raise HTTPException(403, "双机设置已过期或无效")
+            space = setup[0]
+            existing = db.execute(
+                "SELECT code_hash, token_hash FROM device_setup_members WHERE device=?", (claim.device,),
+            ).fetchone()
+            enrolled = db.execute(
+                "SELECT space, token_hash FROM enrolled_devices WHERE device=?", (claim.device,),
+            ).fetchone()
+            if existing == (key, token):
+                return "paired" if enrolled == (space, token) else "waiting"
+            if existing or enrolled or claim.device in self.devices:
+                raise HTTPException(409, "设备标识已登记")
+            members = db.execute(
+                "SELECT device, token_hash FROM device_setup_members WHERE code_hash=?", (key,),
+            ).fetchall()
+            if len(members) == 2 or any(row[1] == token for row in members):
+                raise HTTPException(409, "双机设置已满或重复申请")
+            db.execute("INSERT INTO device_setup_members VALUES(?,?,?)", (claim.device, key, token))
+            if not members:
+                return "waiting"
+            try:
+                db.executemany("INSERT INTO enrolled_devices VALUES(?,?,?)",
+                               ((device, space, token_hash) for device, token_hash in [*members, (claim.device, token)]))
+            except sqlite3.IntegrityError as error:
+                raise HTTPException(409, "设备标识已登记") from error
+            db.execute("UPDATE device_setups SET expires=? WHERE code_hash=?", (int(time.time()) + SETUP_SECONDS, key))
+            return "paired"
+
 
 def install_pairing(app, enrollment):
     from fastapi.responses import JSONResponse
@@ -97,16 +148,24 @@ def install_pairing(app, enrollment):
             raise HTTPException(403, "本机尚未配对")
         return JSONResponse(enrollment.issue(x_lanxi_device, space), headers={"Cache-Control": "no-store"})
 
-    @app.post("/api/v1/pairing/redeem")
-    async def redeem(request: Request):
+    async def read_claim(request):
         data = bytearray()
         async for chunk in request.stream():
             if len(data) + len(chunk) > 512:
                 raise HTTPException(413, "配对请求过大")
             data.extend(chunk)
         try:
-            claim = Redemption.model_validate_json(data)
+            return Redemption.model_validate_json(data)
         except ValidationError as error:
             raise HTTPException(422, "配对请求格式无效") from error
+    @app.post("/api/v1/pairing/redeem")
+    async def redeem(request: Request):
+        claim = await read_claim(request)
         await run_in_threadpool(enrollment.redeem, claim)
         return JSONResponse({"device": claim.device}, headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/v1/pairing/join-setup")
+    async def join_setup(request: Request):
+        claim = await read_claim(request)
+        state = await run_in_threadpool(enrollment.join_setup, claim)
+        return JSONResponse({"device": claim.device, "state": state}, headers={"Cache-Control": "no-store"})

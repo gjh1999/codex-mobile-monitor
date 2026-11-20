@@ -2,6 +2,13 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-20 R34 顶栏整理与手动同步
+
+- 以 R33 和源码 `370f36a` 为基线。主窗口顶部统一提供「连接云服务器」「测试」「合流」。点击「合流」会唤醒现有同步线程，代码经 GitHub，记忆和大文件清单经协调服务。已有同步时排队，重复点击共用同一轮结果。结果只使用当前轮的文件清单，并显示冲突及本机缺少或大小不同的文件。
+- Windows、Python 3.14.7。执行 `.venv\Scripts\python.exe -B -m unittest tests.test_personal_flow tests.test_large_inventory tests.test_temporary_files`，14 项通过，41.932 秒。新增测试使用临时 Git 仓库和私人共享记录，源端 `VSCode/A` 与接收端 `PyCharm/A` 采用同一 origin，两台分别配置各自的共同父目录。手动请求排在进行中的后台轮次后，接收端在原目录取得新代码和新记忆。接收端未克隆第二份项目。
+- `.venv\Scripts\python.exe -B tests/smoke_desktop.py --output build-exe/verification/portable-r34-20261120/qt` 通过，验证顶栏入口、等待与执行状态、项目结果、冲突及文件清单显示。Qt 总耗时未单独测量。 [项目目录和手动同步说明](../PERSONAL_SYNC.md)
+- 执行 `.venv\Scripts\python.exe -B scripts/build-portable.py --work build-exe/verification/portable-r34-20261120/windows --pycharm 'C:\Program Files\JetBrains\PyCharm 2026.3' --workspace-grant build-exe/verification/portable-r33-20261120/lanxi-private-workspace.join`。复用 R33 的私人工作区加入授权。`release/Lanxi-R34-Windows-Private.zip` 为 95,153,530 字节，SHA-256 为 `232a7c47ee3384180008471360c4768164e89d52cd9e13a1ed4e2e75be571488`。
+
 ## 2026-11-20 R33 一键连接云服务器
 
 - 以 R32 和源码 `4045823` 为基线。私人包每次先选「连接云服务器」或「本机使用」，未设置过项目母目录才弹目录选择器。顶部任务栏、主窗口左下角及测试窗口统一使用「连接云服务器」。已连接设备沿用原凭据，本机模式只在当前运行中暂停澜汐的云同步和云更新。包内授权绑定既有私人工作区，各设备先后加入且各有独立凭据。R32 的两台限制和邀请码流程继续供旧客户端使用。

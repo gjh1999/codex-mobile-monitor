@@ -156,6 +156,11 @@ def verify(root):
     assert admin(root, "init", "replacement").returncode == 1 and devices_file.read_bytes() == original
     devices = json.loads(original)
     assert len({device["token"] for device in devices.values()}) == 3
+    local_url = "http://127.0.0.1:18770"
+    local_pair = admin(root, "pair", "first", "--url", local_url)
+    assert local_pair.returncode == 0
+    assert json.loads(local_pair.stdout.split("\n\n", 1)[0])["coordination"]["url"] == local_url
+    assert admin(root, "pair", "first", "--url", "http://sync.example.com").returncode == 1
     devices["other"]["personalSpace"] = "another-test-space"
     devices_file.write_text(json.dumps(devices), encoding="utf-8")
     key, cert = root / "key.pem", root / "cert.pem"

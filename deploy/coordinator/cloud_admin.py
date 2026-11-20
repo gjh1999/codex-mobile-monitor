@@ -37,15 +37,16 @@ def initialize_devices(path, names):
 
 def pairing(path, name, url):
     origin = urlsplit(url)
+    loopback = origin.hostname in ("127.0.0.1", "::1", "localhost")
     if (
-        origin.scheme != "https"
+        not (origin.scheme == "https" or origin.scheme == "http" and loopback)
         or not origin.hostname
         or origin.username is not None
         or origin.query
         or origin.fragment
         or origin.path not in ("", "/")
     ):
-        raise ValueError("填写完整 HTTPS 服务地址，例如 https://sync.example.com")
+        raise ValueError("填写 HTTPS 服务地址或 SSH 隧道的本机 HTTP 地址")
     devices = json.loads(path.read_text(encoding="utf-8"))
     device = devices.get(name)
     if not device or not device.get("personalSpace"):

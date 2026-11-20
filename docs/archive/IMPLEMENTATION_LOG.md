@@ -2,6 +2,12 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-20 阿里云无域名私人协调服务
+
+- 以 `0bb30a6` 为基线，在杭州轻量应用服务器上部署私人协调服务。Alibaba Cloud Linux 3.2104 U10、x86_64、2 核、2 GiB、Docker 26.1.3、Compose 2.27.0。使用上一版服务器包和更新的 Compose 配置，上传后逐一核对 SHA-256。共享的协调服务配置移到 `compose.coordinator.yaml`，公网 HTTPS 和私人 SSH 两种模式共用挂载、健康检查及 `coordinator-data` 持久卷。首轮私人配置引用原公网文件时触发域名变量校验，拆出共享配置后两种模式均通过 Compose 检查。 [部署和配对](../CLOUD_COORDINATOR.md#无域名的私人部署)
+- 通过 `docker compose -f compose.ssh.yaml up -d --wait` 运行实际服务器。容器报告健康，`ss` 确认只监听 `127.0.0.1:8770`。在一台 Windows 电脑使用 OpenSSH 转发到 `127.0.0.1:18770`，健康检查通过。匿名读取个人索引收到 403，两份不同的设备令牌均可读。从本机直接连接公网 8770 未成功。本次验证了一个真实 Windows 设备的 SSH 链路以及两份令牌，第二台物理电脑和常驻重连待验。
+- Windows 上执行 `python -B -m unittest -v tests.test_coordination tests.test_personal_flow`，19 项通过，24.023 秒。执行 `python -B -m tests.smoke_cloud_coordinator --output build-exe/verification/lanxi-aliyun-sas/cloud-regression.json`，6.40 秒通过，覆盖回环 HTTP 配对、拒绝公开 HTTP、原有 HTTPS、鉴权和模拟双客户端同步。实际验收输出 `private-ssh.json` 和回归日志保存在同一输出目录。
+
 ## 2026-11-20 R21 用户数据迁移、项目发现与原会话接续
 
 - 以 `c4b1564` 和上一版 R20 便携包为基线。R20 从 EXE 目录读取配置和数据库。R21 首次启动可迁移旧数据，此后从 `%LOCALAPPDATA%\Lanxi\data` 加载，旧文件保留。SQLite 迁移测试覆盖已提交的 WAL 数据、旧版仍在使用时等待退出、失败后重试及更换程序目录。后台约每五秒扫描项目母目录，按项目显示本机路径、记忆位置和原 Codex 会话，并为新发现的项目创建可启卷的案头条目。 [跨设备开发工作台方案](../跨设备开发工作台方案.html#overview) · [安装、升级与验收](../PORTABLE_CHECK.md)

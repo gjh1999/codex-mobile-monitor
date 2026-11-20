@@ -1,6 +1,32 @@
 # 澜汐云协调服务
 
-台式机和笔记本分别连到同一个 HTTPS 域名，使用各自的设备令牌。协调服务保存项目清单、Codex 记忆和会话。代码继续从 GitHub 同步。
+台式机和笔记本使用各自的设备令牌，通过同一个 HTTPS 域名，或分别经 SSH 隧道访问协调服务。协调服务保存项目清单、Codex 记忆和会话。代码继续从 GitHub 同步。
+
+## 无域名的私人部署
+
+在 Linux 服务器的 `deploy/coordinator` 目录使用 `compose.ssh.yaml`。它在服务器回环地址 `127.0.0.1:8770` 运行后端。使用已有的 SSH 入站规则即可，协调接口保留在服务器内部。
+
+```bash
+sudo docker compose -f compose.ssh.yaml build
+sudo docker compose -f compose.ssh.yaml run --rm --no-deps coordinator cloud_admin.py init desktop laptop
+sudo docker compose -f compose.ssh.yaml up -d --wait
+curl -fsS http://127.0.0.1:8770/healthz
+```
+
+每台 Windows 电脑用自己的 SSH 密钥登录，并从服务器控制台核对主机指纹。隧道把这台电脑的 `127.0.0.1:18770` 转发到服务器的 `127.0.0.1:8770`。把命令里的账号和地址换成自己的。保留运行隧道的窗口，断线后重新执行即可。 [OpenSSH 端口转发](https://man.openbsd.org/ssh)
+
+```powershell
+ssh -N -T -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L 127.0.0.1:18770:127.0.0.1:8770 admin@服务器公网地址
+```
+
+在另一个 PowerShell 窗口检查 `Invoke-RestMethod http://127.0.0.1:18770/healthz` 是否返回 `{"status":"ready"}`。两台电脑各自运行同样的检查。服务器管理员分别生成设备配置，地址都是各电脑自己隧道的回环地址。
+
+```bash
+sudo docker compose -f compose.ssh.yaml exec coordinator python cloud_admin.py pair desktop --url http://127.0.0.1:18770
+sudo docker compose -f compose.ssh.yaml exec coordinator python cloud_admin.py pair laptop --url http://127.0.0.1:18770
+```
+
+按下文的 Windows 配对步骤合并配置并设置各自的令牌。SSH 负责加密跨机传输。服务器的持久卷名称和 HTTPS 部署一致，今后切换到域名时继续用同一份数据，直接重建服务即可。
 
 ## 在 Linux 服务器启动
 
@@ -27,7 +53,7 @@ Invoke-RestMethod https://sync.example.com/healthz
 
 ## 配对两台电脑
 
-从服务器分别生成两台电脑的配置。命令输出客户端 JSON 和该设备专用的 PowerShell 令牌设置。
+从服务器分别生成两台电脑的配置。使用域名时运行下面的命令，SSH 隧道使用上面的命令。输出包含客户端 JSON 和该设备专用的 PowerShell 令牌设置。
 
 ```bash
 docker compose exec coordinator python cloud_admin.py pair desktop --url https://sync.example.com
@@ -52,7 +78,7 @@ codex resume -C "C:\Projects\A" "会话 ID"
 
 ## 数据和服务维护
 
-设备登记和 SQLite 位于 `coordinator-data` 持久卷。容器重启和重建会继续使用原数据。Caddy 的证书数据保存在自己的持久卷中。
+设备登记和 SQLite 位于 `coordinator-data` 持久卷。容器重启和重建会继续使用原数据。Caddy 的证书数据保存在自己的持久卷中。使用 SSH 部署时在以下 Compose 命令中加上 `-f compose.ssh.yaml`，日志只查看 `coordinator` 服务。
 
 ```bash
 docker compose ps

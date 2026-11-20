@@ -1,0 +1,21 @@
+name: lanxi-coordinator
+services:
+  coordinator:
+    extends:
+      file: compose.coordinator.yaml
+      service: coordinator
+    network_mode: host
+    command:
+      - coordination_server.py
+      - --devices
+      - /var/lib/lanxi/devices.json
+      - --database
+      - /var/lib/lanxi/coordination.sqlite3
+      - --host
+      - 127.0.0.1
+      - --no-access-log
+      - --limit-concurrency
+      - "24"
+
+volumes:
+  coordinator-data:

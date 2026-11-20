@@ -109,6 +109,61 @@ class FlowTests(unittest.TestCase):
                 sync_project(self.b, self.url)
             self.assertEqual((self.b / "a.py").read_text(), "conflicting B\n")
 
+    def test_manual_request_checks_next_cycle_and_reuses_existing_clone(self):
+        source_parent = self.root / "source-projects"
+        receiver_parent = self.root / "receiver-projects"
+        source = source_parent / "VSCode" / "A"
+        receiver = receiver_parent / "PyCharm" / "A"
+        source.parent.mkdir(parents=True)
+        receiver.parent.mkdir(parents=True)
+        self.a.rename(source)
+        sync_project(receiver, self.url)
+        flows = []
+        for index, folder in enumerate((source_parent, receiver_parent)):
+            profile = self.root / f"manual-profile-{index}"
+            profile.mkdir()
+            set_project_root(profile, folder)
+            flows.append(PersonalSync(profile, {"exchange": str(self.share), "intervalSeconds": 300}, home=profile / "codex"))
+        sender, destination = flows
+        stop = threading.Event()
+        sender.cycle(stop)
+        (source / "a.py").write_text("manual update\n")
+        memory = Path(".codex/memories/decision.md")
+        (source / memory).parent.mkdir(parents=True)
+        (source / memory).write_text("new memory\n")
+        sender.cycle(stop)
+
+        started = threading.Event()
+        advance = threading.Event()
+        cycle = destination.cycle
+
+        def pending_cycle(signal):
+            if not started.is_set():
+                started.set()
+                advance.wait(10)
+                return None
+            return cycle(signal)
+
+        with patch.object(destination, "cycle", side_effect=pending_cycle):
+            worker = threading.Thread(target=destination.worker, args=(stop,), daemon=True)
+            worker.start()
+            try:
+                self.assertTrue(started.wait(5))
+                requested = destination.request_manual_sync()
+                self.assertIs(requested, destination.request_manual_sync())
+                self.assertFalse(requested.running())
+                advance.set()
+                result = requested.result(timeout=15)
+                self.assertEqual(result["status"], {"example/flow": "已同步"})
+                self.assertTrue(result["memoryChecked"])
+                self.assertEqual((receiver / "a.py").read_text(), "manual update\n")
+                self.assertEqual((receiver / memory).read_text(), "new memory\n")
+                self.assertFalse((receiver_parent / "VSCode" / "A").exists())
+            finally:
+                stop.set()
+                advance.set()
+                worker.join(5)
+
     def test_existing_clone_recovers_newly_allowed_blobs_at_same_commit(self):
         medium = self.a / "medium.dat"
         oversized = self.a / "oversized.dat"

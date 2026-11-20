@@ -6,6 +6,7 @@ import sqlite3
 import sys
 import tempfile
 import time
+from concurrent.futures import Future
 from contextlib import closing
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -140,11 +141,12 @@ def check_diagnostics_pairing(window):
     with (patch.object(monitor, 'config', return_value=settings),
           patch.object(window, 'open_device_pairing') as pair,
           patch('desktop_diagnostics.DiagnosticsDialog.run', autospec=True) as run):
-        test = next(button for button in window.task_panel.findChildren(QPushButton) if button.text() == '测试')
-        pairing = next(button for button in window.task_panel.findChildren(QPushButton) if button.text() == CONNECT_CLOUD)
-        QTest.mouseClick(pairing, Qt.MouseButton.LeftButton)
+        names = {button.text() for button in window.task_panel.findChildren(QPushButton)}
+        assert names.isdisjoint({'测试', CONNECT_CLOUD, '合流'})
+        buttons = {button.text(): button for button in window.edge_menu.panel.findChildren(QPushButton)}
+        buttons[CONNECT_CLOUD].click()
         pair.assert_called_once_with(window)
-        QTest.mouseClick(test, Qt.MouseButton.LeftButton)
+        buttons['测试'].click()
         QTest.qWait(30)
         dialog = window.diagnostics
         run.assert_called_once_with(dialog, 'local')
@@ -154,6 +156,28 @@ def check_diagnostics_pairing(window):
         settings['coordination'] = {'url': 'https://example.test'}
         QTest.mouseClick(dialog.self_test, Qt.MouseButton.LeftButton)
         run.assert_called_with(dialog, 'diagnostics')
+        dialog.close()
+
+
+def check_manual_sync(window):
+    from personal_sync import PersonalSync
+
+    flow = PersonalSync(Path('unused-fixture'), {})
+    future = Future()
+    button = next(b for b in window.edge_menu.panel.findChildren(QPushButton) if b.text() == '合流')
+    assert '手动同步' in button.toolTip()
+    with (patch.object(monitor, 'personal_sync', flow), patch.object(flow, 'request_manual_sync', return_value=future) as request):
+        button.click()
+        request.assert_called_once_with()
+        dialog = window.manual_sync_dialog
+        assert dialog.isVisible() and '等待后台' in dialog.body.toPlainText()
+        future.set_running_or_notify_cancel()
+        assert wait_until(lambda: '正在检查' in dialog.body.toPlainText())
+        future.set_result({'connection': '已连接协调服务', 'projects': 2, 'memoryChecked': True,
+                           'status': {'owner/a': '已同步', 'owner/b': '两端修改发生冲突'},
+                           'largeInventory': {'owner/a': {'data.bin': {'localSize': None}}}})
+        assert wait_until(lambda: 'data.bin · 本机缺少' in dialog.body.toPlainText())
+        assert all(text in dialog.body.toPlainText() for text in ('已同步 1 个', '项目记忆已检查', '发生冲突'))
         dialog.close()
 
 
@@ -1170,6 +1194,7 @@ def main():
             check_first_setup(window)
             check_workspace_startup()
             check_diagnostics_pairing(window)
+            check_manual_sync(window)
             check_automatic_pairing(window)
             check_markdown(window, data, args.output)
             check_process_bubbles(window, args.output)

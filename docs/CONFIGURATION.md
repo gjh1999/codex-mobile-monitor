@@ -9,10 +9,12 @@
 | 运行方式 | 根目录 |
 |---|---|
 | 源码 `desktop_app.py` | 内部模块 `monitor.py` 所在目录，即本项目根目录 |
-| R21 Qt 桌面 EXE | `%LOCALAPPDATA%\Lanxi\data` |
+| R21 起的便携 EXE | `%LOCALAPPDATA%\Lanxi\data` |
 | R20 及以前的 EXE | EXE 所在目录 |
 
 各运行方式从对应的数据根目录读取 `local-config.json`。配置须为有效 JSON，支持 UTF-8 BOM。R21 首次可迁移旧版文件。迁移成功后，`desktop-profile.json` 记录原工作区基准，`project-library.json` 保存本机的项目母目录。PyInstaller 的 `_MEIPASS` 用于打包资源。应用由 `desktop_app.py` 或桌面 EXE 启动，`monitor.py` 在进程内提供后台功能。 [升级与首次配置](PORTABLE_CHECK.md#升级与首次配置)
+
+软件内更新安装在 `%LOCALAPPDATA%\Lanxi\versions`，各版本使用同一个用户数据目录。测试报告默认生成于 `%LOCALAPPDATA%\Lanxi\验收报告`。
 
 ## 顶层配置键
 
@@ -62,6 +64,7 @@
 | `local-config.json` | 当前桌面实例的私密配置 |
 | `local-model-api.json` | 自动分组使用的接口地址、模型及由当前 Windows 用户保护的 API 密钥 |
 | `lanxi-groups.sqlite3` | 案头任务、随记和待办的模型分组结果及手动分组 |
+| `lanxi-notebook.sqlite3` | 吉光片羽的随记、待办和同步记录 |
 | `scheduler.sqlite3` | Codex 下次调度、退避、发送预留，以及 `quota_waits` 额度等待/恢复预留 |
 | `managed.sqlite3` | Codex 受管任务注册与配置指纹 |
 | `task-control.sqlite3`、`claude-task-control.sqlite3` | 分客户端的接入、暂停、托管意图和控制操作队列 |

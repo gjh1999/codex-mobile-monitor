@@ -28,6 +28,7 @@ Windows 原生桌面软件，用于集中查看和控制本机 Codex / Claude Co
 
 | 要做的事 | 文档 |
 |---|---|
+| 查看主文档与当前功能入口 | [跨设备开发工作台方案](docs/跨设备开发工作台方案.html#current) |
 | 查找全部说明 | [文档索引](docs/README.md) |
 | 查看最新交付、候选版和剩余验收 | [跨设备方案交付进度](docs/DELIVERY_STATUS.md) |
 | 在云服务器运行设备配对和记忆同步 | [澜汐云协调服务](docs/CLOUD_COORDINATOR.md) |

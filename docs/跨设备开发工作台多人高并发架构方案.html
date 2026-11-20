@@ -103,13 +103,14 @@
       <article aria-label="商业版架构方案">
         <section id="scope">
           <h2>产品与重构范围</h2>
-          <p>商业版以团队为协作单位。工程师和团队 Leader 都拥有个人开发空间，可配对多台设备、在多个独立任务中使用 IDE 和 CLI，通过手机查看自己的运行进度和处理工具请求。团队协作通过工程师主动发布的代码评审单进行。以下为待开发设计。</p>
+          <p><strong>首轮本地开发版已可运行。</strong> 独立的 Java 服务使用开发身份和 H2。工程师与团队 Leader 可管理自己的设备、私有任务和笔记。工程师可导入 Git 差异并送审，Leader 可评论、要求修改或批准某一修订，旧版意见和决定可回查。<a href="https://github.com/gjh1999/lanxi-commercial">商业版仓库与启动说明</a></p>
+          <p>真实设备配对、IDE 和 CLI 执行、手机审批、生产身份认证和容量验收属于后续阶段。团队协作以工程师主动发布的代码评审单为入口，公司层待定。</p>
           <div class="tbl"><table><thead><tr><th scope="col">现有基础</th><th scope="col">商业版的迁移决定</th></tr></thead><tbody>
             <tr><th scope="row">Qt、Web 与 IDE</th><td>复用 React/TypeScript 网页、iPhone 布局和 VS Code / PyCharm 项目活动协议。桌面按兼容 API 过渡，再将常驻代理与原生窗口分开交付，Windows 窗口采用 JavaFX，托盘与安装包独立验收。保留 Codex、Claude Code、「吉光片羽」、键盘操作及减弱动态效果。</td></tr>
             <tr><th scope="row">Python 服务与 SQLite</th><td><code>web_server.py</code> 的个人登录和两秒轮询迁为个人身份与团队成员关系、分页读接口和事件订阅。<code>coordination_server.py</code>、<code>task_control.py</code> 的协调语义迁为 Java 事务。中心状态进入 PostgreSQL，设备端 SQLite 继续缓存待传事件和执行回执。</td></tr>
             <tr><th scope="row">代码、会话与算力</th><td>沿用 Git origin、签名交接清单、线程和设备路径映射。现有 <code>compute_queue.py</code> 已有持久化队列、按固定提交匹配 CPU/GPU、并发领取和完成回执去重，可作为迁移对照。原方案的家庭机成为用户授权的执行节点，云端负责选址与审计，项目程序和原生 CLI 在获准节点运行。</td></tr>
           </tbody></table></div>
-          <p class="source">本机跨盘 CLI 往返、回环协调和 LFS 续传已有记录。团队及个人工作区隔离、代码评审、Java 服务和下列容量目标属于本方案的待交付内容。开发人员可从团队任务表直接进入实现细节。<a href="DELIVERY_STATUS.md">原方案交付进度</a> · <a href="PROJECT_CONTROL.md">项目控制协议</a> · <a href="WEB.md">现有 Web 接口</a> · <a href="跨设备开发工作台方案.html#design">桌面与移动端体验</a> · <a href="#team">工程实施手册</a></p>
+          <p class="source">首版通过了 4 项 HTTP 集成测试和 1 项浏览器流程验证，覆盖私有任务隔离、版本化评审和重启读回。首轮审查记录了补丁材料完整性和评审记录展示的待修项。下文说明从本地版演进到生产部署的目标。<a href="https://github.com/gjh1999/lanxi-commercial">商业版验收与审查记录</a> · <a href="DELIVERY_STATUS.md">个人版交付进度</a> · <a href="#team">工程实施手册</a></p>
         </section>
         <section id="capacity">
           <h2>五万人同时在线意味着多少负载</h2>

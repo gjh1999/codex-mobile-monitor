@@ -8,6 +8,7 @@ import sqlite3
 import subprocess
 import threading
 import time
+from concurrent.futures import Future
 from pathlib import Path
 
 from code_sync import (
@@ -44,6 +45,7 @@ class PersonalSync:
         self.coordination = coordination
         self.pending_settings = None
         self.priority = None
+        self._manual_sync = None
         self.poll_cache = {}
         self.local_state = self.root / ".local" / "personal-sync"
         self.scope = None
@@ -127,6 +129,13 @@ class PersonalSync:
             epoch = self.completed.get(project, 0)
         self.wake.set()
         return epoch
+
+    def request_manual_sync(self):
+        with self.lock:
+            if self._manual_sync is None or self._manual_sync.done():
+                self._manual_sync = Future()
+                self.wake.set()
+            return self._manual_sync
 
     def resolve(self, tid, directory=None, remote=None):
         with self.lock:
@@ -360,7 +369,8 @@ class PersonalSync:
             worker.start()
         for worker in workers:
             worker.join()
-        if store and self.settings.get("memory", True) and not stop.is_set():
+        check_memory = store is not None and self.settings.get("memory", True) and not stop.is_set()
+        if check_memory:
 
             def report(key, error):
                 errors.setdefault(
@@ -386,6 +396,7 @@ class PersonalSync:
                     self.threads = sessions
             finally:
                 mirror.db.close()
+        inventory = None
         if isinstance(store, RemoteRecords) and not stop.is_set():
             from large_inventory import sync_inventory
             try:
@@ -409,19 +420,32 @@ class PersonalSync:
             self.status = errors
             self.connection = connection
             self.task_owners = task_owners
+        return {"connection": connection, "projects": len(specs), "memoryChecked": check_memory,
+                "largeInventory": inventory, "status": errors}
 
     def worker(self, stop):
         interval = max(2, min(300, int(self.settings.get("intervalSeconds", 10))))
         while not stop.is_set():
-            self.wake.clear()
+            with self.lock:
+                self.wake.clear()
+                manual = self._manual_sync
+                if manual is not None and (manual.done() or not manual.set_running_or_notify_cancel()):
+                    manual = None
+            result = None
             try:
-                self.cycle(stop)
+                result = self.cycle(stop)
             except (OSError, ValueError, sqlite3.Error, KeyError, TypeError, subprocess.TimeoutExpired):
                 with self.lock:
                     self.epoch += 1
                     self.status = {"配对": "个人同步暂不可用，请检查项目登记和配对连接"}
                     if self.connection:
                         self.connection = self.status["配对"]
+            if manual is not None:
+                manual.set_result(None if stop.is_set() else result)
             for _ in range(interval * 4):
                 if stop.wait(0.25) or self.wake.is_set():
                     break
+        with self.lock:
+            pending = self._manual_sync
+        if pending is not None:
+            pending.cancel()

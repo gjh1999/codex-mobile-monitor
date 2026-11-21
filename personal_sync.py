@@ -23,7 +23,7 @@ from coordination_client import ControlClient, ControlDenied, PersonalTaskLocks,
 from handoff_sync import atomic_write
 from personal_memory import Mirror, confirm_published_session, pack, read_transcript, safe_path, sync_memories
 from personal_relay import EMPTY, Records, RemoteRecords, digest
-from plain_projects import INDEX as FOLDER_INDEX, RECEIVER, folder_bindings, folder_id
+from plain_projects import folder_bindings, folder_id, folder_index
 from project_library import configured_root, discover
 
 
@@ -430,6 +430,12 @@ class PersonalSync:
             device = store.client.device if isinstance(store, RemoteRecords) else self.scope
             folders, sources = folder_bindings(configured_root(self.root), self.home, store, index,
                                                self.poll_cache, local, self.code_folders, device, errors, stop)
+            if not check_memory:
+                for project, root in folders.items():
+                    if root.is_dir():
+                        marker = folder_index(root, project, source=project in sources)
+                        if not marker.is_file():
+                            atomic_write(marker, pack({}))
         if check_memory:
 
             def report(key, error):
@@ -452,14 +458,9 @@ class PersonalSync:
                         if s["project"] == project
                     }
                     if project in folders:
-                        marker = safe_path(root, FOLDER_INDEX)
                         if not records and not root.is_dir():
                             continue
-                        marker.parent.mkdir(parents=True, exist_ok=True)
-                        if project not in sources:
-                            receiver = safe_path(root, RECEIVER)
-                            if not receiver.exists():
-                                atomic_write(receiver, pack({"folder": project}))
+                        marker = folder_index(root, project, source=project in sources)
                     else:
                         marker = Path(value(root, "rev-parse", "--absolute-git-dir")) / "lanxi-personal-sessions.json"
                     data = pack(records)

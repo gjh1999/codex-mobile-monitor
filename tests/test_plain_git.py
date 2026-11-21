@@ -217,6 +217,16 @@ class PlainGitTests(unittest.TestCase):
             locks["b"].claim(tid, workers["b"].resolve(tid, dest)[0], lambda _: None)
         locks["a"].event(project, ide, "vscode", 2, "close")
         self.assertTrue(locks["b"].claim(tid, project, lambda _: None))
+        (dest / note).write_text("receiver revision")
+        with closing(sqlite3.connect(workers["b"].home / "memories_1.sqlite")) as db, db:
+            db.execute("UPDATE stage1_outputs SET raw_memory=?, source_updated_at=2 WHERE thread_id=?",
+                       ("receiver memory", tid))
+        cycle("b")
+        cycle("a")
+        self.assertEqual((self.project / note).read_text(), "receiver revision")
+        with closing(sqlite3.connect(workers["a"].home / "memories_1.sqlite")) as db:
+            self.assertEqual(db.execute("SELECT raw_memory FROM stage1_outputs WHERE thread_id=?", (tid,)).fetchone(),
+                             ("receiver memory",))
 
     def test_lost_create_response_recovers_own_remote_only(self):
         def drop_after_creation(token, endpoint, data=None):

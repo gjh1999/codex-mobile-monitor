@@ -5,6 +5,7 @@ import json
 import uuid
 from pathlib import Path
 
+from handoff_sync import atomic_write
 from personal_memory import pack, safe_path
 from personal_relay import EMPTY, Changed, digest
 
@@ -19,6 +20,16 @@ EXCLUDED = {"appdata", "node_modules", "__pycache__", "windows", "program files"
 
 def folder_id(relative):
     return ".folder/" + hashlib.sha256(relative.casefold().encode("utf-8")).hexdigest()
+
+
+def folder_index(directory, project, *, source):
+    marker = safe_path(directory, INDEX)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    if not source:
+        receiver = safe_path(directory, RECEIVER)
+        if not receiver.is_file():
+            atomic_write(receiver, pack({"folder": project}))
+    return marker
 
 
 def receiver_placeholder(directory, expected):

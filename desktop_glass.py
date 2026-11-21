@@ -129,8 +129,9 @@ class OceanBackdrop(QWidget):
         self.previous = None
         self.set_fade(1.0)
 
-    def draw_wallpaper(self, painter, blurred=False):
-        bounds = QRectF(self.rect())
+    def draw_wallpaper(self, painter, blurred=False, bounds=None):
+        if bounds is None:
+            bounds = QRectF(self.rect())
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         layer = int(blurred)
         if self.previous:
@@ -149,10 +150,11 @@ class OceanBackdrop(QWidget):
         painter.drawImage(bounds, image, source)
 
     def paintEvent(self, event):
-        painter = QPainter(self)
-        bounds = QRectF(self.rect())
+        self.paint_background(QPainter(self), QRectF(self.rect()))
+
+    def paint_background(self, painter, bounds):
         painter.fillRect(bounds, QColor('#25465e'))
-        self.draw_wallpaper(painter)
+        self.draw_wallpaper(painter, bounds=bounds)
         shade = QLinearGradient(0, 0, 0, 236)
         shade.setColorAt(0, QColor(7, 26, 44, 56))
         shade.setColorAt(.52, QColor(7, 26, 44, 104))

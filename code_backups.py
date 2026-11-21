@@ -89,7 +89,7 @@ class CodeBackups:
         if version == previous:
             return "已备份"
         with tempfile.TemporaryFile() as staged:
-            with ZipFile(staged, "w", ZIP_DEFLATED, compresslevel=3) as archive:
+            with ZipFile(staged, "w", ZIP_DEFLATED, compresslevel=3, strict_timestamps=False) as archive:
                 archive.comment = version.encode("ascii")
                 for name, path, saved in files:
                     if stop.is_set():
@@ -97,6 +97,8 @@ class CodeBackups:
                     if stamp(safe_path(repo, name)) != saved:
                         raise SyncIssue("项目文件正在写入，下一轮将重试云端备份")
                     archive.write(path, name)
+                    if staged.tell() > 1024**3:
+                        raise SyncIssue("代码备份压缩后超过 1 GiB")
                     if stamp(safe_path(repo, name)) != saved:
                         raise SyncIssue("项目文件正在写入，下一轮将重试云端备份")
             size = staged.tell()

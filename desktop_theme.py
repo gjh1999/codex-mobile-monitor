@@ -299,7 +299,7 @@ QPushButton#send { padding:0; border-radius:17px; font-size:18px; }
 QPushButton#send:hover, QPushButton#approvalAllow:hover { background:#055eaa; border-color:#055eaa; }
 QPushButton#send:pressed, QPushButton#approvalAllow:pressed { background:#044e90; }
 QPushButton:disabled, QPushButton#send:disabled, QPushButton#hoverAction:disabled, QPushButton#approvalAllow:disabled { background:rgba(234, 246, 252, 97); color:#507087; border-color:rgba(225, 245, 255, 80); }
-QDialog#approvalDialog, QDialog#lanxiDialog, QMessageBox {
+QDialog#lanxiDialog, QMessageBox {
     background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #eaf7fc,stop:1 #cee5f1);
     color:#24344d;
 }
@@ -314,6 +314,13 @@ QListWidget#wallpaperList::item { padding:7px 8px; border-radius:5px; color:#254
 QListWidget#wallpaperList::item:selected { background:#b8dcec; color:#143b54; }
 QLabel#wallpaperPreview { background:#193b52; color:#e1f1fa; border-radius:9px; }
 QTextBrowser#approvalDetails { background:#e6f2fb; border:1px solid #bfd9ea; border-radius:8px; }
+QLabel#approvalSummary, QLabel#approvalScope { color:#f1faff; }
+QLabel#approvalMeta { color:#24495f; }
+QTreeWidget#approvalQueue { background:transparent; border:0; color:#254459; }
+QTreeWidget#approvalQueue::item { padding:7px 5px; border-bottom:1px solid rgba(73,133,158,40); }
+QTreeWidget#approvalQueue::item:selected { color:#15394c; background:rgba(157, 212, 233, 195); }
+QTreeWidget#approvalQueue QHeaderView::section { color:#23495b; background:rgba(228,246,252,130); border:0; padding:6px 5px; }
+QTreeWidget#approvalQueue QHeaderView { background:transparent; }
 QScrollArea { border:0; background:transparent; }
 QScrollBar:vertical { background:transparent; width:7px; margin:3px 0; }
 QScrollBar::handle:vertical { background:#d0dae9; border-radius:3px; min-height:26px; }

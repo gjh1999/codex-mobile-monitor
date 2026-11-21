@@ -57,10 +57,13 @@ class CodeBackupTests(unittest.TestCase):
             time.sleep(.02)
         self.assertTrue(server.started)
         self.url = f"http://127.0.0.1:{port}"
-        self.reader = CodeBackups(ControlClient({"url": self.url, "device": "laptop"}, "b" * 40))
+        self.reader = self.client("laptop", "b")
         self.flow = PersonalSync(self.root / "desktop", {"intervalSeconds": 300, "memory": False, "projects": [
             {"remote": self.remote, "path": str(self.repo)},
-        ]}, {"url": self.url, "device": "desktop"}, home=self.root / "codex")
+        ]}, {"url": self.url, "device": "desktop", "projects": {}}, home=self.root / "codex")
+
+    def client(self, name, token):
+        return CodeBackups(ControlClient({"url": self.url, "device": name, "projects": {}}, token * 40))
 
     def test_automatic_and_manual_backup_survive_github_failure(self):
         stop = threading.Event()
@@ -91,12 +94,12 @@ class CodeBackupTests(unittest.TestCase):
         with ZipFile(destination) as archive:
             self.assertEqual(set(archive.namelist()), {".gitignore", "code.py", "new.py"})
             self.assertEqual(archive.read("code.py"), b"changed without GitHub\n")
-        other = CodeBackups(ControlClient({"url": self.url, "device": "other"}, "c" * 40))
+        other = self.client("other", "c")
         self.assertEqual(other.list(self.project), [])
         with self.assertRaises(SyncIssue):
             other.download(self.project, "desktop", self.root / "other.zip")
 
-        writer = CodeBackups(ControlClient({"url": self.url, "device": "desktop"}, "a" * 40))
+        writer = self.client("desktop", "a")
         damaged = b"incomplete"
         with patch("code_backup_server.RESERVE", 0), self.assertRaisesRegex(SyncIssue, "格式"):
             writer.open(self.project, method="PUT", data=damaged, size=len(damaged), extra={

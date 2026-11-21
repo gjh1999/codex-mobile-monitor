@@ -1,12 +1,14 @@
 """A single review window for local and workspace approval requests."""
 import json
 
-from PySide6.QtCore import QSignalBlocker, Qt
+from PySide6.QtCore import QRectF, QSignalBlocker, Qt
+from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import (
     QDialog, QHeaderView, QHBoxLayout, QLabel, QPushButton, QTextBrowser,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout,
 )
 
+from desktop_glass import FrostedPanel
 from desktop_theme import configure_text, ui_font
 
 KINDS = {
@@ -37,8 +39,11 @@ class ApprovalQueueDialog(QDialog):
         self.requests = {}
         self.names = {}
         self.items = {}
+        self.sending = False
+        self.backdrop = parent.centralWidget()
         self.setObjectName('approvalDialog')
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
         self.setWindowTitle('待你定夺 · 审批')
         self.setWindowIcon(parent.windowIcon())
         self.setMinimumSize(760, 410)
@@ -50,15 +55,19 @@ class ApprovalQueueDialog(QDialog):
         header = QHBoxLayout()
         layout.addLayout(header)
         self.summary = QLabel()
+        self.summary.setObjectName('approvalSummary')
         self.summary.setFont(ui_font(12, True))
         header.addWidget(self.summary, 1)
         self.scope = QLabel()
-        self.scope.setObjectName('approvalMeta')
+        self.scope.setObjectName('approvalScope')
         header.addWidget(self.scope)
 
         row = QHBoxLayout()
-        row.setSpacing(14)
+        row.setSpacing(7)
         layout.addLayout(row, 1)
+        self.queue_panel = FrostedPanel(self)
+        queue_layout = QVBoxLayout(self.queue_panel)
+        queue_layout.setContentsMargins(10, 9, 10, 10)
         self.queue = QTreeWidget()
         self.queue.setObjectName('approvalQueue')
         self.queue.setAccessibleName('审批请求列表')
@@ -72,11 +81,14 @@ class ApprovalQueueDialog(QDialog):
         self.queue.setColumnWidth(2, 104)
         self.queue.itemChanged.connect(self.update_actions)
         self.queue.currentItemChanged.connect(self.show_selected)
-        row.addWidget(self.queue, 4)
+        queue_layout.addWidget(self.queue)
+        row.addWidget(self.queue_panel, 4)
 
-        details = QVBoxLayout()
+        self.detail_panel = FrostedPanel(self)
+        details = QVBoxLayout(self.detail_panel)
+        details.setContentsMargins(14, 12, 14, 12)
         details.setSpacing(7)
-        row.addLayout(details, 5)
+        row.addWidget(self.detail_panel, 5)
         self.heading = QLabel('审批详情')
         self.heading.setFont(ui_font(13, True))
         details.addWidget(self.heading)
@@ -110,6 +122,20 @@ class ApprovalQueueDialog(QDialog):
         actions.addWidget(close)
         for button in (self.reject_current, self.approve_selected, self.approve_all, close):
             button.setAutoDefault(False)
+        self.show_selected()
+        self.backdrop.transition.valueChanged.connect(self.refresh_glass)
+        self.backdrop.wallpaper_changed.connect(self.refresh_glass)
+
+    def paintEvent(self, event):
+        self.backdrop.paint_background(QPainter(self), QRectF(self.rect()))
+
+    def draw_wallpaper(self, painter, blurred=False):
+        self.backdrop.draw_wallpaper(painter, blurred, QRectF(self.rect()))
+
+    def refresh_glass(self):
+        self.update()
+        self.queue_panel.update()
+        self.detail_panel.update()
 
     def current_token(self):
         item = self.queue.currentItem()
@@ -122,19 +148,20 @@ class ApprovalQueueDialog(QDialog):
         return [token for token in self.eligible_tokens() if self.items[token].checkState(0) == CHECKED]
 
     def update_requests(self, pending, feedback, submitting, workspace):
+        self.sending = bool(submitting)
         requests = {}
         for token, item in {**pending, **{key: row[0] for key, row in feedback.items()}, **submitting}.items():
             item = pending.get(token, item)
             decision = 'sending' if token in submitting else 'queued' if item.get('decisionQueued') else (
                 feedback[token][1] if token in feedback else 'pending')
-            busy = bool(submitting) or decision in ('queued', 'responding')
+            actionable = token in pending and decision not in ('sending', 'queued', 'responding')
             requests[token] = {
                 'method': item['method'], 'client': item.get('client'), 'details': item.get('details') or {},
                 'device': item.get('deviceName') or '本机', 'decision': decision,
-                'canAllow': token in pending and item.get('canAllow', False) and not busy,
-                'canReject': token in pending and not busy,
+                'canAllow': actionable and item.get('canAllow', False),
+                'canReject': actionable,
             }
-        counts = [f'{sum(key in pending and row["decision"] not in ("queued", "sending") for key, row in requests.items())} 项待审批']
+        counts = [f'{sum(row["canReject"] for row in requests.values())} 项待审批']
         waiting = sum(row['decision'] == 'queued' for row in requests.values())
         if waiting:
             counts.append(f'{waiting} 项等待回执')
@@ -147,8 +174,6 @@ class ApprovalQueueDialog(QDialog):
 
         selected = self.current_token()
         checked = set(self.checked_tokens())
-        # During an in-flight batch the buttons are disabled, while unrelated checks remain selected.
-        checked.update(token for token, row in self.items.items() if row.checkState(0) == CHECKED)
         scroll = self.queue.verticalScrollBar().value()
         self.requests = requests
         with QSignalBlocker(self.queue):
@@ -164,7 +189,7 @@ class ApprovalQueueDialog(QDialog):
                 row.setData(0, TOKEN, token)
                 for column in range(3):
                     row.setToolTip(column, row.text(column))
-                if request['canAllow'] or token in pending and pending[token].get('canAllow') and token not in submitting:
+                if request['canAllow']:
                     row.setCheckState(0, CHECKED if token in checked else Qt.CheckState.Unchecked)
                 else:
                     row.setFlags(row.flags() & ~Qt.ItemFlag.ItemIsUserCheckable)
@@ -199,6 +224,6 @@ class ApprovalQueueDialog(QDialog):
 
     def update_actions(self):
         request = self.requests.get(self.current_token(), {})
-        self.reject_current.setEnabled(request.get('canReject', False))
-        self.approve_selected.setEnabled(bool(self.checked_tokens()))
-        self.approve_all.setEnabled(bool(self.eligible_tokens()))
+        self.reject_current.setEnabled(not self.sending and request.get('canReject', False))
+        self.approve_selected.setEnabled(not self.sending and bool(self.checked_tokens()))
+        self.approve_all.setEnabled(not self.sending and bool(self.eligible_tokens()))

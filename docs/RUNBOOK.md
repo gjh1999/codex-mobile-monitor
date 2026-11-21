@@ -55,10 +55,12 @@ if (-not (Test-Path './local-config.json')) {
 & './scripts/build-exe.ps1'
 ```
 
-默认输出为 `release/Lanxi.exe`。临时构建数据及 `.spec` 位于 `build-exe/`。可用其他文件名构建预览包。
+本机 `release/` 只保留两份桌面构建。稳定版是当前私人更新服务已发布并核过摘要的 ZIP；开发版固定为 `release/Lanxi.exe`，由最新待验证源码构建。目前稳定版为 R36，本机开发版基于 `a9bc851`，使用 R36 版本号。下载与配对工具、服务器部署包及本机运行数据另行保留。2026-11-21 整理的旧桌面包和旧解压目录可在 `build-exe/release-archive/20261121/` 找回。
+
+默认开发构建输出为 `release/Lanxi.exe`。临时预览使用独立输出目录。
 
 ```powershell
-& './scripts/build-exe.ps1' -AppName Lanxi-preview
+& './scripts/build-exe.ps1' -AppName Lanxi-preview -OutputDirectory (Join-Path (Get-Location).Path 'build-exe/preview')
 ```
 
 正式便携 ZIP 使用版本化打包命令。`--work` 每次传入一个新目录，`--pycharm` 指向本机用于构建插件的 PyCharm 263 安装目录。
@@ -67,7 +69,7 @@ if (-not (Test-Path './local-config.json')) {
 & './.venv/Scripts/python.exe' -B scripts/build-portable.py --work build-exe/release-candidate --pycharm 'C:\Program Files\JetBrains\PyCharm 2026.3'
 ```
 
-包名与 `portable_update.py` 的版本一致，ZIP 写入 `release/`。构建日志和用于发布的 `windows-release.json` 位于 `--work` 目录。主程序内置验收工具，ZIP 根目录还有简明使用说明及可选 IDE 工具包。将本地验收通过的同一份 ZIP 交发版负责人审查。
+包名与 `portable_update.py` 的版本一致，打包时在独立工作树中执行上述命令，ZIP 写入该工作树的 `release/`。构建日志和用于发布的 `windows-release.json` 位于 `--work` 目录。主程序内置验收工具，ZIP 根目录还有简明使用说明及可选 IDE 工具包。正式发布并核验后，将同一份 ZIP 放入主工作区的 `release/`，将上一份稳定包移至本机归档。开发版沿用固定文件名更新。
 
 ### 发版审查与交接
 
@@ -88,7 +90,7 @@ EXE 已包含 Python 界面依赖，仍需要对应本机 CLI。R21 桌面包的
 以下命令会注册或移除当前用户的计划任务，按需执行：
 
 ```powershell
-& './scripts/install-startup.ps1' -ExecutableName 'Lanxi-Glass-R19-Integrated.exe'
+& './scripts/install-startup.ps1' -ExecutableName 'Lanxi.exe'
 Get-ScheduledTask -TaskName CodexMobileMonitor | Select-Object TaskName, State, Actions
 & './scripts/install-startup.ps1' -Remove
 ```

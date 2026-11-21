@@ -125,7 +125,7 @@ Claude 的“自动推进”由本监控定时器实现：默认关闭，手动�
 
 ## 登录启动与验收
 
-登录时启动这一版可指定 `scripts/install-startup.ps1 -ExecutableName Lanxi-Glass-R19-Integrated.exe`。省略文件名时优先使用 `release/Lanxi.exe`，其次兼容旧桌面 EXE，最后使用源码方式启动。 [登录启动说明](RUNBOOK.md#windows-登录启动)
+登录时启动本机开发版可指定 `scripts/install-startup.ps1 -ExecutableName Lanxi.exe`。省略文件名时优先使用 `release/Lanxi.exe`，其次兼容旧桌面 EXE，最后使用源码方式启动。 [登录启动说明](RUNBOOK.md#windows-登录启动)
 
 Qt smoke 使用虚构会话核验界面按钮和显示。真实模型收发、工具审批往返、系统通知实际展示、重新登录和故障恢复需要在本机另行验收，不能从打包成功或 smoke 通过推断。
 

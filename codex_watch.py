@@ -116,6 +116,8 @@ class SharedCodex(UniversalRPC):
 
     def poll_approvals(self, stop):
         loaded = set(self.call('thread/loaded/list', {}, timeout=3).get('data', []))
+        for thread in self.subscriptions - loaded:
+            self.approvals.dismiss_thread(self, thread)
         self.subscriptions.intersection_update(loaded)
         for thread in sorted(loaded):
             if stop.is_set():

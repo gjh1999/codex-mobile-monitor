@@ -37,6 +37,11 @@ class Approvals:
   with self.lock:
    for v in self.items.values():
     if v['rpc'] is rpc and v['decision'] is None:v['decision']='disconnected'
+ def dismiss_thread(self,rpc,thread):
+  with self.lock:
+   for v in self.items.values():
+    if v['rpc'] is rpc and v['decision'] is None and v['request'].get('params',{}).get('threadId')==thread:
+     v['decision']='resolved'
  def decide(self,token,allow):
   guard=None
   with self.lock:

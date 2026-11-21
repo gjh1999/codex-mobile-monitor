@@ -15,7 +15,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from PySide6.QtCore import QEvent, QMimeData, QPoint, QPointF, QRect, QTimer, Qt, QUrl
-from PySide6.QtGui import QEnterEvent, QFontDatabase, QImage, QMouseEvent, QRawFont, QTextCursor, QTextDocument
+from PySide6.QtGui import QColor, QEnterEvent, QFontDatabase, QImage, QMouseEvent, QRawFont, QTextCursor, QTextDocument
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog, QFrame, QLabel, QLineEdit, QMenu, QMessageBox, QPushButton
 
@@ -31,6 +31,7 @@ from desktop_pairing import CONNECT_CLOUD, PairingDialog, WorkspaceConnectDialog
 from desktop_poetry import COVER_VERSES
 from desktop_qt import MainWindow, choose_workspace_startup
 from desktop_theme import configure_text, message_html, set_reading_html, ui_font
+from desktop_wallpapers import WallpaperDialog, WallpaperLibrary
 from model_groups import Organizer, read_settings
 from reply_log import ReplyLog
 
@@ -481,6 +482,75 @@ def check_model_settings(window, output):
                 organizer.worker.join(3)
 
 
+def check_wallpaper_manager(window, output, root):
+    backdrop = window.centralWidget()
+    first = backdrop.current_entry
+    source_a, source_b = (root / folder / '临海.png' for folder in ('one', 'two'))
+    for path, size, color in ((source_a, (120, 90), '#1c6c81'), (source_b, (90, 120), '#31486b')):
+        path.parent.mkdir()
+        image = QImage(*size, QImage.Format.Format_RGB32)
+        image.fill(QColor(color))
+        assert image.save(str(path))
+    invalid = root / '无法读取.png'
+    invalid.write_bytes(b'not an image')
+    errors = []
+    left = Qt.MouseButton.LeftButton
+
+    def inspect():
+        dialog = QApplication.activeModalWidget()
+        try:
+            assert isinstance(dialog, WallpaperDialog)
+            assert dialog.selected_key() == first.key
+            assert '当前显示' in dialog.info.text() and 'px' in dialog.info.text()
+            assert dialog.location.text() == first.path.name and not dialog.preview.pixmap().isNull()
+            assert dialog.grab().save(str(output / 'wallpaper-manager.png'))
+
+            QTest.mouseClick(dialog.add, left)
+            assert '已添加 2 张' in dialog.status.text() and '1 张无法读取' in dialog.status.text()
+            managed = backdrop.library.images
+            assert (managed / '临海.png').read_bytes() == source_a.read_bytes()
+            assert (managed / '临海 (2).png').read_bytes() == source_b.read_bytes()
+            assert dialog.selected_key() == 'imported/临海.png' and '120 × 90 px' in dialog.info.text()
+            QTest.mouseClick(dialog.show_now, left)
+            assert backdrop.current_entry.key == 'imported/临海.png' and backdrop.rotation.isActive()
+            assert dialog.info.text().endswith('当前显示')
+            QTest.mouseClick(dialog.toggle, left)
+            assert backdrop.current_entry.key == 'imported/临海 (2).png'
+            assert dialog.toggle.text() == '恢复轮换' and (managed / '临海.png').is_file()
+            assert source_a.is_file() and source_b.is_file()
+            QTest.mouseClick(dialog.current, left)
+            assert dialog.selected_key() == backdrop.current_entry.key
+
+            for entry in backdrop.entries:
+                if entry.key not in backdrop.library.hidden:
+                    dialog.reload(entry.key)
+                    QTest.mouseClick(dialog.toggle, left)
+            assert backdrop.current_entry is None and backdrop.current[0].isNull() and not backdrop.rotation.isActive()
+            assert not dialog.current.isEnabled()
+            reloaded = WallpaperLibrary(backdrop.library.assets, root)
+            assert reloaded.hidden == {entry.key for entry in backdrop.entries}
+            assert first.path.is_file()
+
+            dialog.reload(first.key)
+            QTest.mouseClick(dialog.toggle, left)
+            assert backdrop.current_entry == first and not backdrop.rotation.isActive()
+            assert first.key not in WallpaperLibrary(backdrop.library.assets, root).hidden
+        except Exception as error:
+            errors.append(error)
+        finally:
+            if dialog is not None:
+                dialog.reject()
+
+    selected_files = [str(path) for path in (source_a, source_b, invalid)]
+    with (patch('desktop_wallpapers.QFileDialog.getOpenFileNames', return_value=(selected_files, '')),
+          patch('desktop_glass.motion_enabled', return_value=False)):
+        QTimer.singleShot(0, inspect)
+        action = next(action for action in window.edge_menu.menus['设置'].actions() if action.text() == '壁纸管理…')
+        action.trigger()
+    if errors:
+        raise errors[0]
+
+
 def check_client_switch(window, output):
     switch = window.client_switch
     codex, claude, notebook = switch.buttons.values()
@@ -752,7 +822,9 @@ def main():
                    controls=codex.snapshot(), claude={'connection': 'connected', 'threads': [
                        {'id': CLAUDE, 'title': 'Claude 运行测试', 'status': {'type': 'active'}}], 'controls': claude.snapshot()})
     try:
-        with patch('desktop_glass.local_wallpapers', return_value=[]), \
+        with tempfile.TemporaryDirectory() as wallpaper_directory, \
+             patch('desktop_glass.WallpaperLibrary', side_effect=lambda assets, _: WallpaperLibrary(assets, Path(wallpaper_directory))), \
+             patch('desktop_glass.local_wallpapers', return_value=[]), \
              patch.object(monitor, 'approvals', approvals), patch.object(monitor, 'controller', codex), patch.object(monitor, 'claude_controller', claude), \
              patch.object(monitor, 'conversation_for', side_effect=lambda *_: copy.deepcopy(data)), \
              patch.object(monitor, 'start_background_service', side_effect=lambda stop: (stop, NoWorkers())):
@@ -1287,6 +1359,7 @@ def main():
                 assert str(project) in window.conversation.toPlainText()
                 monitor.update(indexedProjects=[])
                 window.refresh()
+            check_wallpaper_manager(window, args.output, Path(wallpaper_directory))
             print('Qt smoke passed: Markdown, glass, rotation, hover/focus, approval, dual-client controls, drafts, rename, failure dialogs, Chinese glyphs, layout and tray.')
     finally:
         if window is not None:

@@ -64,7 +64,7 @@
 | `local-config.json` | 当前桌面实例的私密配置 |
 | `local-model-api.json` | 自动分组使用的接口地址、模型及由当前 Windows 用户保护的 API 密钥 |
 | `lanxi-groups.sqlite3` | 案头任务、随记和待办的模型分组结果及手动分组 |
-| `lanxi-notebook.sqlite3` | 吉光片羽的随记、待办和同步记录 |
+| `lanxi-notebook.sqlite3` | 吉光片羽的随记、待办、每日记录历史和同步记录 |
 | `scheduler.sqlite3` | Codex 下次调度、退避、发送预留，以及 `quota_waits` 额度等待/恢复预留 |
 | `managed.sqlite3` | Codex 受管任务注册与配置指纹 |
 | `task-control.sqlite3`、`claude-task-control.sqlite3` | 分客户端的接入、暂停、托管意图和控制操作队列 |

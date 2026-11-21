@@ -101,16 +101,32 @@ def inspect_project(path, overrides):
 
 
 def discover(parent, overrides):
-    def scan(path, within_project=False):
-        independent = (path / ".git").exists()
-        project = inspect_project(path, overrides) if independent or not within_project else None
+    def scan(path):
+        project = inspect_project(path, overrides)
+        git = path / ".git"
+        if project and path != parent and (not git.exists() or has_git_history(git)):
+            return {path: project}
         children = {}
         for child in folders(path):
-            children.update(scan(child, within_project or (project is not None and path != parent)))
-        # A directory containing separate projects acts as their parent, even if it has markers of its own.
+            children.update(scan(child))
         return children or ({path: project} if project else {})
 
     return scan(parent)
+
+
+def has_git_history(git):
+    # Keep embedded checkouts and test fixtures inside an established project out of the library.
+    if git.is_file():
+        return True
+    if any((git / name).exists() for name in ("packed-refs", "reftable")):
+        return True
+    try:
+        head = (git / "HEAD").read_text(encoding="utf-8").strip()
+        if head and not head.startswith("ref:"):
+            return True
+        return any((git / "refs" / "heads").iterdir())
+    except (OSError, UnicodeError):
+        return False
 
 
 class ProjectLibrary:

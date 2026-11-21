@@ -564,6 +564,92 @@ def check_wallpaper_manager(window, output, root):
             fixed.deleteLater()
 
 
+def check_approval_queue(window, output):
+    left = Qt.MouseButton.LeftButton
+    local, peer = Approvals(), Approvals()
+    source, target = CodexWorkspace(local), CodexWorkspace(peer)
+    remote_rpc = FakeApprovalClient()
+    remote_rpc.client_type = 'codex'
+    local_rpc = FakeApprovalClient()
+    method = 'item/commandExecution/requestApproval'
+    tokens = [
+        'remote:home-pc:' + peer.add(remote_rpc, {
+            'id': number, 'method': method, 'params': {'cwd': 'D:/Projects/Vision', **details},
+        })
+        for number, details in ((101, {'command': 'python -m unittest'}),
+                                (102, {'command': 'git status --short'}), (103, {}))
+    ]
+
+    with tempfile.TemporaryDirectory() as directory:
+        records = Records(Path(directory) / 'records.sqlite3', 'test-workspace')
+
+        def store(device):
+            return SimpleNamespace(client=SimpleNamespace(device=device), index=records.index,
+                                   read=records.read, put=records.put)
+
+        requester, origin = store('this-pc'), store('home-pc')
+
+        def publish_peer():
+            with patch('codex_workspace.socket.gethostname', return_value='家庭工作站'):
+                target.sync(origin)
+
+        def sync_receipts():
+            source.sync(requester)
+            publish_peer()
+            source.sync(requester)
+            window.refresh_approvals()
+
+        prior_scope = monitor.snapshot().get('codexWorkspaceWatch', 'local')
+        window._approval_feedback.clear()
+        with patch.object(monitor, 'approvals', local), patch.object(monitor, 'workspace_codex', source):
+            try:
+                monitor.update(codexWorkspaceWatch='connected')
+                publish_peer()
+                source.sync(requester)
+                window.refresh_approvals()
+                dialog = window.approval_dialog
+                assert dialog is not None and dialog.isVisible() and len(dialog.items) == 3
+                assert isinstance(dialog.queue_panel, FrostedPanel) and isinstance(dialog.detail_panel, FrostedPanel)
+                assert dialog.checked_tokens() == [] and not dialog.approve_selected.isEnabled()
+                assert '家庭工作站' in dialog.meta.text() and 'D:/Projects/Vision' in dialog.meta.text()
+                assert dialog.details.toPlainText() == 'python -m unittest'
+                assert tokens[2] not in dialog.eligible_tokens()
+                dialog.items[tokens[0]].setCheckState(0, Qt.CheckState.Checked)
+                assert dialog.grab().save(str(output / 'approval-queue.png'))
+                QTest.mouseClick(dialog.approve_selected, left)
+                assert wait_until(lambda: dialog.items[tokens[0]].text(2) == '等待回执')
+                assert not remote_rpc.sent and dialog.items[tokens[1]].text(2) == '待审批'
+                assert dialog.grab().save(str(output / 'approval-awaiting-receipt.png'))
+                sync_receipts()
+                assert remote_rpc.sent == [{'id': 101, 'result': {'decision': 'accept'}}]
+                assert dialog.items[tokens[0]].text(2) == '已同意' and window.approval_dialog is dialog
+
+                local_token = local.add(local_rpc, {'id': 104, 'method': method, 'params': {'command': 'npm test'}})
+                window.refresh_approvals()
+                assert window.approval_dialog is dialog and dialog.items[local_token].text(1) == '本机'
+                assert set(dialog.eligible_tokens()) == {tokens[1], local_token}
+                QTest.mouseClick(dialog.approve_all, left)
+                assert wait_until(lambda: dialog.items[tokens[1]].text(2) == '等待回执')
+                assert local_rpc.sent == [{'id': 104, 'result': {'decision': 'accept'}}]
+                assert [message['id'] for message in remote_rpc.sent] == [101]
+                sync_receipts()
+                assert [message['id'] for message in remote_rpc.sent] == [101, 102]
+                assert dialog.items[tokens[1]].text(2) == '已同意' and not dialog.approve_all.isEnabled()
+                dialog.queue.setCurrentItem(dialog.items[tokens[2]])
+                assert dialog.reject_current.isEnabled()
+                QTest.mouseClick(dialog.reject_current, left)
+                assert wait_until(lambda: dialog.items[tokens[2]].text(2) == '等待回执')
+                sync_receipts()
+                assert remote_rpc.sent[-1] == {'id': 103, 'result': {'decision': 'decline'}}
+                assert dialog.items[tokens[2]].text(2) == '已拒绝' and window.stat_pending.text() == '0'
+            finally:
+                if window.approval_dialog is not None:
+                    window.approval_dialog.reject()
+                monitor.update(codexWorkspaceWatch=prior_scope)
+                window._approval_feedback.clear()
+        window.refresh_approvals()
+
+
 def check_client_switch(window, output):
     switch = window.client_switch
     codex, claude, notebook = switch.buttons.values()
@@ -1264,7 +1350,7 @@ def main():
             window.refresh()
             QTest.qWait(70)
             dialog = window.approval_dialog
-            assert dialog and dialog.isVisible() and window._review_token == token
+            assert dialog and dialog.isVisible() and dialog.current_token() == token
             assert any('D:/Projects/Demo' in node.text() for node in dialog.findChildren(QLabel))
             dialog.grab().save(str(args.output / 'approval-desktop.png'))
             dialog.reject()
@@ -1273,10 +1359,13 @@ def main():
             QTest.mouseClick(window.review_button, Qt.MouseButton.LeftButton)
             QTest.qWait(30)
             assert window.approval_dialog is not None
-            allow = window.approval_dialog.findChild(QPushButton, 'approvalAllow')
-            QTest.mouseClick(allow, Qt.MouseButton.LeftButton)
+            dialog = window.approval_dialog
+            dialog.items[token].setCheckState(0, Qt.CheckState.Checked)
+            QTest.mouseClick(dialog.approve_selected, Qt.MouseButton.LeftButton)
+            assert wait_until(lambda: dialog.items[token].text(2) == '已同意')
             assert approvals_rpc.sent == [{'id': 37, 'result': {'decision': 'accept'}}]
-            assert window.approval_dialog is None and window.stat_pending.text() == '0'
+            assert window.stat_pending.text() == '0'
+            dialog.reject()
             for expected_index, name in ((1, 'big-sur'), (2, 'catalina')):
                 ocean.rotation.timeout.emit()
                 QTest.qWait(700)
@@ -1323,12 +1412,15 @@ def main():
             QTest.qWait(45)
             assert window.approval_dialog is not None and window.approval_dialog.isVisible()
             assert not window.isVisible()
-            reject = next(button for button in window.approval_dialog.findChildren(QPushButton) if button.text() == '拒绝')
-            QTest.mouseClick(reject, Qt.MouseButton.LeftButton)
+            dialog = window.approval_dialog
+            QTest.mouseClick(dialog.reject_current, Qt.MouseButton.LeftButton)
+            assert wait_until(lambda: window.stat_pending.text() == '0')
             assert approvals_rpc.sent[-1] == {'id': 38, 'result': {'decision': 'decline'}}
+            dialog.reject()
             window.show_window()
             QTest.qWait(30)
             assert window.isVisible(), 'The tray action must reopen the workspace'
+            check_approval_queue(window, args.output)
             check_codex_slash(window, codex, args.output)
             check_notebook(window, args.output)
             check_edge_menu(window, args.output)

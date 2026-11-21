@@ -2,6 +2,14 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+<a id="r35-owner-review"></a>
+## 2026-11-21 R35 负责人补审
+
+- 输入为 Windows 工作区 `15e4d00` 及已发布的私人 ZIP。以项目虚拟环境执行 `python -B -m unittest discover -s tests -t . -p "test_*.py" -q`，207.576 秒运行 259 项，257 项通过、2 项跳过。输出中有 SQLite 连接资源警告和 Starlette 弃用警告。
+- 同一环境执行 `python -B tests/smoke_desktop.py --output build-exe/verification/release-review-r35-20261121/qt`，Qt 源码交互通过。集中审批、壁纸管理和每日记录的截图在该独立目录；Qt 总耗时未测量。
+- 本轮重新计算服务器及本地 ZIP 的 SHA-256，并用 `ZipFile.testzip()` 检查本地包。通过 PyInstaller 的 `CArchiveReader` 读取 ZIP 中 EXE 的 PYZ，比对送审源码编译出的代码对象。审批窗口及主窗口与 `d4361ee` 匹配，其余抽查结果及两项退修见[补审单](../DELIVERY_STATUS.md#r35-review)。
+- 用 `python -B build-exe/verification/release-review-r35-20261121/live_readonly.py` 从本机通过两套配对身份查询生产 HTTPS；两者均可看到 R35 更新清单、读取备份列表。现场实体双机、真实审批往返及此轮实包界面交互待验收。
+
 ## 2026-11-21 R35 GitHub 与服务器代码备份
 
 - 以已发布的 R34 为基线。连接私有协调服务时，自动同步和手动「合流」均执行 GitHub 同步与服务器备份，分别报告结果。服务器按项目和设备保存最新的校验成功 ZIP。恢复工作流从「跨机接续」下载 ZIP。GitHub 失败时仍可备份本机已保存的有效文件。

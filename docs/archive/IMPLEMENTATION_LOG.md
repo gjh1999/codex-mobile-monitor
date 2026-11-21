@@ -7,6 +7,7 @@
 - 以 R34 的随记、待办和逐条同步格式为基线。左栏新增三个分类的圆角矩形滑块，复用工作台顶部的点击、拖动、回位与系统减弱动画逻辑。「每日记录」按本机日期将当日随记和待办合在同一页。未完成待办继续留在待办列表，跨天变更时保留旧值，复用已有个人同步存储传递历史。
 - Windows、Python 3.14.7、PySide6 6.12.0。执行 `.venv\Scripts\python.exe -B -m unittest tests.test_notebook_sync -v`，2 项通过，覆盖旧库、跨天修改与办结、两套临时数据库的逐条同步和重复同步。
 - 执行 `.venv\Scripts\python.exe -B tests/smoke_desktop.py --output build-exe/verification/notebook-daily-20261121/run-02`。验证点击和拖动滑块、每日列表去重、只读日期页、未完成待办续留、临界日期刷新及顶部工作区切换。首次测试在虚拟跨日结束后未还原时钟，后续步骤访问了已清理的测试数据库。修正隔离并复跑通过。新截图在 `run-02/daily-records-desktop.png`，总耗时未单独记录。便携包与两台实体电脑待验收。 [使用说明](../DESKTOP.md#吉光片羽)
+- 整仓 `unittest discover -s tests -t . -p 'test_*.py' -q` 运行 254 项，用时 230.137 秒，跳过 2 项。退出测试的旧桩未接收 R33 新增的工作区参数，三个退出场景触发同一参数错误。更新测试桩后，重跑 `tests.test_desktop_shutdown tests.test_notebook_sync` 的 3 项测试全部通过，用时 2.764 秒。
 
 ## 2026-11-20 R34 顶栏整理与手动同步
 

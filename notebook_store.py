@@ -13,11 +13,11 @@ PREFIX = "notebook/"
 HISTORY_PREFIX = "notebook-history/"
 
 
-def local_day(stamp):
+def utc_stamp(stamp):
     instant = datetime.fromisoformat(stamp)
     if instant.tzinfo is None:
         instant = instant.replace(tzinfo=timezone.utc)
-    return instant.astimezone().date()
+    return instant
 
 
 def pack(entry):
@@ -103,6 +103,7 @@ class NotebookStore:
 
     def daily_entries(self, day):
         with closing(sqlite3.connect(self.path)) as db:
+            db.execute("BEGIN")
             entries = {}
             rows = db.execute("""
                 SELECT uuid, data FROM notebook_history
@@ -117,7 +118,7 @@ class NotebookStore:
             """, (day,))
             for key, *entry in rows:
                 entries[key] = tuple(entry)
-            return sorted(entries.values(), key=lambda entry: entry[4])
+            return sorted(entries.values(), key=lambda entry: utc_stamp(entry[4]))
 
     def save(self, kind, entry_id, body, *, expected=None):
         with self.transaction() as db:
@@ -147,7 +148,7 @@ class NotebookStore:
             return updated
 
     def remember_previous_day(self, db, entry_id, entry, updated):
-        if local_day(entry[4]) == local_day(updated):
+        if utc_stamp(entry[4]).astimezone().date() == utc_stamp(updated).astimezone().date():
             return False
         row = db.execute("SELECT uuid FROM notebook_sync WHERE entry=?", (entry_id,)).fetchone()
         if row is None:

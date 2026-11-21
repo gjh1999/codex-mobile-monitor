@@ -4,6 +4,7 @@ import tempfile
 import threading
 import unittest
 from contextlib import closing
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 
 from notebook_store import NotebookStore, sync_notebook
@@ -65,3 +66,34 @@ class NotebookSyncTests(unittest.TestCase):
         self.assertNotEqual(local_saved, other_id)
         self.assertIn("编辑区草稿", {row[2] for row in b.entries("todo")})
         self.assertTrue(all(isinstance(json.loads(self.relay.read(key)), list) for key in self.relay.index()))
+
+    def test_daily_record_retains_previous_text_and_todo_state_after_sync(self):
+        book = NotebookStore(self.a / "lanxi-notebook.sqlite3")
+        today = date.today()
+        yesterday = today - timedelta(days=1)
+        before = datetime.combine(yesterday, time(12)).astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        with book.transaction() as db:
+            note = book.insert(db, ("note", "旧题", "昨天的笔记", 0, before, None))
+            todo = book.insert(db, ("todo", "", "跨天待办", 0, before, None))
+            book.insert(db, ("todo", "", "昨天就完成", 1, before, None))
+
+        self.assertEqual(book.daily_dates(), [yesterday.isoformat()])
+        self.assertFalse(book.entries("note", today=today.isoformat()))
+        self.assertEqual([row[0] for row in book.entries("todo", today=today.isoformat())], [todo])
+        book.save("note", note, "今天的笔记")
+        book.set_filed("todo", todo, True)
+        self.assertEqual(book.daily_dates(), [today.isoformat(), yesterday.isoformat()])
+        self.assertEqual({entry[1:4] for entry in book.daily_entries(yesterday.isoformat())}, {
+            ("旧题", "昨天的笔记", 0), ("", "跨天待办", 0), ("", "昨天就完成", 1),
+        })
+        self.assertEqual({entry[2:4] for entry in book.daily_entries(today.isoformat())}, {
+            ("今天的笔记", 0), ("跨天待办", 1),
+        })
+        self.sync(self.a)
+        self.assertTrue(self.sync(self.b))
+        other = NotebookStore(self.b / book.path.name)
+        self.assertEqual(other.daily_dates(), book.daily_dates())
+        for day in book.daily_dates():
+            self.assertCountEqual(other.daily_entries(day), book.daily_entries(day))
+        self.assertFalse(self.sync(self.b))
+        self.assertEqual(sum(key.startswith("notebook-history/") for key in self.relay.index()), 2)

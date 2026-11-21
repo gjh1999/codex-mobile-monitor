@@ -391,7 +391,9 @@ def verify_checkout(repo, identity):
         or repo.resolve() != Path(value(repo, "rev-parse", "--show-toplevel")).resolve()
     ):
         raise SyncIssue("本机目录已存在，且不是登记的仓库")
-    origin = value(repo, "config", "--get", "remote.origin.url")
+    origin = run(repo, "config", "--get", "remote.origin.url", check=False).stdout.decode().strip()
+    if not origin:
+        raise SyncIssue("本机仓库未配置 origin")
     if github_id(origin) != identity and github_id(value(repo, "remote", "get-url", "origin")) != identity:
         raise SyncIssue("本机 origin 与登记的项目不一致")
 
@@ -457,7 +459,9 @@ def sync_project(repo, remote, branch=None, *, memory_subdir=".codex/memories"):
         )
     ):
         raise SyncIssue("等待当前 Git 操作结束")
-    local = value(repo, "symbolic-ref", "--short", "HEAD")
+    local = run(repo, "symbolic-ref", "--quiet", "--short", "HEAD", check=False).stdout.decode().strip()
+    if not local:
+        raise SyncIssue("本机未检出分支，请切回登记分支")
     selected, tip = remote_tip(repo, "origin", branch)
     if selected != local:
         raise SyncIssue("本机处于其他分支，保留当前工作区")

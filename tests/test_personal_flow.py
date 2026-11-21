@@ -168,6 +168,11 @@ class FlowTests(unittest.TestCase):
     def test_invalid_registration_does_not_block_projects_under_git_library(self):
         parent = self.a.parent
         (parent / ".git").mkdir()
+        embedded = self.a / "vendor" / "fixture"
+        embedded.mkdir(parents=True)
+        git(embedded, "init", "-b", "main")
+        git(embedded, "remote", "add", "origin", "https://github.com/example/vendor.git")
+        (self.a / ".git" / "info" / "exclude").write_text("/vendor/\n", encoding="utf-8")
         set_project_root(self.root, parent)
         flow = PersonalSync(self.root, {"projects": [
             {"remote": "https://github.com/example/invalid.git", "path": "relative/path"},

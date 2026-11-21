@@ -1389,14 +1389,14 @@ def main():
                 'id': 37, 'method': 'item/commandExecution/requestApproval',
                 'params': {'threadId': CLAUDE, 'cwd': 'D:/Projects/Demo', 'command': 'npm run test'},
             })
-            window.refresh()
-            QTest.qWait(70)
+            window.refresh_approvals()
             dialog = window.approval_dialog
             assert dialog and dialog.isVisible() and dialog.current_token() == token
+            assert dialog.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
             assert any('D:/Projects/Demo' in node.text() for node in dialog.findChildren(QLabel))
             dialog.grab().save(str(args.output / 'approval-desktop.png'))
             dialog.reject()
-            window.refresh()
+            window.refresh_approvals()
             assert window.approval_dialog is None and not approvals_rpc.sent
             QTest.mouseClick(window.review_button, Qt.MouseButton.LeftButton)
             QTest.qWait(30)
@@ -1447,19 +1447,29 @@ def main():
             assert window.send_button.isEnabled()
             window.close()
             assert not window.isVisible() and not window.stop.is_set(), 'Closing should keep workers in the tray'
+            window.timer.stop()
             approvals.add(approvals_rpc, {
                 'id': 38, 'method': 'item/commandExecution/requestApproval', 'params': {'command': 'npm run test'},
             })
-            window.refresh()
-            QTest.qWait(45)
-            assert window.approval_dialog is not None and window.approval_dialog.isVisible()
+            assert wait_until(lambda: window.approval_dialog is not None and window.approval_dialog.isVisible())
             assert not window.isVisible()
             dialog = window.approval_dialog
+            dialog.hide()
+            next_token = approvals.add(approvals_rpc, {
+                'id': 39, 'method': 'item/commandExecution/requestApproval', 'params': {'command': 'git status'},
+            })
+            assert wait_until(lambda: dialog.isVisible() and next_token in dialog.items)
+            assert window.approval_dialog is dialog
+            QTest.mouseClick(dialog.reject_current, Qt.MouseButton.LeftButton)
+            assert wait_until(lambda: window.stat_pending.text() == '1')
+            assert approvals_rpc.sent[-1] == {'id': 38, 'result': {'decision': 'decline'}}
+            dialog.queue.setCurrentItem(dialog.items[next_token])
             QTest.mouseClick(dialog.reject_current, Qt.MouseButton.LeftButton)
             assert wait_until(lambda: window.stat_pending.text() == '0')
-            assert approvals_rpc.sent[-1] == {'id': 38, 'result': {'decision': 'decline'}}
+            assert approvals_rpc.sent[-1] == {'id': 39, 'result': {'decision': 'decline'}}
             dialog.reject()
             window.show_window()
+            window.timer.start(1000)
             QTest.qWait(30)
             assert window.isVisible(), 'The tray action must reopen the workspace'
             check_codex_slash(window, codex, args.output)

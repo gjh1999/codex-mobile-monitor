@@ -72,6 +72,16 @@ class CodexWorkspace:
                     for token, row in self.remote.items()
                     if row['expires'] > now and row['liveUntil'] > now]
 
+    def device_name(self, device):
+        with self.lock:
+            peer = self.peers.get(device)
+        if peer:
+            row = peer[1]
+            name = row.get('name')
+            if recent(row.get('time'), self.clock(), LIVE) and isinstance(name, str) and name.strip():
+                return name.strip()[:80]
+        return device
+
     def decide(self, token, allow):
         now = self.clock()
         with self.lock:

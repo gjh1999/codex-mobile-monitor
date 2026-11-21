@@ -1728,10 +1728,9 @@ class MainWindow(QMainWindow):
             self.launch_project(self._project_directory)
 
     def request_project(self, project):
-        owners = monitor.personal_sync.snapshot().get('taskOwners') or {}
-        holder = (owners.get('projects') or {}).get(project)
-        if holder and holder != owners.get('device'):
-            self.control_message.setText('其他设备正在使用该项目，当前仅可查看。')
+        blocked = self.project_occupancy_message(project=project)
+        if blocked:
+            self.control_message.setText(blocked)
             return
         self._pending_open = project, monitor.personal_sync.request(project)
         self.control_message.setText('正在后台同步 '+project+'，完成后打开 VS Code')
@@ -1852,9 +1851,11 @@ class MainWindow(QMainWindow):
                 self.message_edit.show_slash()
                 return
         target = self.selected_thread if tid is None else tid
-        if action != 'create_test' and self.other_task_owner(target):
-            self.control_message.setText('其他设备正在使用该项目，当前仅可查看。')
-            return
+        if action != 'create_test':
+            blocked = self.project_occupancy_message(target)
+            if blocked:
+                self.control_message.setText(blocked)
+                return
         if target and target.startswith(ENTRY_PREFIX) and action != 'create_test':
             return
         if action != 'create_test' and not target:
@@ -1944,30 +1945,41 @@ class MainWindow(QMainWindow):
                 message_hint = '已暂泊，点「续航」后即可发送。'
         else:
             message_hint = '选择案头任务执舟后即可发送。'
-        self.message_hint.setText(message_hint)
-        if self.other_task_owner(self.selected_thread):
+        blocked = self.project_occupancy_message(self.selected_thread)
+        buttons['attach'].setToolTip(blocked or '接入任务')
+        if blocked:
             for name in ('attach', 'pause', 'resume', 'manage', 'unmanage', 'handoff', 'open_project'):
                 buttons[name].setEnabled(False)
-            self.message_hint.setText('其他设备正在使用该项目，当前仅可查看。')
             allowed = False
+        self.message_hint.setText(blocked or message_hint)
         self.send_button.setEnabled(allowed)
         self.check_operation_results(controls)
 
-    def other_task_owner(self, thread):
+    def project_occupancy_message(self, thread=None, *, project=None):
         flow = monitor.personal_sync
-        if self.client != 'codex' or not thread or not flow:
+        if self.client != 'codex' or not (thread or project) or not flow:
             return None
         view = flow.snapshot()
         state = view.get('taskOwners')
         if not state:
             return None
-        session = view['sessions'].get(thread, {})
-        item = self.task_items.get(thread)
-        cwd = item.data(0, TASK_DIRECTORY_ROLE) if isinstance(item, QTreeWidgetItem) else None
-        mapping = flow.resolve(thread, cwd)
-        project = session.get('project') or (mapping[0] if mapping else None)
-        owner = state['tasks'].get(thread) or state['projects'].get(project)
-        return owner if owner != state['device'] else None
+        task_owner = state['tasks'].get(thread)
+        if task_owner and task_owner != state['device']:
+            name = monitor.workspace_codex.device_name(task_owner)
+            return f'{name} 持有此会话。请在该电脑的澜汐中选择此会话并点击「交还任务」。'
+        if project is None:
+            item = self.task_items.get(thread)
+            cwd = item.data(0, TASK_DIRECTORY_ROLE) if isinstance(item, QTreeWidgetItem) else None
+            mapping = flow.resolve(thread, cwd)
+            project = mapping[0] if mapping else None
+        owner = state['projects'].get(project)
+        if not owner or owner == state['device']:
+            return None
+        name = monitor.workspace_codex.device_name(owner)
+        if any(state['tasks'].get(tid) == owner and session.get('project') == project
+               for tid, session in view['sessions'].items()):
+            return f'{name} 持有此项目的其他会话。请在该电脑的澜汐中交还该项目的任务。'
+        return f'{name} 正在使用此项目。请在该电脑关闭项目的 IDE 窗口，或在澜汐中交还任务。'
 
     def render_guard_quota(self, snap):
         connection = '已连接' if snap.get('connection') == 'connected' else '连接待检查'

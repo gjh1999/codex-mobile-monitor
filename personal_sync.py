@@ -107,9 +107,32 @@ class PersonalSync:
         self.wake.set()
 
     def task_locks(self):
-        if self.coordination and not self.settings.get("exchange") and not self.settings.get("codeOnly"):
-            return PersonalTaskLocks(ControlClient(self.coordination, device_token(self.coordination)))
+        with self.lock:
+            settings, coordination = self.pending_settings or (self.settings, self.coordination)
+        if coordination and not settings.get("exchange") and not settings.get("codeOnly"):
+            return PersonalTaskLocks(ControlClient(coordination, device_token(coordination)))
         return None
+
+    def watch_task_owners(self, stop):
+        from ide_activity import close_queue, flush_closes
+
+        outbox = close_queue(self.root)
+        while not stop.is_set():
+            try:
+                locks = self.task_locks()
+                owners = None
+                if locks:
+                    try:
+                        flush_closes(outbox, locks)
+                    except sqlite3.Error:
+                        pass
+                    owners = {"device": locks.client.device, **locks.request()}
+                with self.lock:
+                    if not stop.is_set():
+                        self.task_owners = owners
+            except (ControlDenied, OSError, ValueError, KeyError, TypeError):
+                pass
+            stop.wait(3)
 
     def code_backups(self):
         if self.coordination and not self.settings.get("exchange") and not self.settings.get("codeOnly"):
@@ -356,7 +379,6 @@ class PersonalSync:
         store, index = None, {}
         cloud = self.coordination and not self.settings.get("exchange") and not self.settings.get("codeOnly")
         connection = None
-        task_owners = None
         try:
             store = self.store()
             index = store.index() if store else {}
@@ -371,7 +393,7 @@ class PersonalSync:
             store = None
             local, specs = self.bindings(None, {}, cached, published, errors, untrusted)
         if connection == "已连接协调服务":
-            self._phase("正在检查随记与项目占用")
+            self._phase("正在同步随记")
             try:
                 from notebook_store import sync_notebook
                 changed, notebook_errors = sync_notebook(self.root, store, index, stop)
@@ -382,14 +404,6 @@ class PersonalSync:
                     errors["吉光片羽"] = notebook_errors[0]
             except (ValueError, OSError, sqlite3.Error):
                 errors["吉光片羽"] = "随记暂不可同步，后台将重试"
-            try:
-                from ide_activity import close_queue, flush_closes
-                locks = PersonalTaskLocks(store.client)
-                flush_closes(close_queue(self.root), locks)
-                owners = locks.request()
-                task_owners = {"device": store.client.device, **owners}
-            except ControlDenied:
-                pass
         if store:
             for file, data in ((catalog, pack(specs)), (preferences, pack(published))):
                 if not file.is_file() or file.read_bytes() != data:
@@ -579,7 +593,6 @@ class PersonalSync:
             self.status = errors
             self.backup_status = backup_status
             self.connection = connection
-            self.task_owners = task_owners
         return {"connection": connection, "projects": len(specs), "memoryChecked": check_memory,
                 "untrustedGit": sorted(map(str, untrusted), key=str.casefold),
                 "largeInventory": inventory, "status": errors,

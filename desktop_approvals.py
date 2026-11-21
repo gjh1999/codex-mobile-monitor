@@ -2,9 +2,9 @@
 import json
 
 from PySide6.QtCore import QRectF, QSignalBlocker, Qt
-from PySide6.QtGui import QPainter
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
-    QDialog, QHeaderView, QHBoxLayout, QLabel, QPushButton, QTextBrowser,
+    QDialog, QHeaderView, QHBoxLayout, QLabel, QPushButton, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTextBrowser,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout,
 )
 
@@ -31,6 +31,23 @@ CHECKED = Qt.CheckState.Checked
 
 def approval_status(decision):
     return STATUS.get(decision, '结果未确认')
+
+
+class ApprovalCheckDelegate(QStyledItemDelegate):
+    def paint(self, painter, option, index):
+        super().paint(painter, option, index)
+        if index.column() != 0 or index.data(Qt.ItemDataRole.CheckStateRole) != CHECKED.value:
+            return
+        item = QStyleOptionViewItem(option)
+        self.initStyleOption(item, index)
+        checkbox = item.widget.style().subElementRect(QStyle.SubElement.SE_ItemViewItemCheckIndicator, item, item.widget)
+        x, y = checkbox.center().x(), checkbox.center().y()
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(QColor('#f2faff'), 1.5, cap=Qt.PenCapStyle.RoundCap))
+        painter.drawLine(x - 4, y, x - 1, y + 3)
+        painter.drawLine(x - 1, y + 3, x + 4, y - 3)
+        painter.restore()
 
 
 class ApprovalQueueDialog(QDialog):
@@ -76,6 +93,7 @@ class ApprovalQueueDialog(QDialog):
         self.queue.setHeaderLabels(['请求', '执行设备', '状态'])
         self.queue.setRootIsDecorated(False)
         self.queue.setUniformRowHeights(True)
+        self.queue.setItemDelegate(ApprovalCheckDelegate(self.queue))
         self.queue.setMinimumWidth(352)
         self.queue.header().setStretchLastSection(False)
         self.queue.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
@@ -187,7 +205,7 @@ class ApprovalQueueDialog(QDialog):
                     self.names[token] = self.task_title(token, request)
                 kind = KINDS.get(request['method'], '审批请求')
                 command = request['details'].get('command')
-                preview = ' '.join(command.split())[:160] if isinstance(command, str) else ''
+                preview = ' '.join(command[:320].split())[:160] if isinstance(command, str) else ''
                 caption = preview or f'{kind} · {self.names[token]}'
                 decision = request['decision']
                 status = '缺少操作详情' if decision == 'pending' and not request['canAllow'] else approval_status(decision)

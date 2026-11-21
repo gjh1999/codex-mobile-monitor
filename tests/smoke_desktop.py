@@ -614,7 +614,8 @@ def check_approval_queue(window, output):
                 assert '家庭工作站' in dialog.meta.text() and 'D:/Projects/Vision' in dialog.meta.text()
                 assert dialog.details.toPlainText() == 'python -m unittest'
                 assert tokens[2] not in dialog.eligible_tokens()
-                dialog.items[tokens[0]].setCheckState(0, Qt.CheckState.Checked)
+                QTest.keyClick(dialog.queue, Qt.Key.Key_Space)
+                assert dialog.checked_tokens() == [tokens[0]]
                 assert dialog.grab().save(str(output / 'approval-queue.png'))
                 QTest.mouseClick(dialog.approve_selected, left)
                 assert wait_until(lambda: dialog.items[tokens[0]].text(2) == '等待回执')

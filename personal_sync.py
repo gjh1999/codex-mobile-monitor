@@ -23,7 +23,7 @@ from coordination_client import ControlClient, ControlDenied, PersonalTaskLocks,
 from handoff_sync import atomic_write
 from personal_memory import Mirror, confirm_published_session, pack, read_transcript, safe_path, sync_memories
 from personal_relay import EMPTY, Records, RemoteRecords, digest
-from plain_projects import INDEX as FOLDER_INDEX, folder_bindings
+from plain_projects import INDEX as FOLDER_INDEX, RECEIVER, folder_bindings
 from project_library import configured_root, discover
 
 
@@ -40,6 +40,7 @@ class PersonalSync:
         self.lock = threading.Lock()
         self.projects = {}
         self.folders = {}
+        self.code_folders = set()
         self.threads = {}
         self.status = {}
         self.backup_status = {}
@@ -168,10 +169,18 @@ class PersonalSync:
         local = {}
         parent = configured_root(self.root)
         found = {}
+        self.code_folders.clear()
         if parent and parent.is_dir():
+            from plain_git import managed
             for path in discover(parent, {}):
                 if not (path / ".git").exists():
+                    if any((path / name).is_file() for name in (
+                            "package.json", "pyproject.toml", "Cargo.toml", "go.mod", "CMakeLists.txt", "pom.xml",
+                            "requirements.txt")) or any(path.glob("*.sln")) or any(path.glob("*.slnx")):
+                        self.code_folders.add(path)
                     continue
+                if managed(path):
+                    self.code_folders.add(path)
                 try:
                     remote = value(path, "config", "--get", "remote.origin.url")
                 except (OSError, SyncIssue, subprocess.TimeoutExpired):
@@ -402,7 +411,7 @@ class PersonalSync:
         for worker in workers:
             worker.join()
         check_memory = store is not None and self.settings.get("memory", True) and not stop.is_set()
-        folders = {}
+        folders, sources = {}, {}
         if check_memory:
 
             def report(key, error):
@@ -412,9 +421,12 @@ class PersonalSync:
 
             mirror = Mirror(self.local_state, store, self.poll_cache)
             try:
-                folders = folder_bindings(configured_root(self.root), self.home, store, index,
-                                          self.poll_cache, local.values(), errors, stop)
-                session_roots = {**ready, **{project: (root, ".lanxi") for project, root in folders.items()}}
+                folders, sources = folder_bindings(configured_root(self.root), self.home, store, index,
+                                                   self.poll_cache, local, self.code_folders, self.scope, errors, stop)
+                # Keep the same session namespace when a folder gains a private Git origin.
+                aliased = set(folders.values())
+                session_roots = {project: row for project, row in ready.items() if row[0] not in aliased}
+                session_roots.update({project: (root, ".lanxi") for project, root in folders.items()})
                 sessions = sync_memories(mirror, index, self.home, session_roots, self.poll_cache, report, stop)
                 for project, (root, _) in session_roots.items():
                     records = {
@@ -427,6 +439,10 @@ class PersonalSync:
                         if not records and not marker.is_file():
                             continue
                         marker.parent.mkdir(parents=True, exist_ok=True)
+                        if project not in sources:
+                            receiver = safe_path(root, RECEIVER)
+                            if not receiver.exists():
+                                atomic_write(receiver, pack({"folder": project}))
                     else:
                         marker = Path(value(root, "rev-parse", "--absolute-git-dir")) / "lanxi-personal-sessions.json"
                     data = pack(records)

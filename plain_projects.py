@@ -70,6 +70,8 @@ def folder_bindings(parent, home, store, index, cache, git_projects, code_folder
     for cwd in set(native_directories(home, cache)) | set(code_folders):
         if stop.is_set():
             break
+        if not folder_relative(parent, cwd, allow_git=cwd in code_folders):
+            continue
         cwd = next((p for p in (cwd, *cwd.parents) if p in code_folders), cwd)
         relative = folder_relative(parent, cwd, allow_git=cwd in code_folders)
         if relative and cwd.is_dir():

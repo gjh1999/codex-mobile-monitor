@@ -308,6 +308,8 @@ def cloud_client(data_dir):
 
 
 def project_report(directory, data_dir, emit):
+    from plain_projects import INDEX, folder_id, folder_relative
+    from project_library import configured_root
     check(directory.is_dir(), "所选项目目录不存在。")
     base = Path(sys._MEIPASS) if getattr(sys, "frozen", False) else Path(__file__).resolve().parents[1]
     script = base / "scripts" / "诊断项目会话.cmd"
@@ -322,6 +324,13 @@ def project_report(directory, data_dir, emit):
                             timeout=180, creationflags=subprocess.CREATE_NO_WINDOW)
     emit("本机项目与会话清点", "failed" if result.returncode else "passed",
          (result.stdout + result.stderr).strip())
+    parent = configured_root(data_dir)
+    relative = folder_relative(parent, directory)
+    if (directory / INDEX).is_file() and parent and directory != parent and directory.is_relative_to(parent):
+        relative = directory.relative_to(parent).as_posix()
+    if relative:
+        emit("普通项目映射", "passed", f"核对相对路径：{relative}")
+        return folder_id(relative)
     if (directory / ".git").exists() and shutil.which("git"):
         origin = run(directory, "config", "--get", "remote.origin.url", check=False)
         if not origin.returncode:
@@ -372,7 +381,7 @@ def main():
             directory = args.project_dir or Path(input("输入本机项目目录：").strip().strip('"'))
             identity = project_report(directory.resolve(), data_dir, emit)
             if args.with_server and not identity:
-                emit("服务器项目比对", "skipped", "该目录未读取到支持的 GitHub origin。")
+                emit("服务器项目比对", "skipped", "未能确定该目录的普通项目映射或 GitHub 仓库名。")
         if mode == "server" or (mode == "project" and args.with_server and identity):
             server_checks(cloud_client(data_dir), emit, project=identity)
         if mode == "local":

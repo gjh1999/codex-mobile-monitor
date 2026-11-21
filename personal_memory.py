@@ -11,12 +11,14 @@ import uuid
 from pathlib import Path, PureWindowsPath
 
 from handoff import (
+    MAX_FILE,
     native_publication_lock,
     session_info,
     session_location,
     session_progress,
 )
 from personal_relay import EMPTY, MAX_RECORD, Changed, digest
+from session_chunks import MANIFESTS, MAX_ENVELOPE, manifest_key, read_manifest, sync_large
 
 
 def windows_reserved(name):
@@ -47,21 +49,21 @@ def safe_path(root, relative):
     return path
 
 
-def read(path):
+def read(path, *, limit=MAX_RECORD - 1):
     if not path.exists():
         return None
-    if not path.is_file() or path.stat().st_size >= MAX_RECORD:
+    if not path.is_file() or path.stat().st_size > limit:
         raise ValueError("文件过大或不是普通文件")
     with path.open("rb") as stream:
-        data = stream.read(MAX_RECORD)
-    if len(data) >= MAX_RECORD:
+        data = stream.read(min(path.stat().st_size, limit) + 1)
+    if len(data) > limit:
         raise ValueError("文件超过同步上限")
     return data
 
 
-def replace(path, expected, data, backups):
+def replace(path, expected, data, backups, *, limit=MAX_RECORD - 1):
     """Keep the exact old content and never overwrite a second editor's new path."""
-    if read(path) != expected:
+    if read(path, limit=limit) != expected:
         raise Changed("本地文件刚刚变化")
     path.parent.mkdir(parents=True, exist_ok=True)
     if expected is not None:
@@ -71,7 +73,7 @@ def replace(path, expected, data, backups):
             with backup.open("xb") as stream:
                 stream.write(expected)
         except FileExistsError:
-            if read(backup) != expected:
+            if read(backup, limit=limit) != expected:
                 raise Changed("本地备份不完整")
     with tempfile.TemporaryDirectory(dir=path.parent, prefix=".lanxi-write-") as scratch:
         old = Path(scratch) / "old"
@@ -81,7 +83,7 @@ def replace(path, expected, data, backups):
         if expected is not None:
             path.rename(old)
         try:
-            if expected is not None and read(old) != expected:
+            if expected is not None and read(old, limit=limit) != expected:
                 raise Changed("保留了写入期间变化的本地文件")
             if data is not None:
                 os.link(staged, path)
@@ -237,10 +239,40 @@ def sync_native_row(mirror, db, key, path, tid, index):
             mirror.db.execute("INSERT OR REPLACE INTO native_memory VALUES(?,?)", (key, revision))
 
 
+def read_transcript(path):
+    return read(path, limit=MAX_FILE)
+
+
+def read_envelope(path):
+    return read(path, limit=MAX_ENVELOPE)
+
+
+def replace_envelope(path, expected, data, backups):
+    replace(path, expected, data, backups, limit=MAX_ENVELOPE)
+
+
+def confirm_published_session(store, session, tid):
+    native = Path(session["path"])
+    key = f"sessions/{session['project']}/{native.name}"
+    index = store.index()
+    data = read_transcript(native)
+    if not data or session_info(data)[0] != tid:
+        return None
+    envelope = pack({"name": native.name, "cwd": session["relative"]}) + b"\n" + data
+    tall = manifest_key(key)
+    if index.get(tall, EMPTY) != EMPTY:
+        spec = read_manifest(store, tall, index[tall])
+        if len(envelope) == spec["size"] and digest(envelope) == spec["sha256"]:
+            return digest(data)
+    elif index.get(key) == digest(envelope):
+        return digest(data)
+    return None
+
+
 def split_session(payload, filename, tid):
     header, transcript = payload.split(b"\n", 1)
     meta = json.loads(header)
-    if meta.get("name") != filename or session_info(transcript)[0] != tid:
+    if len(transcript) > MAX_FILE or meta.get("name") != filename or session_info(transcript)[0] != tid:
         raise ValueError("会话映射与内容不一致")
     return meta["cwd"], transcript
 
@@ -254,9 +286,9 @@ def install_history(home, filename, tid, data, backups):
         state, path, prior = session_progress(home, tid, data, distinguish_ahead=True)
         if state == "missing":
             path = safe_path(home, session_location(filename, tid).as_posix())
-            replace(path, None, data, backups)
+            replace(path, None, data, backups, limit=MAX_FILE)
         elif state == "advance":
-            replace(path, prior, data, backups)
+            replace(path, prior, data, backups, limit=MAX_FILE)
 
 
 def sync_memories(mirror, index, home, projects, poll_cache, report, stop):
@@ -288,7 +320,8 @@ def sync_memories(mirror, index, home, projects, poll_cache, report, stop):
     for project, (root, subdir) in projects.items():
         dest = safe_path(root, subdir)
         roots[project] = dest
-        sync_notes("notes/" + project + "/", dest)
+        if not project.startswith(".folder/"):
+            sync_notes("notes/" + project + "/", dest)
     # Cache unchanged native files; never move an active writer's live database or WAL.
     for path in (home / "sessions").rglob("rollout-*.jsonl"):
         if stop.is_set():
@@ -324,10 +357,10 @@ def sync_memories(mirror, index, home, projects, poll_cache, report, stop):
             cached = poll_cache.get(path)
             if cached == stamp:
                 continue
-            if statinfo.st_size >= MAX_RECORD:
-                report("session/" + tid, ValueError("会话超过同步上限"))
+            if statinfo.st_size > MAX_FILE:
+                report("session/" + tid, ValueError("原生会话超过 64 MiB 同步上限"))
                 continue
-            data = read(path)
+            data = read_transcript(path)
             ident, _, cwd = session_info(data)
             if ident != tid:
                 continue
@@ -344,19 +377,18 @@ def sync_memories(mirror, index, home, projects, poll_cache, report, stop):
                 for project, dest in roots.items():
                     envelope = safe_path(dest, ".lanxi/sessions/" + path.name)
                     if envelope.is_file():
-                        header = json.loads(read(envelope).split(b"\n", 1)[0])
+                        with envelope.open("rb") as stored:
+                            header = json.loads(stored.readline(64 * 1024))
                         mapped = project, header["cwd"]
                         break
             if mapped:
                 project, relative = mapped
                 envelope = safe_path(roots[project], ".lanxi/sessions/" + path.name)
                 header = pack({"name": path.name, "cwd": relative}) + b"\n"
-                old = read(envelope)
+                old = read_envelope(envelope)
                 new = header + data
                 if old is None or new.startswith(old) and new != old:
-                    if len(new) >= MAX_RECORD:
-                        raise ValueError("会话超过同步上限")
-                    replace(envelope, old, new, mirror.backups)
+                    replace_envelope(envelope, old, new, mirror.backups)
                 elif not old.startswith(new):
                     raise Changed("项目副本和原生会话已分叉")
                 poll_cache[path] = stamp
@@ -373,9 +405,10 @@ def sync_memories(mirror, index, home, projects, poll_cache, report, stop):
         for project, dest in roots.items():
             prefix = "sessions/" + project + "/"
             folder = safe_path(dest, ".lanxi/sessions")
+            manifests = MANIFESTS + project + "/"
             files = {f.name for f in folder.glob("rollout-*.jsonl")} | {
                 k[len(prefix) :] for k in index if k.startswith(prefix)
-            }
+            } | {k[len(manifests):] for k, rev in index.items() if k.startswith(manifests) and rev != EMPTY}
             for filename in sorted(files):
                 if stop.is_set():
                     return sessions
@@ -386,7 +419,12 @@ def sync_memories(mirror, index, home, projects, poll_cache, report, stop):
                     if str(uuid.UUID(tid)) != tid:
                         raise ValueError("会话 ID 无效")
                     envelope = safe_path(folder, filename)
-                    mirror.sync(prefix + filename, envelope, index, rollout=True)
+                    if (index.get(manifests + filename, EMPTY) != EMPTY
+                            or envelope.is_file() and envelope.stat().st_size >= MAX_RECORD):
+                        sync_large(mirror, index, prefix + filename, envelope, stop, read_envelope,
+                                   replace_envelope, lambda raw: split_session(raw, filename, tid))
+                    else:
+                        mirror.sync(prefix + filename, envelope, index, rollout=True)
                     native = safe_path(home, session_location(filename, tid).as_posix())
 
                     def stamps():
@@ -401,7 +439,7 @@ def sync_memories(mirror, index, home, projects, poll_cache, report, stop):
                         sessions[tid] = cached[1]
                         thread_projects[tid] = project
                         return
-                    data = read(envelope)
+                    data = read_envelope(envelope)
                     if data is None:
                         return
                     rel, transcript = split_session(data, filename, tid)
@@ -420,6 +458,8 @@ def sync_memories(mirror, index, home, projects, poll_cache, report, stop):
                     thread_projects[tid] = project
 
                 attempt(prefix + filename, apply, project, prefix, folder, filename)
+            if project.startswith(".folder/"):
+                continue
             row_prefix = "long-term/" + project + "/"
             known = {tid for tid, owner in thread_projects.items() if owner == project}
             known.update(k[len(row_prefix) :] for k in index if k.startswith(row_prefix))

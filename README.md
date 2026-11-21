@@ -6,6 +6,8 @@ Windows 原生桌面软件，用于集中查看和控制本机 Codex / Claude Co
 
 ## 快速开始
 
+新 Windows 电脑可直接双击从发布机复制的 `release/笔记本下载/下载澜汐最新版.cmd`，自动加入私人工作区并下载最新版 ZIP。 [新电脑安装说明](docs/PORTABLE_CHECK.md#在另一台-windows-电脑使用)
+
 本机 `release/` 根目录保留当前稳定版 `Lanxi-R36-Windows-Private.zip` 和开发版 `Lanxi.exe`。从下次正式发版起，`release/history/` 另存最近两个被替换的稳定版 ZIP，供回滚使用。 [发布目录维护](docs/RUNBOOK.md#构建-exe)
 
 R36 私人 Windows 便携版启动时可选「连接云服务器」或「本机使用」。第一次使用再设置项目母目录。你的电脑使用同一私人包连接后会加入同一个工作区。顶部菜单栏提供「连接云服务器」「测试」和「合流」。点「合流」可手动同步。 [安装、升级与验收](docs/PORTABLE_CHECK.md)

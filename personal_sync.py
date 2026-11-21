@@ -23,6 +23,7 @@ from coordination_client import ControlClient, ControlDenied, PersonalTaskLocks,
 from handoff_sync import atomic_write
 from personal_memory import Mirror, pack, read, safe_path, split_session, sync_memories
 from personal_relay import EMPTY, Records, RemoteRecords, digest
+from plain_projects import INDEX as FOLDER_INDEX, folder_bindings
 from project_library import configured_root, discover
 
 
@@ -38,6 +39,7 @@ class PersonalSync:
         self.wake = threading.Event()
         self.lock = threading.Lock()
         self.projects = {}
+        self.folders = {}
         self.threads = {}
         self.status = {}
         self.backup_status = {}
@@ -76,6 +78,7 @@ class PersonalSync:
         with self.lock:
             return {
                 "projects": dict(self.projects),
+                "folderProjects": dict(self.folders),
                 "sessions": dict(self.threads),
                 "status": dict(self.status),
                 "codeBackups": dict(self.backup_status),
@@ -147,18 +150,19 @@ class PersonalSync:
 
     def resolve(self, tid, directory=None, remote=None):
         with self.lock:
+            paths = {**self.projects, **self.folders}
             thread = self.threads.get(tid, {})
             project = thread.get("project") or remote
-            if project not in self.projects and directory:
+            if project not in paths and directory:
                 current = Path(directory)
                 candidates = [
                     (len(Path(path).parts), p)
-                    for p, path in self.projects.items()
+                    for p, path in paths.items()
                     if current.is_relative_to(path)
                 ]
                 project = max(candidates)[1] if candidates else None
-            if project in self.projects:
-                return project, Path(self.projects[project])
+            if project in paths:
+                return project, Path(paths[project])
         return None
 
     def bindings(self, store, index, cached, published, errors):
@@ -399,6 +403,7 @@ class PersonalSync:
         for worker in workers:
             worker.join()
         check_memory = store is not None and self.settings.get("memory", True) and not stop.is_set()
+        folders = {}
         if check_memory:
 
             def report(key, error):
@@ -408,16 +413,23 @@ class PersonalSync:
 
             mirror = Mirror(self.local_state, store, self.poll_cache)
             try:
-                sessions = sync_memories(mirror, index, self.home, ready, self.poll_cache, report, stop)
-                for project, (root, _) in ready.items():
+                folders = folder_bindings(configured_root(self.root), self.home, store, index,
+                                          self.poll_cache, local.values(), errors, stop)
+                session_roots = {**ready, **{project: (root, ".lanxi") for project, root in folders.items()}}
+                sessions = sync_memories(mirror, index, self.home, session_roots, self.poll_cache, report, stop)
+                for project, (root, _) in session_roots.items():
                     records = {
                         tid: {"cwd": s["relative"], "updated": s["updated"]}
                         for tid, s in sessions.items()
                         if s["project"] == project
                     }
-                    marker = (
-                        Path(value(root, "rev-parse", "--absolute-git-dir")) / "lanxi-personal-sessions.json"
-                    )
+                    if project in folders:
+                        marker = safe_path(root, FOLDER_INDEX)
+                        if not records and not marker.is_file():
+                            continue
+                        marker.parent.mkdir(parents=True, exist_ok=True)
+                    else:
+                        marker = Path(value(root, "rev-parse", "--absolute-git-dir")) / "lanxi-personal-sessions.json"
                     data = pack(records)
                     if not stop.is_set() and (not marker.is_file() or marker.read_bytes() != data):
                         atomic_write(marker, data)
@@ -443,7 +455,12 @@ class PersonalSync:
             except (ValueError, OSError, TypeError):
                 errors["大文件"] = "大文件清单暂不可用，后台将重试"
         with self.lock:
-            for project in specs:
+            self.folders = {project: str(root) for project, root in folders.items()}
+            # This status gates session handoff. Per-thread transfer failures omit
+            # that thread from self.threads; code/backup counters remain Git-only.
+            for project in folders:
+                errors.setdefault(project, "已同步")
+            for project in (*specs, *folders):
                 self.completed[project] = self.completed.get(project, 0) + 1
             self.epoch += 1
             self.status = errors
@@ -453,6 +470,7 @@ class PersonalSync:
         return {"connection": connection, "projects": len(specs), "memoryChecked": check_memory,
                 "largeInventory": inventory, "status": errors,
                 "codeBackups": backup_status,
+                "folderProjects": dict(self.folders),
                 "projectPaths": {p: str(local[p]) if p in local else "" for p in specs}}
 
     def worker(self, stop):

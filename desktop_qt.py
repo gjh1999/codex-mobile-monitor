@@ -1557,14 +1557,15 @@ class MainWindow(QMainWindow):
                 snap['threads'] = list(threads.values())
             if self._pending_open:
                 project, epoch = self._pending_open
-                if project not in view['projects']:
+                paths = {**view['projects'], **view.get('folderProjects', {})}
+                if project not in paths:
                     self._pending_open = None
                     self._popup('无法启卷','项目已移出本机同步清单。')
                 elif view['completed'].get(project,0) > epoch or '配对' in view['status'] and project not in view['status']:
                     self._pending_open = None
                     status = view['status'].get(project,'项目尚未准备好')
                     if status == '已同步':
-                        self.launch_project(Path(view['projects'][project]))
+                        self.launch_project(Path(paths[project]))
                     else:
                         self._popup('无法启卷',status)
         self._last_snapshot = snap

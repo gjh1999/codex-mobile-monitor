@@ -15,6 +15,7 @@ from handoff import session_location
 from personal_memory import latest_session
 from personal_relay import MAX_RECORD
 from personal_sync import PersonalSync
+from personal_task_locks import Claim
 from project_library import set_project_root
 
 
@@ -89,7 +90,11 @@ class PlainProjectRoundtripTests(unittest.TestCase):
             with self.subTest(tid=tid):
                 self.assertEqual(view["sessions"][tid]["cwd"], str(restored))
                 self.assertEqual(Path(view["sessions"][tid]["path"]), receiver.home / relative)
-                self.assertEqual(file_digest(source.home / relative), file_digest(receiver.home / relative))
+                checksum = file_digest(source.home / relative)
+                self.assertEqual(checksum, file_digest(receiver.home / relative))
+                # This is the digest the receiving desktop supplies before taking control.
+                self.assertEqual(receiver.session_digest(tid), checksum)
+                Claim(project=view["sessions"][tid]["project"], checkpoint=checksum)
         self.assertIn(latest_session(restored)[0], sessions)
         self.assertIsNone(latest_session(ref))
         self.assertFalse((restored / "private.txt").exists())

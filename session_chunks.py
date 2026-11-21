@@ -2,7 +2,6 @@
 
 import json
 import re
-from pathlib import Path
 
 from handoff import MAX_FILE
 from handoff_sync import atomic_write

@@ -55,9 +55,12 @@ def read(path, *, limit=MAX_RECORD - 1):
     if not path.is_file() or path.stat().st_size > limit:
         raise ValueError("文件过大或不是普通文件")
     with path.open("rb") as stream:
-        data = stream.read(min(path.stat().st_size, limit) + 1)
-    if len(data) > limit:
-        raise ValueError("文件超过同步上限")
+        size = os.fstat(stream.fileno()).st_size
+        if size > limit:
+            raise ValueError("文件超过同步上限")
+        data = stream.read(size + 1)
+    if len(data) != size:
+        raise Changed("读取时文件大小发生变化")
     return data
 
 

@@ -550,6 +550,16 @@ def check_wallpaper_manager(window, output, root):
     if errors:
         raise errors[0]
 
+    with patch('desktop_glass.local_wallpapers', return_value=[source_a, source_b]):
+        fixed = OceanBackdrop(backdrop.library.assets.parent.parent, 0, root)
+        try:
+            assert fixed.current_entry == first and not fixed.rotation.isActive()
+            local = next(entry for entry in fixed.entries if entry.path == source_b)
+            assert fixed.show_wallpaper(local)
+            assert fixed.current_entry == local and not fixed.rotation.isActive()
+        finally:
+            fixed.deleteLater()
+
 
 def check_client_switch(window, output):
     switch = window.client_switch

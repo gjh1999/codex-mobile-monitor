@@ -30,6 +30,10 @@ class DesktopStorageTests(unittest.TestCase):
             cache = self.old / ".local" / "personal-sync" / "home"
             cache.mkdir(parents=True)
             (cache / "catalog.json").write_text("{}", encoding="utf-8")
+            wallpapers = Path(".local/desktop-wallpapers")
+            (self.old / wallpapers / "images").mkdir(parents=True)
+            (self.old / wallpapers / "images/海边.png").write_bytes(b"wallpaper fixture")
+            (self.old / wallpapers / "hidden.json").write_bytes(b'["builtin/os-x-mavericks-wave.jpg"]')
             (self.old / "not-a-setting.bin").touch()
             workspace = prepare_data(self.new, self.target, lambda _: self.old)
             self.assertEqual(workspace, self.old.parent)
@@ -38,6 +42,9 @@ class DesktopStorageTests(unittest.TestCase):
                 (self.old / "local-config.json").read_bytes(),
             )
             self.assertTrue((self.target / cache.relative_to(self.old) / "catalog.json").exists())
+            for name in ("images/海边.png", "hidden.json"):
+                self.assertEqual((self.target / wallpapers / name).read_bytes(),
+                                 (self.old / wallpapers / name).read_bytes())
             self.assertFalse((self.target / "not-a-setting.bin").exists())
             with closing(sqlite3.connect(self.target / db_path.name)) as copied:
                 self.assertEqual(copied.execute("SELECT text FROM fixture").fetchone(), ("old reply",))

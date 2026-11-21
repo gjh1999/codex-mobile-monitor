@@ -30,6 +30,8 @@ Codex 和 Claude 各有独立 worker、RPC 适配器、任务控制器和本地�
 | `daemon_support.py` | 限定范围的 Codex 命令自动审批策略和 Windows 提醒去重 |
 | `reply_log.py`、`conversation.py` | 本地消息/事件记录及只读对话展示 |
 | `history_labels.py` | Codex 本机历史会话的标题和路径标签 |
+| `personal_sync.py`、`code_sync.py` | 项目登记、自动及手动同步轮次、GitHub 代码同步和项目记忆 |
+| `code_backups.py`、`code_backup_server.py` | 生成可下载的代码 ZIP，按私人工作区鉴权，校验后原子替换该设备的最新快照 |
 | `codex_watch.py` | 增量读取原生轮次完成，订阅共享 Codex App Server 的待审批会话 |
 | `codex_workspace.py` | 同工作区的提醒、待审批项、审批决定和回执 |
 | `channels_dingtalk.py` | 签名 HTTPS Webhook、业务返回检查、脱敏和不确定送达处理 |

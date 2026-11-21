@@ -53,8 +53,10 @@ def notebook(root):
     sync(receiver)
     sync(source)
     require(first.entries("todo")[0][2:4] == ("测试待办", 1), "待办完成状态未回传")
+    # Entries created in the same second may have different local insertion order.
     require(second.daily_dates() and first.daily_dates() == second.daily_dates()
-            and all(first.daily_entries(day) == second.daily_entries(day) for day in second.daily_dates()),
+            and all(sorted(first.daily_entries(day), key=repr) == sorted(second.daily_entries(day), key=repr)
+                    for day in second.daily_dates()),
             "每日记录不一致")
     return "隔离资料库的随记归档、分组、待办完成状态与每日记录往返一致"
 

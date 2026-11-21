@@ -3,13 +3,21 @@
 import json
 import sqlite3
 from contextlib import closing, contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from personal_relay import Changed, EMPTY, digest
 
 FIELDS = ("kind", "title", "body", "filed", "updated_at", "manual_group")
 PREFIX = "notebook/"
+HISTORY_PREFIX = "notebook-history/"
+
+
+def local_day(stamp):
+    instant = datetime.fromisoformat(stamp)
+    if instant.tzinfo is None:
+        instant = instant.replace(tzinfo=timezone.utc)
+    return instant.astimezone().date()
 
 
 def pack(entry):
@@ -64,6 +72,11 @@ class NotebookStore:
                     entry INTEGER PRIMARY KEY, uuid TEXT UNIQUE NOT NULL, base BLOB
                 )
             """)
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS notebook_history (
+                    key TEXT PRIMARY KEY, uuid TEXT NOT NULL, updated_at TEXT NOT NULL, data BLOB NOT NULL
+                )
+            """)
 
     @contextmanager
     def transaction(self):
@@ -71,12 +84,40 @@ class NotebookStore:
             db.execute("BEGIN IMMEDIATE")
             yield db
 
-    def entries(self, kind, archived=False):
+    def entries(self, kind, archived=False, *, today=None):
         with closing(sqlite3.connect(self.path)) as db:
             return db.execute("""
                 SELECT id,title,body,filed,updated_at FROM notebook
-                WHERE kind=? AND (kind='todo' OR filed=?) ORDER BY updated_at DESC,id DESC
-            """, (kind, int(archived))).fetchall()
+                WHERE kind=? AND (kind='todo' OR filed=?)
+                  AND (? IS NULL OR ? OR date(updated_at,'localtime') >= ? OR (kind='todo' AND filed=0))
+                ORDER BY updated_at DESC,id DESC
+            """, (kind, int(archived), today, int(archived), today)).fetchall()
+
+    def daily_dates(self):
+        with closing(sqlite3.connect(self.path)) as db:
+            dates = db.execute("""
+                SELECT date(updated_at,'localtime') AS day FROM notebook
+                UNION SELECT date(updated_at,'localtime') AS day FROM notebook_history ORDER BY day DESC
+            """)
+            return [day for (day,) in dates if day]
+
+    def daily_entries(self, day):
+        with closing(sqlite3.connect(self.path)) as db:
+            entries = {}
+            rows = db.execute("""
+                SELECT uuid, data FROM notebook_history
+                WHERE date(updated_at,'localtime')=? ORDER BY datetime(updated_at),key
+            """, (day,))
+            for key, data in rows:
+                entries[key] = unpack(data)
+            rows = db.execute(f"""
+                SELECT coalesce(sync.uuid, notebook.id), {','.join(FIELDS)}
+                FROM notebook LEFT JOIN notebook_sync AS sync ON sync.entry=notebook.id
+                WHERE date(updated_at,'localtime')=? ORDER BY notebook.id
+            """, (day,))
+            for key, *entry in rows:
+                entries[key] = tuple(entry)
+            return sorted(entries.values(), key=lambda entry: entry[4])
 
     def save(self, kind, entry_id, body, *, expected=None):
         with self.transaction() as db:
@@ -84,14 +125,56 @@ class NotebookStore:
                 return db.execute("INSERT INTO notebook(kind,title,body) VALUES(?, '', ?)", (kind, body)).lastrowid
             current = self.row(db, entry_id)
             if current and expected is not None and current[1:3] != expected and body != current[2]:
-                return self.insert(db, (kind, "冲突副本", body, *current[3:]))
-            db.execute("UPDATE notebook SET title='',body=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND kind=?",
-                       (body, entry_id, kind))
+                updated = db.execute("SELECT CURRENT_TIMESTAMP").fetchone()[0]
+                return self.insert(db, (kind, "冲突副本", body, current[3], updated, current[5]))
+            if current and current[0] == kind and (current[1] or body != current[2]):
+                updated = db.execute("SELECT CURRENT_TIMESTAMP").fetchone()[0]
+                self.remember_previous_day(db, entry_id, current, updated)
+                db.execute("UPDATE notebook SET title='',body=?,updated_at=? WHERE id=?", (body, updated, entry_id))
             return entry_id
 
     def set_filed(self, kind, entry_id, filed):
         with self.transaction() as db:
-            db.execute("UPDATE notebook SET filed=? WHERE id=? AND kind=?", (int(filed), entry_id, kind))
+            current = self.row(db, entry_id)
+            if current is None or current[0] != kind or current[3] == int(filed):
+                return
+            updated = current[4]
+            if kind == "todo" or not filed:
+                now = db.execute("SELECT CURRENT_TIMESTAMP").fetchone()[0]
+                if self.remember_previous_day(db, entry_id, current, now):
+                    updated = now
+            db.execute("UPDATE notebook SET filed=?,updated_at=? WHERE id=?", (int(filed), updated, entry_id))
+
+    def remember_previous_day(self, db, entry_id, entry, updated):
+        if local_day(entry[4]) == local_day(updated):
+            return False
+        row = db.execute("SELECT uuid FROM notebook_sync WHERE entry=?", (entry_id,)).fetchone()
+        if row is None:
+            uid = str(uuid4())
+            db.execute("INSERT INTO notebook_sync(entry,uuid) VALUES(?,?)", (entry_id, uid))
+        else:
+            uid = row[0]
+        data = pack(entry)
+        self.insert_history(db, uid + "/" + digest(data), entry, data)
+        return True
+
+    @staticmethod
+    def insert_history(db, key, entry, data):
+        return db.execute("INSERT OR IGNORE INTO notebook_history VALUES(?,?,?,?)",
+                          (key, key.split("/", 1)[0], entry[4], data)).rowcount > 0
+
+    def history_keys(self):
+        with closing(sqlite3.connect(self.path)) as db:
+            return {key for (key,) in db.execute("SELECT key FROM notebook_history")}
+
+    def history_data(self, key):
+        with closing(sqlite3.connect(self.path)) as db:
+            return db.execute("SELECT data FROM notebook_history WHERE key=?", (key,)).fetchone()[0]
+
+    def receive_history(self, key, data):
+        entry = unpack(data)
+        with self.transaction() as db:
+            return self.insert_history(db, key, entry, data)
 
     def groups(self, kind):
         with closing(sqlite3.connect(self.path)) as db:
@@ -126,6 +209,7 @@ class NotebookStore:
                 if self.row(db, entry) != expected:
                     raise Changed("本机正在编辑，稍后同步")
                 if value != expected:
+                    self.remember_previous_day(db, entry, expected, value[4])
                     db.execute(f"UPDATE notebook SET {','.join(f'{field}=?' for field in FIELDS)} WHERE id=?",
                                (*value, entry))
             else:
@@ -190,4 +274,26 @@ def sync_notebook(root, store, index, stop):
             changed |= book.receive(key, local, updated, merged, conflict)
         except (ValueError, OSError, TypeError, sqlite3.Error) as error:
             errors.append(str(error) if isinstance(error, ValueError) else "部分记录暂不可同步")
+    history = book.history_keys()
+    history_index = {key.removeprefix(HISTORY_PREFIX): value for key, value in index.items()
+                     if key.startswith(HISTORY_PREFIX)}
+    for key in sorted(history | history_index.keys()):
+        if stop.is_set():
+            break
+        uid, _, checksum = key.partition("/")
+        if not is_id(uid) or len(checksum) != 64:
+            continue
+        name = HISTORY_PREFIX + key
+        revision = history_index.get(key, EMPTY)
+        try:
+            if key in history:
+                if revision == EMPTY:
+                    store.put(name, EMPTY, book.history_data(key))
+            elif revision == checksum:
+                data = store.read(name)
+                if digest(data) != checksum:
+                    raise Changed("云端每日记录已更新，稍后同步")
+                changed |= book.receive_history(key, data)
+        except (ValueError, OSError, TypeError, sqlite3.Error) as error:
+            errors.append(str(error) if isinstance(error, ValueError) else "部分每日记录暂不可同步")
     return changed, errors

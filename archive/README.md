@@ -8,5 +8,6 @@
 | `diagnostics/` | 研究任务只读检查、回复调试脚本 | 可能读取本机历史或状态；使用前先读脚本并确认目标 |
 | `manual-tools/` | goal 读取和 goal 修复脚本 | 人工维护工具，不作为应用部署入口 |
 | `old-build/` | 旧 PyInstaller `.spec` 快照 | 路径和机器相关，当前构建由 `scripts/build-exe.ps1` 动态生成 |
+| `old-build/portable/` | 旧固定版本下载脚本生成器及模板、R28 独立验收启动器 | 当前下载使用 [HTTPS 最新版脚本](../scripts/download-latest-portable.cmd)，R36 可从程序内打开「测试」 |
 
 归档脚本保持原始代码，以便追溯；它们的相对路径不保证适用于当前目录。运行诊断或人工维护工具前，先确认目标和操作范围。当前可重复的启动、构建和验证命令只记录在 [运行与维护](../docs/RUNBOOK.md)。

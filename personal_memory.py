@@ -487,11 +487,11 @@ def latest_session(cwd):
     from plain_projects import INDEX
 
     for root in (cwd, *cwd.parents):
-        if (root / ".git").exists():
+        if (root / INDEX).is_file():
+            marker = safe_path(root, INDEX)
+        elif (root / ".git").exists():
             from code_sync import value
             marker = Path(value(root, "rev-parse", "--absolute-git-dir")) / "lanxi-personal-sessions.json"
-        elif (root / INDEX).is_file():
-            marker = safe_path(root, INDEX)
         else:
             continue
         if marker.is_file():

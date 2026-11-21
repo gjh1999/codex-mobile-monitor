@@ -309,7 +309,7 @@ def auto_path(name, tracked, path):
     low = parts.name.lower()
     if (
         any(
-            p.lower() in {".git", ".ssh", ".aws", ".local", ".venv", "node_modules", "__pycache__"}
+            p.lower() in {".git", ".ssh", ".aws", ".local", ".lanxi", ".venv", "node_modules", "__pycache__"}
             for p in parts.parts
         )
         or low.startswith(
@@ -408,7 +408,18 @@ def verify_checkout(repo, identity):
         raise SyncIssue("本机 origin 与登记的项目不一致")
 
 
-def sync_project(repo, remote, branch=None, *, memory_subdir=".codex/memories"):
+def finish_placeholder(repo, identity, marker_name):
+    marker = Path(value(repo, "rev-parse", "--absolute-git-dir")) / marker_name
+    if marker.read_text(encoding="utf-8") != identity:
+        raise SyncIssue("占位项目检出记录与仓库不一致")
+    missing = run(repo, "ls-files", "--deleted", "-z").stdout
+    if missing:
+        run(repo, "checkout-index", "-z", "--stdin", data=missing)
+    marker.unlink()
+    return "已克隆"
+
+
+def sync_project(repo, remote, branch=None, *, memory_subdir=".codex/memories", placeholder_id=None):
     identity = github_id(remote)
     if not identity:
         raise SyncIssue("仅接受已登记的 GitHub 仓库")
@@ -419,7 +430,10 @@ def sync_project(repo, remote, branch=None, *, memory_subdir=".codex/memories"):
         and getattr(repo.lstat(), "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
     ):
         raise SyncIssue("本机项目位置为目录链接")
-    if not repo.exists() or repo.is_dir() and not any(repo.iterdir()):
+    from plain_projects import receiver_placeholder
+    placeholder = bool(placeholder_id and receiver_placeholder(repo, placeholder_id))
+    pending_checkout = "lanxi-placeholder-checkout"
+    if not repo.exists() or repo.is_dir() and not any(repo.iterdir()) or placeholder:
         selected, _ = remote_tip(None, remote, branch)
         repo.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=repo.parent, prefix=".lanxi-clone-") as temp:
@@ -442,6 +456,14 @@ def sync_project(repo, remote, branch=None, *, memory_subdir=".codex/memories"):
             run(stage, "read-tree", "-mu", "HEAD")
             exclude_memory(stage, memory_subdir)
             run(stage, "config", "lanxi.blobLimit", str(LIMIT))
+            if placeholder:
+                if (stage / ".lanxi").exists() or not receiver_placeholder(repo, placeholder_id):
+                    raise SyncIssue("普通项目占位目录已变化，保留现有文件")
+                # Publish Git metadata first. Only restore missing tracked paths; a
+                # retry completes an interrupted checkout without replacing user data.
+                (stage / ".git" / pending_checkout).write_text(identity, encoding="utf-8")
+                (stage / ".git").rename(repo / ".git")
+                return finish_placeholder(repo, identity, pending_checkout)
             existed = repo.is_dir()
             if existed:
                 repo.rmdir()  # Succeeds only while the target is still empty.
@@ -454,6 +476,8 @@ def sync_project(repo, remote, branch=None, *, memory_subdir=".codex/memories"):
         return "已克隆"
     verify_checkout(repo, identity)
     gitdir = Path(value(repo, "rev-parse", "--absolute-git-dir"))
+    if (gitdir / pending_checkout).is_file():
+        return finish_placeholder(repo, identity, pending_checkout)
     exclude_memory(repo, memory_subdir)
     if any(
         (gitdir / x).exists()

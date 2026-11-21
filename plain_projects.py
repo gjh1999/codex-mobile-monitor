@@ -20,6 +20,16 @@ def folder_id(relative):
     return ".folder/" + hashlib.sha256(relative.casefold().encode("utf-8")).hexdigest()
 
 
+def receiver_placeholder(directory, expected):
+    if not directory.is_dir() or {item.name for item in directory.iterdir()} != {".lanxi"}:
+        return False
+    try:
+        marker = safe_path(directory, RECEIVER)
+        return marker.is_file() and json.loads(marker.read_bytes()) == {"folder": expected}
+    except (OSError, ValueError):
+        return False
+
+
 def folder_relative(parent, directory, *, allow_git=False):
     if not parent or not parent.is_absolute() or not directory.is_relative_to(parent) or directory == parent:
         return None

@@ -23,7 +23,7 @@ from coordination_client import ControlClient, ControlDenied, PersonalTaskLocks,
 from handoff_sync import atomic_write
 from personal_memory import Mirror, confirm_published_session, pack, read_transcript, safe_path, sync_memories
 from personal_relay import EMPTY, Records, RemoteRecords, digest
-from plain_projects import INDEX as FOLDER_INDEX, RECEIVER, folder_bindings
+from plain_projects import INDEX as FOLDER_INDEX, RECEIVER, folder_bindings, folder_id
 from project_library import configured_root, discover
 
 
@@ -370,7 +370,9 @@ class PersonalSync:
                     verify_checkout(path, project)
                     exclude_memory(path, subdir)
                     ready[project] = (path, subdir)
-                sync_project(path, spec["remote"], spec.get("branch"), memory_subdir=subdir)
+                relative = spec.get("relativePath")
+                sync_project(path, spec["remote"], spec.get("branch"), memory_subdir=subdir,
+                             placeholder_id=folder_id(relative) if relative else None)
                 ready[project] = (path, subdir)
                 errors[project] = "已同步"
             except (

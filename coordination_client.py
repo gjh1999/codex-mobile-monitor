@@ -332,12 +332,19 @@ class PersonalTaskLocks:
 
 def personal_project_at(cwd):
     from code_sync import github_id, run
+    from desktop_storage import user_data_root
+    from plain_projects import INDEX, folder_id, folder_relative
+    from project_library import configured_root
     if not cwd:
         return None
     location = Path(cwd)
     if not location.is_absolute():
         return None
     for folder in (location, *location.parents):
+        if (folder / INDEX).is_file():
+            relative = folder_relative(configured_root(user_data_root()), folder, allow_git=True)
+            if relative:
+                return folder_id(relative)
         if (folder / '.git').exists():
             result = run(folder, 'config', '--get', 'remote.origin.url', check=False)
             return github_id(result.stdout.decode(errors='replace').strip())

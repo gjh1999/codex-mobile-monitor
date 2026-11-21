@@ -1,20 +1,20 @@
 """The native notebook and its local SQLite storage."""
 import sqlite3
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from PySide6.QtCore import QEvent, QMimeData, QRectF, QSignalBlocker, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QDrag, QPainter, QPainterPath, QPalette, QPen
 from PySide6.QtWidgets import (
-    QButtonGroup, QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
+    QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
     QMenu, QMessageBox, QPushButton, QStyle, QStyledItemDelegate, QTextEdit, QVBoxLayout, QWidget,
 )
 
-from desktop_glass import FrostedPanel
+from desktop_glass import ClientSwitch, FrostedPanel
 from desktop_theme import configure_text, ui_font
 from model_groups import group_name
 from notebook_store import NotebookStore
 
-GROUP_NAMES = {'note': '拾得片羽', 'todo': '待理诸事'}
+GROUP_NAMES = {'note': '拾得片羽', 'todo': '待理诸事', 'daily': '每日记录'}
 INK = '#f3faff'
 MUTED = '#a9c8d7'
 CHECK_STATE = Qt.ItemDataRole.CheckStateRole
@@ -147,6 +147,7 @@ class NotebookWorkspace(QWidget):
         self.store = store
         self.organizer = organizer
         self.kind = 'note'
+        self.today = date.today()
         self.archived = False
         self.entry_id = None
         self.dirty = False
@@ -168,32 +169,11 @@ class NotebookWorkspace(QWidget):
         navigation = QVBoxLayout(self.list_panel)
         navigation.setContentsMargins(13, 12, 13, 10)
         navigation.setSpacing(5)
-        group = QButtonGroup(self)
-        self.category_rows = {}
-        self.category_buttons = {}
-        self.create_buttons = {}
-        for kind, name in GROUP_NAMES.items():
-            surface = QFrame()
-            surface.setObjectName('notebookGroup')
-            row = QHBoxLayout(surface)
-            row.setContentsMargins(0, 0, 0, 0)
-            row.setSpacing(0)
-            button = notebook_button(name, 'notebookCategory', 12)
-            button.setCheckable(True)
-            button.setFixedHeight(36)
-            group.addButton(button)
-            button.clicked.connect(lambda _checked, kind=kind: self.select_kind(kind))
-            row.addWidget(button, 1)
-            create = notebook_button('＋', 'notebookIcon', 14)
-            create.setFixedSize(34, 34)
-            create.setToolTip('落一笔' if kind == 'note' else '记一件待理之事')
-            create.setAccessibleName(create.toolTip())
-            create.clicked.connect(lambda _checked, kind=kind: self.new_entry(kind))
-            row.addWidget(create)
-            navigation.addWidget(surface)
-            self.category_rows[kind] = surface
-            self.category_buttons[kind] = button
-            self.create_buttons[kind] = create
+        self.category_switch = ClientSwitch(
+            backdrop, self.select_kind, compact=True, accessible_name='吉光片羽分类',
+            segments=tuple((kind, name, 74) for kind, name in GROUP_NAMES.items()),
+        )
+        navigation.addWidget(self.category_switch, 0, Qt.AlignmentFlag.AlignHCenter)
 
         divider = QFrame()
         divider.setObjectName('notebookDivider')
@@ -227,6 +207,10 @@ class NotebookWorkspace(QWidget):
         self.heading.setObjectName('notebookHeading')
         self.heading.setFont(ui_font(15, True))
         header.addWidget(self.heading, 1)
+        self.create = notebook_button('＋', 'notebookIcon', 14)
+        self.create.setFixedSize(31, 32)
+        self.create.clicked.connect(lambda: self.new_entry(self.kind))
+        header.addWidget(self.create)
         self.more = notebook_button('⋯', 'notebookIcon', 17)
         self.more.setFixedSize(31, 32)
         self.more.setAccessibleName('更多操作')
@@ -259,32 +243,37 @@ class NotebookWorkspace(QWidget):
 
     def select_kind(self, kind):
         if kind == self.kind and not self.archived:
+            self.category_switch.select(kind)
             return
         if self.flush():
             self.load_group(kind)
         else:
-            self.category_buttons[self.kind].setChecked(True)
+            self.category_switch.select(self.kind)
 
     def load_group(self, kind, archived=False):
         self.kind, self.archived = kind, archived
         self.heading.setText(GROUP_NAMES[kind])
         self.list.setAccessibleName(GROUP_NAMES[kind])
         self.body.setAccessibleName(GROUP_NAMES[kind] + '正文')
-        self.body.setPlaceholderText('有念，便落一笔。' if kind == 'note' else '把要做的事写在这里。')
-        for key, row in self.category_rows.items():
-            row.setProperty('current', key == kind)
-            row.style().unpolish(row)
-            row.style().polish(row)
-            button = self.category_buttons[key]
-            button.setChecked(key == kind)
-            button.setFont(ui_font(12, key == kind))
+        self.body.setPlaceholderText({'note': '有念，便落一笔。', 'todo': '把要做的事写在这里。', 'daily': ''}[kind])
+        daily = kind == 'daily'
+        self.category_switch.select(kind)
+        self.list.setDragEnabled(not daily)
+        self.list.setAcceptDrops(not daily)
+        self.create.setVisible(not daily)
+        self.more.setVisible(not daily)
+        self.create.setToolTip('落一笔' if kind == 'note' else '记一件待理之事')
+        self.create.setAccessibleName(self.create.toolTip())
         self.entry_id = None
         self.load_list()
         remembered = self.selections.get((kind, archived))
         self.set_entry(remembered if remembered in self.records else next(iter(self.records), None))
 
     def load_list(self):
-        rows = self.store.entries(self.kind, self.archived)
+        if self.kind == 'daily':
+            self.load_daily_list()
+            return
+        rows = self.store.entries(self.kind, self.archived, today=self.today.isoformat())
         self.records = {row[0]: row[1:] for row in rows}
         self.items = {}
         scrollbar = self.list.verticalScrollBar()
@@ -320,6 +309,23 @@ class NotebookWorkspace(QWidget):
         self.empty.setText('旧笺尚空。' if self.archived else '这一页尚空。')
         self.empty.setVisible(not rows)
 
+    def load_daily_list(self):
+        days = self.store.daily_dates()
+        self.records = dict.fromkeys(days)
+        self.items = {}
+        scrollbar = self.list.verticalScrollBar()
+        scroll = scrollbar.value()
+        with QSignalBlocker(self.list):
+            self.list.clear()
+            for day in days:
+                item = QListWidgetItem(day, self.list)
+                item.setData(ENTRY_ID, day)
+                self.items[day] = item
+            self.list.setCurrentItem(self.items.get(self.entry_id))
+        scrollbar.setValue(scroll)
+        self.empty.setText('暂无每日记录')
+        self.empty.setVisible(not days)
+
     def move_to_group(self, entry_id, name):
         if entry_id not in self.records:
             return
@@ -332,6 +338,9 @@ class NotebookWorkspace(QWidget):
     def set_entry(self, entry_id):
         self.entry_id = entry_id
         self.selections[(self.kind, self.archived)] = entry_id
+        if self.kind == 'daily':
+            self.show_daily_entry(entry_id)
+            return
         title, body, _filed, _updated_at = self.records.get(entry_id, ('', '', False, ''))
         self.edit_basis = (title, body) if entry_id is not None else None
         if title:
@@ -342,6 +351,25 @@ class NotebookWorkspace(QWidget):
         self.body.setReadOnly(self.archived and entry_id is None)
         self.dirty = False
         self.update_stamp()
+
+    def show_daily_entry(self, day):
+        sections = {'note': [], 'todo': []}
+        if day is not None:
+            for kind, title, body, filed, _updated, _group in self.store.daily_entries(day):
+                text = '\n\n'.join(part for part in (title, body) if part) or '一笔未题'
+                if kind == 'todo':
+                    text = ('已完成 · ' if filed else '待完成 · ') + text
+                sections[kind].append(text)
+        text = '\n\n'.join(GROUP_NAMES[kind] + '\n\n' + '\n\n'.join(entries)
+                           for kind, entries in sections.items() if entries)
+        self.heading.setText(day or GROUP_NAMES['daily'])
+        with QSignalBlocker(self.body), QSignalBlocker(self.list):
+            self.body.setReadOnly(True)
+            if text != self.body.toPlainText():
+                self.body.setPlainText(text)
+            self.list.setCurrentItem(self.items.get(day))
+        self.stamp.clear()
+        self.saved_status.clear()
 
     def update_stamp(self):
         record = self.records.get(self.entry_id)
@@ -366,9 +394,15 @@ class NotebookWorkspace(QWidget):
             return False
         previous = self.entry_id
         self.load_list()
-        if previous is not None:
+        if previous is not None or self.kind == 'daily':
             self.set_entry(previous if previous in self.records else next(iter(self.records), None))
         return True
+
+    def refresh_day(self):
+        today = date.today()
+        if today != self.today and not self.dirty:
+            self.today = today
+            self.refresh_synced()
 
     def flush(self):
         self.draft.stop()
@@ -410,12 +444,14 @@ class NotebookWorkspace(QWidget):
 
     def set_filed(self, entry_id, filed):
         try:
-            self.store.set_filed(self.kind, entry_id, filed)
+            updated = self.store.set_filed(self.kind, entry_id, filed)
         except (OSError, sqlite3.Error):
             QMessageBox.warning(self, '尚未记下', '暂时无法更新这条记录。')
             return False
         title, body, _filed, updated_at = self.records[entry_id]
-        self.records[entry_id] = (title, body, filed, updated_at)
+        self.records[entry_id] = (title, body, filed, updated or updated_at)
+        if entry_id == self.entry_id:
+            self.update_stamp()
         return True
 
     def update_check(self, item):

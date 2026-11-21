@@ -1226,6 +1226,7 @@ class MainWindow(QMainWindow):
                     self._popup('吉光片羽暂未打开', '暂时无法读写本机笔记库。')
                     return
                 self.workspace_pages.addWidget(self.notebook)
+            self.notebook.refresh_day()
             self.workspace_pages.setCurrentWidget(self.notebook)
             self.client_switch.select(section)
             return
@@ -1455,6 +1456,8 @@ class MainWindow(QMainWindow):
                 live = threads.get(tid, {})
                 threads[tid] = {**indexed, **live, 'cwd': live.get('cwd') or indexed['cwd']}
             snap['threads'] = list(threads.values())
+        if self.notebook is not None:
+            self.notebook.refresh_day()
         flow = monitor.personal_sync
         if flow:
             view = flow.snapshot()

@@ -144,6 +144,7 @@ class NotebookStore:
                 if self.remember_previous_day(db, entry_id, current, now):
                     updated = now
             db.execute("UPDATE notebook SET filed=?,updated_at=? WHERE id=?", (int(filed), updated, entry_id))
+            return updated
 
     def remember_previous_day(self, db, entry_id, entry, updated):
         if local_day(entry[4]) == local_day(updated):

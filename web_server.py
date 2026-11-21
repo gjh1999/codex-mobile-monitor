@@ -10,7 +10,7 @@ from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request, Response, Depends
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool
 import monitor
 from handoff import handoff_receipts
 from handoff_sync import read_state as read_handoff_sync
@@ -152,12 +152,28 @@ def create_app(start_workers=True):
     @app.post('/api/approvals', dependencies=[Depends(auth)])
     def decide(data: Decision):
         try:
-            result = monitor.approvals.decide(data.token, data.allow)
-            if result not in ('allowed', 'denied'):
+            result = (monitor.decide_approvals([data.token], data.allow)[0]['decision'] if data.token.startswith('remote:')
+                      else monitor.approvals.decide(data.token, data.allow))
+            if result not in ('allowed', 'denied', 'queued'):
                 raise HTTPException(409, f'审批结果：{result}，请检查任务')
             return {'result': result}
         except (KeyError, ValueError) as error:
             raise HTTPException(409, str(error)) from error
+
+    class ApprovalBatch(BaseModel):
+        tokens: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(min_length=1, max_length=256)
+        allow: StrictBool
+
+    @app.get('/api/approvals', dependencies=[Depends(auth)])
+    def approval_queue():
+        state = monitor.snapshot()
+        return {'pending': monitor.approval_queue(), 'decisions': monitor.workspace_codex.decisions(),
+                'sharedCodex': state.get('codexApprovalWatch', 'own_connection'),
+                'workspace': state.get('codexWorkspaceWatch', 'local')}
+
+    @app.post('/api/approvals/batch', dependencies=[Depends(auth)])
+    def decide_batch(data: ApprovalBatch):
+        return {'results': monitor.decide_approvals(data.tokens, data.allow)}
 
     dist = Path(__file__).parent / 'web' / 'dist'
     if dist.exists():

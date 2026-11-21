@@ -326,8 +326,8 @@ def project_report(directory, data_dir, emit):
          (result.stdout + result.stderr).strip())
     parent = configured_root(data_dir)
     relative = folder_relative(parent, directory)
-    if (directory / INDEX).is_file() and parent and directory != parent and directory.is_relative_to(parent):
-        relative = directory.relative_to(parent).as_posix()
+    if (directory / INDEX).is_file():
+        relative = folder_relative(parent, directory, allow_git=True)
     if relative:
         emit("普通项目映射", "passed", f"核对相对路径：{relative}")
         return folder_id(relative)

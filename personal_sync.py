@@ -41,6 +41,7 @@ class PersonalSync:
         self.projects = {}
         self.folders = {}
         self.code_folders = set()
+        self.git_retries = {}
         self.threads = {}
         self.status = {}
         self.backup_status = {}
@@ -454,6 +455,28 @@ class PersonalSync:
                     self.threads = sessions
             finally:
                 mirror.db.close()
+        folder_git = {}
+        if isinstance(store, RemoteRecords):
+            from plain_git import promote
+            synchronized = {local[repo] for repo in ready if errors.get(repo) == "已同步"}
+            for project, directory in sorted(sources.items()):
+                if stop.is_set():
+                    break
+                if directory in synchronized:
+                    folder_git[project] = "已接入 GitHub"
+                    self.git_retries.pop((self.scope, project), None)
+                    continue
+                retry, last = self.git_retries.get((self.scope, project), (0, ""))
+                if time.monotonic() < retry:
+                    folder_git[project] = last
+                    continue
+                try:
+                    folder_git[project] = promote(directory)
+                    self.git_retries.pop((self.scope, project), None)
+                except (OSError, ValueError, subprocess.SubprocessError) as error:
+                    message = str(error) if isinstance(error, SyncIssue) else "自动 Git 接入暂未完成，稍后重试"
+                    self.git_retries[self.scope, project] = time.monotonic() + 60, message
+                    folder_git[project] = message
         inventory = None
         if isinstance(store, RemoteRecords) and not stop.is_set():
             from large_inventory import sync_inventory
@@ -488,6 +511,7 @@ class PersonalSync:
                 "largeInventory": inventory, "status": errors,
                 "codeBackups": backup_status,
                 "folderProjects": dict(self.folders),
+                "folderGit": folder_git,
                 "projectPaths": {p: str(local[p]) if p in local else "" for p in specs}}
 
     def worker(self, stop):

@@ -568,6 +568,9 @@ class ManualSyncDialog(QDialog):
             lines.append(f'普通项目会话映射 {len(folders)} 个。')
             for key, path in sorted(folders.items(), key=lambda entry: str(entry[1]).casefold()):
                 lines.append(f"{path} · {status.get(key, '已登记')}")
+                git_result = (result.get('folderGit') or {}).get(key)
+                if git_result:
+                    lines.append(f"    Git 接入 · {git_result}")
         lines.extend(f'{key} · {value}' for key, value in sorted(status.items()) if key not in paths and key not in folders)
         for project, path in sorted(paths.items(), key=lambda row: (status.get(row[0]) == '已同步', row[0])):
             lines.append(f"{project} · {status.get(project, '未检查')}")

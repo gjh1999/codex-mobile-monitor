@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 
 import monitor
 from cloud_pairing import bundled_workspace
+from desktop_approvals import ApprovalQueueDialog, INACTIVE, approval_status
 from desktop_glass import ClientSwitch, FrostedPanel, OceanBackdrop, motion_enabled
 from desktop_diagnostics import DiagnosticsDialog
 from desktop_model_api import ModelApiDialog
@@ -574,6 +575,7 @@ class ManualSyncDialog(QDialog):
 
 class MainWindow(QMainWindow):
     history_ready = Signal(object, object)
+    approval_ready = Signal(object)
     codex_options_ready = Signal(object, object)
     grouping_changed = Signal(str)
     code_backup_result = Signal(object, object, object)
@@ -605,8 +607,11 @@ class MainWindow(QMainWindow):
         self.collapsed_projects = {'codex': set(), 'claude': set()}
         self._pending_approvals = {}
         self._shown_approvals = set()
+        self._approval_feedback = {}
+        self._approval_sending = {}
+        self._approval_scope = 'local'
+        self._approval_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='lanxi-approval')
         self.approval_dialog = None
-        self._review_token = None
         self._rename_target = None
         self._project_directory = None
         self._pending_open = None
@@ -627,6 +632,7 @@ class MainWindow(QMainWindow):
         self._codex_menu = None
         self.organizer = Organizer(monitor.ROOT, self.grouping_changed.emit)
         self.history_ready.connect(self.history_loaded, Qt.ConnectionType.QueuedConnection)
+        self.approval_ready.connect(self.approval_finished, Qt.ConnectionType.QueuedConnection)
         self.codex_options_ready.connect(self.show_codex_options, Qt.ConnectionType.QueuedConnection)
         self.grouping_changed.connect(self.refresh_grouping, Qt.ConnectionType.QueuedConnection)
         self.setWindowTitle(WINDOW_TITLE)
@@ -913,7 +919,7 @@ class MainWindow(QMainWindow):
         for action, key in zip((attach, pause, resume), ('attach', 'pause', 'resume')):
             action.setEnabled(self.workspace_pages.currentWidget() is self.task_workspace
                               and self.action_buttons[key].isEnabled())
-        review.setEnabled(bool(self._pending_approvals))
+        review.setEnabled(bool(self._pending_approvals or self._approval_feedback or self._approval_sending))
 
     def about_lanxi(self):
         self._popup('关于澜汐', f'澜汐 R{VERSION} · 开发工作台\n一处开始，处处继续。')
@@ -1261,6 +1267,7 @@ class MainWindow(QMainWindow):
         self.organizer.close()
         self.timer.stop()
         self.activity_timer.stop()
+        self._approval_pool.shutdown(wait=False, cancel_futures=True)
         self._history_pool.shutdown(wait=True, cancel_futures=True)
         if self.worker:
             self.worker.join(timeout=8)
@@ -1918,18 +1925,41 @@ class MainWindow(QMainWindow):
         self.quota_text.setPlainText('\n'.join(lines) or '尚无额度窗口数据')
 
     def refresh_approvals(self):
-        now = time.time()
-        self._pending_approvals = {
-            item['token']: item for item in monitor.approvals.public()
-            if not item.get('decision') and item.get('expires', 0) > now
-        }
+        snapshot = monitor.approval_snapshot()
+        self._approval_scope = snapshot['workspace']
+        self._pending_approvals = {item['token']: item for item in snapshot['pending']}
         self._shown_approvals.intersection_update(self._pending_approvals)
-        count = len(self._pending_approvals)
-        self.stat_pending.setText(str(count))
-        self.review_button.setVisible(count > 0)
-        if self.approval_dialog is not None and self._review_token not in self._pending_approvals:
-            self.approval_dialog.reject()
+        now = time.time()
+        receipts = []
+        for token, (item, decision, recorded) in list(self._approval_feedback.items()):
+            if decision in ('queued', 'unknown_delivery'):
+                result = snapshot['decisions'].get(token)
+                if decision == 'queued' and result is None and (item['expires'] <= now or self._approval_scope == 'local'):
+                    result = 'unknown_delivery'
+                if result is not None and result != decision:
+                    self._approval_feedback[token] = item, result, now
+                    receipts.append(result)
+                    continue
+            if decision != 'queued' and now - recorded > 300:
+                del self._approval_feedback[token]
+        if receipts:
+            self.report_approval_results(receipts)
+        self.render_approvals()
         self.offer_approval()
+
+    def render_approvals(self):
+        self.stat_pending.setText(str(len(self._pending_approvals)))
+        reviewable = self._pending_approvals or self._approval_sending or self._approval_feedback
+        self.review_button.setVisible(bool(reviewable))
+        self.review_button.setText('查看待审批请求' if self._pending_approvals else '查看审批结果')
+        if self.approval_dialog is None:
+            return
+        if reviewable:
+            self._shown_approvals.update(self._pending_approvals)
+            self.approval_dialog.update_requests(self._pending_approvals, self._approval_feedback,
+                                                 self._approval_sending, self._approval_scope)
+        else:
+            self.approval_dialog.reject()
 
     def offer_approval(self, force=False):
         if self._quitting:
@@ -1940,81 +1970,68 @@ class MainWindow(QMainWindow):
                 self.approval_dialog.raise_()
                 self.approval_dialog.activateWindow()
             return
-        pending = (item for token, item in self._pending_approvals.items()
-                   if force or token not in self._shown_approvals)
-        item = next(pending, None)
-        if item is None:
+        has_requests = bool(self._pending_approvals or self._approval_feedback or self._approval_sending)
+        if not has_requests or not force and not (self._pending_approvals.keys() - self._shown_approvals):
             return
-        token = item['token']
-        params = item.get('details') or {}
-        method = item.get('method', '')
-        title = '允许运行命令？' if 'commandExecution' in method else (
-            '允许修改文件？' if 'fileChange' in method else '允许此权限请求？')
-        dialog = QDialog(self)
-        dialog.setObjectName('approvalDialog')
-        dialog.setWindowTitle(title)
-        dialog.setWindowIcon(self.windowIcon())
-        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dialog.resize(510, 294)
-        body = QVBoxLayout(dialog)
-        body.setContentsMargins(20, 16, 20, 16)
-        heading = QHBoxLayout()
-        mark = QLabel()
-        mark.setPixmap(self.windowIcon().pixmap(32, 32))
-        heading.addWidget(mark)
-        heading.addWidget(label(title, 14, True), 1)
-        body.addLayout(heading)
-        client = item.get('client', 'codex')
+        self.approval_dialog = ApprovalQueueDialog(self, self.approval_task_title, self.submit_approval)
+        self.approval_dialog.finished.connect(self.approval_closed)
+        self.render_approvals()
+        self.approval_dialog.show()
+
+    def approval_task_title(self, token, request):
+        params = request['details']
+        tid = params.get('threadId')
+        cwd = params.get('cwd')
+        fallback = folder_name(cwd if isinstance(cwd, str) else '') or tid or '未提供'
+        if token.startswith('remote:') or not isinstance(tid, str):
+            return fallback
+        client = 'claude' if request['client'] == 'claude' else 'codex'
         snapshot = monitor.client_snapshot(monitor.snapshot(), client)
-        projects = self.all_tasks(snapshot, client)
-        task_name, _ = projects.get(params.get('threadId'), (folder_name(params.get('cwd')) or '未提供', ''))
-        info = label(
-            f'客户端　{"Claude Code" if client == "claude" else "Codex"}\n'
-            f'任务　{task_name}\n执行设备　本机\n工作目录　{params.get("cwd") or "未提供"}',
-            9, color=MUTED)
-        info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        body.addWidget(info)
-        concrete = {key: value for key, value in params.items() if key not in ('threadId', 'turnId', 'itemId', 'client', 'cwd')}
-        text = QTextBrowser()
-        text.setObjectName('approvalDetails')
-        configure_text(text, 9, 7)
-        if set(concrete) == {'command'} and isinstance(concrete['command'], str):
-            text.setPlainText(concrete['command'])
-            text.setMaximumHeight(82)
-        else:
-            text.setPlainText(json.dumps(concrete, ensure_ascii=False, indent=2) if concrete else '未收到可核对的操作详情。')
-        body.addWidget(text, 1)
-        actions = QHBoxLayout()
-        actions.addStretch()
-        for title, allow in (('拒绝', False), ('允许一次', True)):
-            button = ActionButton(title)
-            button.setAutoDefault(False)
-            if allow:
-                button.setObjectName('approvalAllow')
-                button.setEnabled(any(params.get(key) for key in ('command', 'changes', 'permissions', 'networkApprovalContext')))
-            button.clicked.connect(lambda _=False, value=allow: self.decide(token, value))
-            actions.addWidget(button)
-        body.addLayout(actions)
-        self._shown_approvals.add(token)
-        self._review_token = token
-        self.approval_dialog = dialog
-        dialog.finished.connect(self.approval_closed)
-        dialog.show()
+        return self.all_tasks(snapshot, client).get(tid, (fallback, ''))[0]
 
     def approval_closed(self, _result):
         self.approval_dialog = None
-        self._review_token = None
 
-    def decide(self, token, allowed):
+    def submit_approval(self, tokens, allow):
+        if self._quitting or self._approval_sending:
+            return
+        for token in tokens:
+            item = self._pending_approvals.get(token)
+            decision = self._approval_feedback.get(token, (None, 'pending', None))[1]
+            if item and not item.get('decisionQueued') and decision not in INACTIVE and (not allow or item.get('canAllow')):
+                self._approval_sending[token] = item
+                self._approval_feedback.pop(token, None)
+        if not self._approval_sending:
+            return
+        self.render_approvals()
+        future = self._approval_pool.submit(monitor.decide_approvals, list(self._approval_sending), allow)
+
+        def completed(result):
+            if not self.stop.is_set():
+                self.approval_ready.emit(result)
+
+        future.add_done_callback(completed)
+
+    def approval_finished(self, future):
+        if self._quitting:
+            return
         try:
-            result = monitor.approvals.decide(token, allowed)
-            if result in ('unknown_delivery', 'disconnected', 'resolved'):
-                self._popup('审批未完成', '请求已失效或送达结果不确定，请核查任务。')
-            else:
-                self.control_message.setText('已允许一次' if result == 'allowed' else '已拒绝')
-        except (KeyError, ValueError) as error:
-            self._popup('审批未完成', str(error))
-        self.refresh()
+            results = {row['token']: row['decision'] for row in future.result()}
+        except Exception:
+            results = {}
+        now = time.time()
+        decisions = []
+        for token, item in self._approval_sending.items():
+            decision = results.get(token, 'unknown_delivery')
+            self._approval_feedback[token] = item, decision, now
+            decisions.append(decision)
+        self._approval_sending.clear()
+        self.report_approval_results(decisions)
+        self.refresh_approvals()
+
+    def report_approval_results(self, decisions):
+        counts = Counter(approval_status(decision) for decision in decisions)
+        self.control_message.setText('审批 · ' + ' · '.join(f'{status} {count} 项' for status, count in counts.items()))
 
     def refresh_activity(self):
         thread = self.selected_thread

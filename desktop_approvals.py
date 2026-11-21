@@ -23,6 +23,8 @@ STATUS = {
     'unavailable': '暂时无法处理', 'disconnected': '来源连接已断开', 'unknown_delivery': '结果未确认',
 }
 WORKSPACE = {'connected': '云工作区已连接', 'retrying': '正在重连云工作区', 'local': '本机使用'}
+INACTIVE = {'sending', 'queued', 'responding', 'allowed', 'denied', 'resolved', 'expired',
+            'not_found', 'unknown_delivery', 'disconnected'}
 TOKEN = Qt.ItemDataRole.UserRole
 CHECKED = Qt.CheckState.Checked
 
@@ -152,9 +154,9 @@ class ApprovalQueueDialog(QDialog):
         requests = {}
         for token, item in {**pending, **{key: row[0] for key, row in feedback.items()}, **submitting}.items():
             item = pending.get(token, item)
-            decision = 'sending' if token in submitting else 'queued' if item.get('decisionQueued') else (
-                feedback[token][1] if token in feedback else 'pending')
-            actionable = token in pending and decision not in ('sending', 'queued', 'responding')
+            decision = 'sending' if token in submitting else feedback[token][1] if token in feedback else (
+                'queued' if item.get('decisionQueued') else 'pending')
+            actionable = token in pending and decision not in INACTIVE
             requests[token] = {
                 'method': item['method'], 'client': item.get('client'), 'details': item.get('details') or {},
                 'device': item.get('deviceName') or '本机', 'decision': decision,

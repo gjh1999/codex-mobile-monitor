@@ -22,9 +22,9 @@ def folder_id(relative):
 
 
 def receiver_placeholder(directory, expected):
-    if not directory.is_dir() or {item.name for item in directory.iterdir()} != {".lanxi"}:
-        return False
     try:
+        if not directory.is_dir() or {item.name for item in directory.iterdir()} != {".lanxi"}:
+            return False
         marker = safe_path(directory, RECEIVER)
         return marker.is_file() and json.loads(marker.read_bytes()) == {"folder": expected}
     except (OSError, ValueError):
@@ -121,11 +121,9 @@ def folder_bindings(parent, home, store, index, cache, git_projects, code_folder
             git_project = by_root.get(directory)
             if linked and git_project and git_project != linked:
                 raise ValueError("普通项目登记的 GitHub 仓库与本机不一致")
-            if owns and directory in code_folders and git_project and not linked:
-                linked = git_project
-                record = {**record, "githubProject": linked}
-                store.put(key, revision or EMPTY, pack(record))
-                revision = digest(pack(record))
+            newly_linked = owns and directory in code_folders and git_project and not linked
+            if newly_linked:
+                record = {**record, "githubProject": git_project}
             # Git initialization may succeed before origin is available. Keep serving
             # the folder sessions while the owning device retries publication.
             allow_git = owns and directory in code_folders or bool(linked and linked == git_project)
@@ -133,8 +131,15 @@ def folder_bindings(parent, home, store, index, cache, git_projects, code_folder
                 raise ValueError("普通目录路径无效或与 Git 工作区重叠")
             if any(directory.is_relative_to(path) for path in by_root if path != directory or not allow_git):
                 raise ValueError("普通目录与已登记 Git 项目重叠")
-            if not revision:
-                store.put(key, EMPTY, pack(record))
+            if not owns and directory.exists() and not allow_git:
+                marker = safe_path(directory, RECEIVER)
+                if marker.is_file():
+                    if json.loads(marker.read_bytes()) != {"folder": project}:
+                        raise ValueError("已存在其他普通项目的接收记录")
+                elif any(item.name != ".lanxi" for item in directory.iterdir()):
+                    raise ValueError("本机已有同名目录，无法核对是否为同一项目")
+            if not revision or newly_linked:
+                store.put(key, revision or EMPTY, pack(record))
             if owns and project in native and not safe_path(directory, RECEIVER).exists():
                 sources[project] = directory
             folders[project] = directory

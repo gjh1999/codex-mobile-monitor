@@ -5,8 +5,8 @@
 ## 2026-11-21 Codex 全局监控与跨设备审批后端
 
 - 以 R34 和开发开始时的源码 `899a67e` 为基线。目标是独立于任务接入状态收集会话完成事件和可见的审批。多台电脑加入同一工作区时，可查看同一待审批队列、选择部分或全部同意，实际决定由会话所在设备回复。需求与前端分工见[主文档](../跨设备开发工作台方案.html#ownership)。
-- Windows，Python 3.14.7，已安装 Codex CLI 0.171.0。执行 `.venv\Scripts\python.exe -B -m unittest tests.test_codex_watch tests.test_monitor tests.test_web tests.test_automation tests.test_codex_activity tests.test_codex_desktop tests.test_task_control tests.test_coordination`。72 项通过，包含未接入任务的原生日志增量读取、历史完成过滤、共享连接审批订阅与原请求 ID、勾选和全部同意、工作区切换隔离和已失效审批。
-- 执行 `.venv\Scripts\python.exe -B -m tests.smoke_cloud_coordinator --output build-exe/verification/codex-watch-20261121/https-final.json`。同机起用带真实 TLS 的隔离协调服务，两套设备身份在同组，第三套在另一组。两项审批中只同意所选的一项，来源端使用原请求 ID 回执，另一项保持待确认，另一工作区读取记录返回 404。完成事件经同一通道往返。审批输入使用模拟 RPC。沙箱内复跑时 Windows DPAPI 加密临时凭据返回 WinError 2，经授权后通过。报告在 `build-exe/verification/codex-watch-20261121/`。
+- Windows，Python 3.14.7，已安装 Codex CLI 0.171.0。执行 `.venv\Scripts\python.exe -B -m unittest tests.test_codex_watch tests.test_monitor tests.test_web tests.test_automation tests.test_codex_activity tests.test_codex_desktop tests.test_task_control tests.test_coordination`。72 项通过，耗时 7.836 秒，包含未接入任务的原生日志增量读取、历史完成过滤、共享连接审批订阅与原请求 ID、勾选和全部同意、工作区切换隔离和已失效审批。
+- 执行 `.venv\Scripts\python.exe -B -m tests.smoke_cloud_coordinator --output build-exe/verification/codex-watch-20261121/https-final.json`。同机启动带真实 TLS 的隔离协调服务，两套设备身份在同组，第三套在另一组。两项审批中只同意所选的一项，来源端使用原请求 ID 回执，另一项保持待确认，另一工作区读取记录返回 404。完成事件经同一通道往返。审批输入使用模拟 RPC。沙箱内复跑时 Windows DPAPI 加密临时凭据返回 WinError 2，经授权后通过，最终耗时 12.87 秒。报告在 `build-exe/verification/codex-watch-20261121/`。
 - 默认 Codex 共享 socket 的只读探测在沙箱内未能连接，原生 Codex 审批使用协议夹具验证。两台实体电脑、真实 Codex 客户端审批、Windows 提醒显示、集中审批窗口和便携版发布待验收。现有服务器 API 支持该通道，无本次服务端部署。 [后端接口](../ARCHITECTURE.md#全局-codex-监控与审批队列)
 
 ## 2026-11-21 R34 合流、项目发现与本机会话排查

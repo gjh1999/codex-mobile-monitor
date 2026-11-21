@@ -59,6 +59,8 @@ if (-not (Test-Path './local-config.json')) {
 
 默认开发构建输出为 `release/Lanxi.exe`。临时预览使用独立输出目录。
 
+2026-11-21 本机从构建归档、验收目录和旧工作树的生成目录删除 502 份旧包、重复程序和打包中间文件，合计 14,789,419,617 字节。清理后重新核对了两份保留构建的 SHA-256。旧验收日志中的产物路径反映当时的构建位置。
+
 ```powershell
 & './scripts/build-exe.ps1' -AppName Lanxi-preview -OutputDirectory (Join-Path (Get-Location).Path 'build-exe/preview')
 ```

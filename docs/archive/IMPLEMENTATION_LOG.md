@@ -2,6 +2,12 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-21 本机发布目录整理
+
+- 稳定版沿用已发布的 R36 私人 ZIP，整理后复核 SHA-256 与线上发布记录一致。从 `a9bc851` 的 R36 源码构建本机开发版 `release/Lanxi.exe`，SHA-256 为 `7b20d52592147404c614fbc6cf7df1b793883f22d9b6c94a844384fce27d9199`。
+- Windows 构建使用 `scripts/build-exe.ps1 -AppName Lanxi`。首次指定相对构建目录时，PyInstaller 从 spec 所在目录寻找验收助手，未生成开发版。重跑时将 `-BuildDirectory` 与 `-OutputDirectory` 分别设为项目中 `build-exe/release-cleanup-r36/dev-build` 和 `dev-output` 的绝对路径。执行该构建的 `Lanxi-Verify.exe --exe <dev-output/Lanxi.exe> --mode local --output build-exe/release-cleanup-r36/local-check.json`，六项通过，13.86 秒。替换后重新核对开发版摘要。
+- 移入 `build-exe/release-archive/20261121/` 的旧桌面产物共 53 项，包括 22 个 EXE、15 个 ZIP 和 16 个解压目录。R20 目录内的历史数据库随目录归档。服务端部署 ZIP、下载和配对工具、根目录运行数据仍在原位置。此次整理范围为本机工作区。
+
 <a id="r36-release"></a>
 ## 2026-11-21 R36 私人 Windows 版与协调服务发布
 

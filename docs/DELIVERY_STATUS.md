@@ -66,7 +66,7 @@ R35 补审退回的两项修复已在 R36 发布。R35 已配对客户端可从�
 
 负责人补审未切换线上清单或执行回滚。负责人在 Windows 上复跑 259 项单元测试，其中 257 项通过、2 项跳过，源码 Qt smoke 通过。使用桌面和笔记本两套已配对身份，只读复核 R34 客户端可见 R35 清单以及服务器备份列表接口。 [本轮验证记录](archive/IMPLEMENTATION_LOG.md#r35-owner-review)
 
-R35 审查资料对应源码提交 `5b6d7f4`。请核对项目分组、离线历史、GitHub 与服务器双份代码同步及 R34 升级路径，并复核线上更新清单与备份接口。候选包为本机 `release/Lanxi-R35-Windows-Private.zip`。 [构建、校验和部署记录](archive/IMPLEMENTATION_LOG.md#2026-11-21-r35-github-与服务器代码备份)
+R35 审查资料对应源码提交 `5b6d7f4`，涵盖项目分组、离线历史、GitHub 与服务器双份代码同步及 R34 升级路径。原审核包已归档至本机 `build-exe/release-archive/20261121/Lanxi-R35-Windows-Private.zip`。 [构建、校验和部署记录](archive/IMPLEMENTATION_LOG.md#2026-11-21-r35-github-与服务器代码备份)
 
 R35 包含母目录含 Git 标记时的项目发现和任务分组修复，恢复本机模式下未匹配项目的 Codex 历史显示。「合流」按项目显示本机路径、同步状态及 Git 凭据、仓库所有者等错误。源码和便携版已验证，两台实体设备验收待完成。 [排查和验收记录](archive/IMPLEMENTATION_LOG.md#2026-11-21-r34-合流项目发现与本机会话排查)
 

@@ -87,7 +87,11 @@ class WallpaperLibrary:
             number = 1
             while True:
                 name = source.name if number == 1 else f'{source.stem} ({number}){suffix}'
+                key = 'imported/' + name
                 target = self.images / name
+                if key in self.hidden:
+                    number += 1
+                    continue
                 try:
                     output = target.open('xb')
                     break
@@ -99,10 +103,6 @@ class WallpaperLibrary:
             except OSError:
                 target.unlink(missing_ok=True)
                 raise
-        # Removals are keyed by the managed name, which can be reused after a manual file deletion.
-        key = 'imported/' + name
-        if key in self.hidden:
-            self.set_hidden(key, False)
         return key
 
 
@@ -248,6 +248,8 @@ class WallpaperDialog(QDialog):
 
     def toggle_selected(self):
         key = self.selected_key()
+        if key is None:
+            return
         hidden = key not in self.backdrop.library.hidden
         try:
             self.backdrop.library.set_hidden(key, hidden)

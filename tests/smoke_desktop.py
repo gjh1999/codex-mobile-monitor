@@ -1267,12 +1267,12 @@ def main():
             for expected_index, name in ((1, 'big-sur'), (2, 'catalina')):
                 ocean.rotation.timeout.emit()
                 QTest.qWait(700)
-                assert ocean.index == expected_index and not ocean.current[1].isNull()
+                assert ocean.current_entry == ocean.wallpapers[expected_index] and not ocean.current[1].isNull()
                 assert ocean.previous is None and ocean.fade == 1.0
                 window.grab().save(str(args.output / f'{name}-desktop.png'))
             ocean.rotation.timeout.emit()
             QTest.qWait(700)
-            assert ocean.index == 0
+            assert ocean.current_entry == ocean.wallpapers[0]
             # A quota wait is separate from a manual pause and has a real reset
             # timestamp. The current task makes that distinction visible.
             codex.data['tasks'][0]['threadStatus'] = {'type': 'idle'}

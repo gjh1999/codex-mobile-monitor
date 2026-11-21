@@ -307,43 +307,26 @@ def cloud_client(data_dir):
     return client
 
 
-def cloud_roundtrip(mode, data_dir, code, passed):
-    client = cloud_client(data_dir)
-    passed("本机已连接协调服务")
-    store = RemoteRecords(client)
-    source = mode == "cloud-source"
-    code = uuid.uuid4().hex if source else (code or input("源电脑显示的测试码：")).strip()
-    check(re.fullmatch("[0-9a-f]{32}", code), "测试码格式错误。")
-    key = "verification/" + code
-    if not source:
-        offer = store.read(key)
-        request = json.loads(offer)
-        check(set(request) == {"from", "code"} and request["code"] == code, "这组验收已结束或测试码错误。")
-        check(request["from"] != client.device, "两端使用了相同设备配置。")
-        reply = {**request, "reply": client.device}
-        store.put(key, digest(offer), json.dumps(reply).encode())
-        passed("已读取源设备的测试记录，并通过本机设备令牌回传")
-        return
-    request = {"from": client.device, "code": code}
-    offer = json.dumps(request).encode()
-    store.put(key, EMPTY, offer)
-    passed("源设备令牌已验证，已写入独立测试记录")
-    print(f"请在另一台电脑的测试窗口输入测试码 {code}，然后点「回传测试」。", flush=True)
-    current = offer
-    try:
-        deadline = time.monotonic() + 20 * 60
-        while time.monotonic() < deadline:
-            current = store.read(key)
-            if current != offer:
-                reply = json.loads(current)
-                check(reply.get("from") == client.device and reply.get("code") == code
-                      and reply.get("reply") and reply["reply"] != client.device, "收到的回执与本轮不符。")
-                passed("已从另一设备收到同一测试码的回执")
-                return
-            time.sleep(2)
-        raise TimeoutError("等待另一台设备回传超时。")
-    finally:
-        store.put(key, digest(current), None)
+def project_report(directory, data_dir, emit):
+    check(directory.is_dir(), "所选项目目录不存在。")
+    base = Path(sys._MEIPASS) if getattr(sys, "frozen", False) else Path(__file__).resolve().parents[1]
+    script = base / "scripts" / "诊断项目会话.cmd"
+    check(script.is_file(), "包内缺少项目会话诊断脚本。")
+    command = ("[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); "
+               "$s=[IO.File]::ReadAllText($env:LANXI_DIAG_FILE) -split '(?m)^:LANXI_DIAG\\r?$',2; "
+               "& ([ScriptBlock]::Create($s[1]))")
+    env = {**os.environ, "LANXI_DIAG_FILE": str(script), "LANXI_DIAG_PROJECT": str(directory),
+           "LANXI_DIAG_DATA_DIR": str(data_dir)}
+    result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command],
+                            env=env, capture_output=True, encoding="utf-8", errors="replace",
+                            timeout=180, creationflags=subprocess.CREATE_NO_WINDOW)
+    emit("本机项目与会话清点", "failed" if result.returncode else "passed",
+         (result.stdout + result.stderr).strip())
+    if (directory / ".git").exists() and shutil.which("git"):
+        origin = run(directory, "config", "--get", "remote.origin.url", check=False)
+        if not origin.returncode:
+            return github_id(origin.stdout.decode("utf-8", errors="replace").strip())
+    return None
 
 
 def main():
@@ -352,9 +335,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--exe", type=Path, required=True)
     parser.add_argument("--output", type=Path)
-    parser.add_argument("--mode", choices=(*[mode for mode, _ in MENU.values()], "diagnostics"))
+    parser.add_argument("--mode", choices=[mode for mode, _ in MENU.values()])
     parser.add_argument("--data-dir", type=Path)
-    parser.add_argument("--code")
+    parser.add_argument("--project-dir", type=Path)
+    parser.add_argument("--with-server", action="store_true")
     args = parser.parse_args()
     if getattr(sys, "frozen", False):
         ctypes.windll.kernel32.SetDllDirectoryW(None)
@@ -365,11 +349,17 @@ def main():
         selected = input("选择模式，直接回车选择 1：").strip() or "1"
         mode = MENU[selected][0] if selected in MENU else None
     started = time.monotonic()
-    report = {"status": "failed", "mode": mode, "checks": []}
+    report = {"status": "failed", "mode": mode, "checks": [], "results": []}
+
+    def emit(label, status, detail):
+        states = {"passed": "通过", "failed": "失败", "skipped": "跳过"}
+        print(f"[{states[status]}] {label}" + (f"\n{detail}" if detail else ""), flush=True)
+        report["results"].append({"label": label, "status": status, "detail": detail})
+        if status == "passed":
+            report["checks"].append(label)
 
     def passed(message):
-        print("[通过] " + message, flush=True)
-        report["checks"].append(message)
+        emit(message, "passed", "")
 
     try:
         check(mode is not None, "无效选择。")
@@ -377,20 +367,28 @@ def main():
         check(exe.is_file(), f"找不到澜汐程序\n{exe}")
         report["app_sha256"] = hash_file(exe)
         data_dir = args.data_dir or user_data_root()
-        if mode in ("cloud-source", "cloud-receiver"):
-            cloud_roundtrip(mode, data_dir, args.code, passed)
-        else:
-            check(shutil.which("git") is not None, "本机自检需要 Git for Windows。")
-            report["git"] = git(None, "--version")
+        identity = None
+        if mode == "project":
+            directory = args.project_dir or Path(input("输入本机项目目录：").strip().strip('"'))
+            identity = project_report(directory.resolve(), data_dir, emit)
+            if args.with_server and not identity:
+                emit("服务器项目比对", "skipped", "该目录未读取到支持的 GitHub origin。")
+        if mode == "server" or (mode == "project" and args.with_server and identity):
+            server_checks(cloud_client(data_dir), emit, project=identity)
+        if mode == "local":
             with tempfile.TemporaryDirectory(prefix="lanxi-check-", ignore_cleanup_errors=True) as temp:
-                verify_local(exe, Path(temp), passed)
-            if mode == "diagnostics":
-                PersonalTaskLocks(cloud_client(data_dir)).request()
-                passed("已连接协调服务并验证本机配对及项目占用接口")
+                root = Path(temp)
+                local_feature_checks(root, emit)
+                if shutil.which("git"):
+                    report["git"] = git(None, "--version")
+                    verify_local(exe, root, passed)
+                else:
+                    emit("Git 代码与会话接续", "failed", "本机自检需要 Git for Windows。")
+        check(not any(row["status"] == "failed" for row in report["results"]), "存在失败项，请查看分项结果。")
         report["status"] = "passed"
         print("\n验收通过。", flush=True)
     except HTTPError as error:
-        report["error"] = f"协调服务返回 HTTP {error.code}，请检查设备配对和测试码。"
+        report["error"] = f"协调服务返回 HTTP {error.code}，请检查网络和设备配对。"
         print(report["error"], file=sys.stderr)
         error.close()
     except (

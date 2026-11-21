@@ -13,6 +13,7 @@ from pathlib import Path
 
 from code_sync import (
     SyncIssue,
+    UnsafeRepository,
     exclude_memory,
     github_id,
     sync_project,
@@ -168,7 +169,7 @@ class PersonalSync:
                 return stable, root
         return None
 
-    def bindings(self, store, index, cached, published, errors):
+    def bindings(self, store, index, cached, published, errors, untrusted=None):
         local = {}
         parent = configured_root(self.root)
         found = {}
@@ -190,6 +191,10 @@ class PersonalSync:
                         continue
                 try:
                     remote = value(path, "config", "--get", "remote.origin.url")
+                except UnsafeRepository:
+                    if untrusted is not None:
+                        untrusted.add(path)
+                    continue
                 except (OSError, SyncIssue, subprocess.TimeoutExpired):
                     continue
                 identity = github_id(remote)
@@ -303,6 +308,7 @@ class PersonalSync:
                 self.settings, self.coordination = self.pending_settings
                 self.pending_settings = None
         errors = {}
+        untrusted = set()
         channel = (
             ""
             if self.settings.get("codeOnly")
@@ -327,7 +333,7 @@ class PersonalSync:
         try:
             store = self.store()
             index = store.index() if store else {}
-            local, specs = self.bindings(store, index, cached, published, errors)
+            local, specs = self.bindings(store, index, cached, published, errors, untrusted)
             if cloud:
                 connection = "已连接协调服务"
         except (OSError, ValueError, sqlite3.Error):
@@ -335,7 +341,7 @@ class PersonalSync:
             if cloud:
                 connection = "协调服务暂不可用，后台将重试"
             store = None
-            local, specs = self.bindings(None, {}, cached, published, errors)
+            local, specs = self.bindings(None, {}, cached, published, errors, untrusted)
         if connection == "已连接协调服务":
             try:
                 from notebook_store import sync_notebook
@@ -387,6 +393,10 @@ class PersonalSync:
                              placeholder_id=folder_id(relative) if relative else None)
                 ready[project] = (path, subdir)
                 errors[project] = "已同步"
+            except UnsafeRepository as error:
+                with self.lock:
+                    untrusted.add(path)
+                errors[project] = str(error)
             except (
                 ValueError,
                 OSError,
@@ -416,6 +426,10 @@ class PersonalSync:
                             backup_status[project] = "本机没有项目，可查找已有服务器备份"
                             continue
                         backup_status[project] = backups.sync(path, project, specs[project]["memoryPath"], stop)
+                    except UnsafeRepository as error:
+                        with self.lock:
+                            untrusted.add(path)
+                        backup_status[project] = str(error)
                     except (OSError, KeyError, TypeError, ValueError, subprocess.TimeoutExpired) as error:
                         backup_status[project] = str(error) if isinstance(error, ValueError) else "服务器或本机目录暂不可用"
 
@@ -523,6 +537,7 @@ class PersonalSync:
             self.connection = connection
             self.task_owners = task_owners
         return {"connection": connection, "projects": len(specs), "memoryChecked": check_memory,
+                "untrustedGit": sorted(map(str, untrusted), key=str.casefold),
                 "largeInventory": inventory, "status": errors,
                 "codeBackups": backup_status,
                 "folderProjects": dict(self.folders),

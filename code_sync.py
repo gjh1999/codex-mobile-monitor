@@ -121,6 +121,10 @@ class SyncIssue(ValueError):
     pass
 
 
+class UnsafeRepository(SyncIssue):
+    pass
+
+
 def github_id(remote):
     if not isinstance(remote, str):
         return None
@@ -195,7 +199,7 @@ def run(repo, *args, data=None, check=True, trace=False, timeout=90):
         )):
             raise SyncIssue("GitHub 登录或仓库权限不可用，请在本机确认 Git 凭据及仓库访问权限")
         if b"dubious ownership" in stderr or b"unsafe repository" in stderr:
-            raise SyncIssue("Git 拒绝访问该目录，请核对仓库所有者及 safe.directory 设置")
+            raise UnsafeRepository("Git 拒绝访问该目录，请核对仓库所有者及 safe.directory 设置")
         if b"not a git repository" in stderr or b"invalid gitfile" in stderr:
             raise SyncIssue("本机 Git 工作区不可用，请核对项目路径和 Git 元数据")
         raise SyncIssue(f"Git {args[0]} 未完成，请核对网络、凭据和仓库状态")
@@ -204,6 +208,26 @@ def run(repo, *args, data=None, check=True, trace=False, timeout=90):
 
 def value(repo, *args):
     return run(repo, *args).stdout.decode().strip()
+
+
+def trust_git_directory(repo):
+    repo = Path(repo)
+    if not repo.is_absolute() or not repo.is_dir() or repo.resolve() != repo:
+        raise SyncIssue("请选择本机仓库的实际目录")
+    marker = repo / ".git"
+    if not (marker.is_dir() or marker.is_file()) or marker.is_symlink() or (
+        getattr(marker.lstat(), "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+    ):
+        raise SyncIssue("该目录没有本机 Git 仓库")
+    try:
+        run(repo, "rev-parse", "--show-toplevel", timeout=5)
+    except UnsafeRepository:
+        # Use an exact path in the current account's protected Git configuration.
+        result = run(None, "config", "--global", "--add", "safe.directory", repo.as_posix(),
+                     check=False, timeout=5)
+        if result.returncode:
+            raise SyncIssue("无法写入当前 Windows 用户的 Git 配置")
+        run(repo, "rev-parse", "--show-toplevel", timeout=5)
 
 
 def remote_tip(repo, remote, branch):

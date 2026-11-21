@@ -211,7 +211,7 @@ class PersonalSync:
                         pending_git.add(path)
                         continue
                 try:
-                    origin = run(path, "config", "--get", "remote.origin.url", check=False)
+                    origin = run(path, "config", "--get", "remote.origin.url", check=False, timeout=5)
                     if origin.returncode:
                         # Git config can omit the local configuration of an untrusted
                         # repository without surfacing the ownership error itself.

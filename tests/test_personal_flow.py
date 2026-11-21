@@ -72,6 +72,15 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(result["untrustedGit"], [])
         self.assertEqual(result["status"]["example/flow"], "已同步")
 
+    def test_stalled_git_http_reports_timeout(self):
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            listener.listen()
+            remote = f"http://127.0.0.1:{listener.getsockname()[1]}/test.git"
+            with patch.dict(os.environ, GIT_HTTP_LOW_SPEED_TIME="1"):
+                with self.assertRaisesRegex(SyncIssue, "GitHub 请求超时"):
+                    run(None, "ls-remote", remote, timeout=8)
+
     def test_projects_follow_relative_folder_on_new_device(self):
         relative = Path("客户甲/研发/项目 A")
         original = self.a
@@ -197,7 +206,7 @@ class FlowTests(unittest.TestCase):
         self.assertEqual((folder / "draft.py").read_text(), "local")
         self.assertFalse((folder / ".lanxi").exists())
 
-    def test_manual_request_checks_next_cycle_and_reuses_existing_clone(self):
+    def test_manual_request_joins_active_cycle_and_can_queue_fresh_retry(self):
         source_parent = self.root / "source-projects"
         receiver_parent = self.root / "receiver-projects"
         source = source_parent / "VSCode" / "A"
@@ -239,9 +248,15 @@ class FlowTests(unittest.TestCase):
                 self.assertTrue(started.wait(5))
                 requested = destination.request_manual_sync()
                 self.assertIs(requested, destination.request_manual_sync())
-                self.assertFalse(requested.running())
+                self.assertTrue(requested.running())
+                self.assertIn("正在连接", destination.sync_progress()[0])
+                fresh = destination.request_manual_sync(fresh=True)
+                self.assertIsNot(fresh, requested)
+                self.assertIs(fresh, destination.request_manual_sync(fresh=True))
+                self.assertFalse(fresh.running())
                 advance.set()
-                result = requested.result(timeout=15)
+                self.assertIsNone(requested.result(timeout=5))
+                result = fresh.result(timeout=15)
                 self.assertEqual(result["status"], {"example/flow": "已同步"})
                 self.assertEqual(result["projectPaths"], {"example/flow": str(receiver)})
                 self.assertTrue(result["memoryChecked"])

@@ -10,6 +10,7 @@ from pathlib import Path
 from personal_memory import safe_path, windows_reserved
 
 LIMIT = 100 * 1024 * 1024
+HTTP_IDLE_OPTIONS = ("-c", "http.lowSpeedLimit=1", "-c", "http.lowSpeedTime=20")
 CODE_EXTENSIONS = {
     "py",
     "pyi",
@@ -171,10 +172,7 @@ def run(repo, *args, data=None, check=True, trace=False, timeout=90):
         "git",
         "-c",
         "protocol.version=2",
-        "-c",
-        "http.lowSpeedLimit=1",
-        "-c",
-        "http.lowSpeedTime=20",
+        *HTTP_IDLE_OPTIONS,
         "-c",
         "core.hooksPath=" + os.devnull,
         "-c",

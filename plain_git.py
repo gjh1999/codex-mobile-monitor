@@ -14,7 +14,8 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from code_sync import GENERATED_DIRECTORIES, PRIVATE_DIRECTORIES, SyncIssue, auto_path, github_id, is_large, run, value
+from code_sync import (GENERATED_DIRECTORIES, HTTP_IDLE_OPTIONS, PRIVATE_DIRECTORIES, SyncIssue,
+                       auto_path, github_id, is_large, run, value)
 from handoff_sync import atomic_write
 from personal_memory import safe_path
 from service_lock import ServiceLock
@@ -192,7 +193,7 @@ def _push(folder, url, token, login):
     for setting in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM"):
         if setting in os.environ:
             env[setting] = os.environ[setting]
-    command = ["git", "-C", str(folder), "-c", "http.followRedirects=false", "-c", "credential.helper=",
+    command = ["git", "-C", str(folder), *HTTP_IDLE_OPTIONS, "-c", "http.followRedirects=false", "-c", "credential.helper=",
                "-c", "core.hooksPath=" + os.devnull, "-c", "push.followTags=false", "-c", "push.recurseSubmodules=no",
                "-c", "protocol.allow=never", "-c", "protocol.https.allow=always"]
     options = dict(stdin=subprocess.DEVNULL, capture_output=True, env=env, timeout=90,

@@ -197,11 +197,15 @@ def check_manual_sync(window):
     assert '手动同步' in button.toolTip()
     with (patch.object(monitor, 'personal_sync', flow), patch.object(flow, 'request_manual_sync', return_value=future) as request):
         button.click()
-        request.assert_called_once_with()
+        request.assert_called_once_with(fresh=False)
         dialog = window.manual_sync_dialog
         assert dialog.isVisible() and '等待后台' in dialog.body.toPlainText()
         future.set_running_or_notify_cancel()
         assert wait_until(lambda: '正在检查' in dialog.body.toPlainText())
+        with patch.object(dialog, 'progress', return_value=('正在检查 GitHub 与服务器代码备份', 15, 1, 2,
+                                                           {'owner/b': 'GitHub'})):
+            assert wait_until(lambda: 'owner/b · GitHub' in dialog.body.toPlainText())
+            assert '仓库已处理 1/2' in dialog.body.toPlainText()
         future.set_result({'connection': '已连接协调服务', 'projects': 2, 'memoryChecked': True,
                            'projectPaths': {'owner/a': 'D:/work/a', 'owner/b': 'D:/work/b'},
                            'status': {'owner/a': '已同步', 'owner/b': '两端修改发生冲突'},
@@ -218,8 +222,10 @@ def check_manual_sync(window):
               patch('desktop_qt.trust_git_directory') as trust):
             request.return_value = retry
             dialog.trust_button.click()
+            assert wait_until(lambda: request.call_count == 2)
             trust.assert_called_once_with('D:/work/b')
-            assert request.call_count == 2 and not dialog.trust_button.isVisible()
+            request.assert_called_with(fresh=True)
+            assert not dialog.trust_button.isVisible()
         dialog.close()
 
 

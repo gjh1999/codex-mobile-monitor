@@ -2,6 +2,14 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+<a id="r35-frontend-ticket"></a>
+## 2026-11-21 R35-03 前端验收
+
+- 输入为 `release/Lanxi-R35-Windows-Private.zip`，SHA-256 为 `6cf1aa158b855b1c744579c655a607aea8e987cbfe0d0eac2225a6b5fe00c3d1`，完整 ZIP 的 CRC 检查通过。Windows、Python 3.14.7 与 PySide6 6.12.0，使用隔离资料目录及模拟 RPC。
+- 执行 `.venv\Scripts\python.exe -B build-exe/verification/r35-frontend-ticket-20261121/verify_widgets.py packaged-widgets-01`。从 EXE 的 PYZ 直接加载包内模块到测试进程，用 Qt 点击审批、壁纸和每日记录界面，交互测试通过，用时 2.949 秒。覆盖审批勾选、全部同意、单项拒绝、未收到与收到回执、缺详情跳过；壁纸导入与恢复；每日记录三段滑块、日期合并和过日刷新。截图和报告保存在 `build-exe/verification/r35-frontend-ticket-20261121/packaged-widgets-01/`。
+- `desktop_qt`、`desktop_approvals` 与 `d4361ee` 的代码对象相同，与 `42e5395` 不同。R35 实测审批左栏只显示类型与任务，缺详情项的状态仍是「待审批」，勾选沿用深色方框。原命令可在右栏读到。源码比较还确认 R35 缺少关闭窗口后发送结果信号时的异常保护，该项待候选包独立复测。
+- 执行 `.venv\Scripts\python.exe -B build-exe/verification/r35-frontend-ticket-20261121/verify_exe_local.py`。包中 `Lanxi-Verify.exe` 用隔离本机模式启动原 R35 EXE，6 项通过，用时 13.92 秒。输出 `exe-selftest-01/portable-local.json`。原 EXE 进程实测覆盖启动及自检，界面交互由包内模块测试覆盖。真实 Codex 审批和实体双机待验证。 [工单 R35-03](../DELIVERY_STATUS.md#r35-03)
+
 <a id="r35-owner-review"></a>
 ## 2026-11-21 R35 负责人补审
 

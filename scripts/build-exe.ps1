@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$AppName = 'Lanxi',
   [string]$OutputDirectory,
   [string]$BuildDirectory,

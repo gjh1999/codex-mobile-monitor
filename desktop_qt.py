@@ -1334,9 +1334,12 @@ class MainWindow(QMainWindow):
         active_controls = {task.get('threadId'): task for task in controls.get('tasks') or []}
         attaching = {op.get('threadId') for op in controls.get('operations') or []
                      if op.get('action') in ('attach', 'focus') and op.get('status') in ('queued', 'running')}
+        roots = frozenset(Path(row['cwd']) for row in self._last_snapshot.get('indexedProjects', [])
+                          if row['id'].startswith(ENTRY_PREFIX))
+        boundary = configured_root(monitor.ROOT)
+        groups = {directory: project_group(directory, roots, boundary) for _, directory in projects.values()}
         projects_by_name = {}
-        for _title, directory in projects.values():
-            group = project_group(directory)
+        for group in groups.values():
             projects_by_name.setdefault(group[1].casefold(), set()).add(group)
         rows = []
         for tid, (title, directory) in projects.items():
@@ -1352,7 +1355,7 @@ class MainWindow(QMainWindow):
                 caption = '暂泊中' if self.client == 'claude' and status == 'active' else '已暂泊 · 待续航'
             else:
                 caption = {'active': '行舟中', 'systemError': '执行异常'}.get(status, '已执舟')
-            group = project_group(directory)
+            group = groups[directory]
             model_label = self.organizer.label('task:' + self.client, tid)
             if model_label and model_label.casefold() != group[1].casefold():
                 matching = projects_by_name.get(model_label.casefold(), ())
@@ -1449,7 +1452,8 @@ class MainWindow(QMainWindow):
             threads = {t['id']: t for t in snap.get('threads', [])}
             for indexed in snap['indexedProjects']:
                 tid = indexed['id']
-                threads[tid] = {**indexed, **threads.get(tid, {}), 'projectRoot': indexed['cwd']}
+                live = threads.get(tid, {})
+                threads[tid] = {**indexed, **live, 'cwd': live.get('cwd') or indexed['cwd']}
             snap['threads'] = list(threads.values())
         flow = monitor.personal_sync
         if flow:

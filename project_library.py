@@ -154,7 +154,10 @@ class ProjectLibrary:
             directory = fields["cwd"]
             path = Path(directory)
             parent = next((part for part in (path, *path.parents) if part in projects), None) if directory else None
-            rows.append({"id": thread, **fields, "cwd": str(parent) if parent else directory})
+            row = {"id": thread, **fields}
+            if parent:
+                row.update(cwd=str(parent), projectRoot=str(parent))
+            rows.append(row)
         self.headers = cache
         return [*projects.values(), *rows]
 

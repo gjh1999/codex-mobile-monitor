@@ -11,7 +11,7 @@ def folder_name(directory):
 
 
 @lru_cache(maxsize=256)
-def project_group(directory):
+def project_group(directory, known_roots=frozenset(), boundary=None):
     if not directory:
         return '', '未归档', ''
     path = Path(directory)
@@ -21,8 +21,13 @@ def project_group(directory):
             if path.is_dir():
                 workspace = str(path.resolve())
                 path = Path(workspace)
-                workspace = next((str(parent) for parent in (path, *path.parents)
-                                  if (parent / '.git').exists()), workspace)
+                parents = (path, *path.parents)
+                project = next((parent for parent in parents if parent in known_roots), None)
+                if project is None:
+                    if boundary and path.is_relative_to(boundary):
+                        parents = parents[:parents.index(boundary)]
+                    project = next((parent for parent in parents if (parent / '.git').exists()), path)
+                workspace = str(project)
         except OSError:
             pass
     normalized = os.path.normcase(os.path.normpath(workspace))

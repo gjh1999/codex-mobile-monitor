@@ -30,6 +30,8 @@ Codex 和 Claude 各有独立 worker、RPC 适配器、任务控制器和本地�
 | `daemon_support.py` | 限定范围的 Codex 命令自动审批策略和 Windows 提醒去重 |
 | `reply_log.py`、`conversation.py` | 本地消息/事件记录及只读对话展示 |
 | `history_labels.py` | Codex 本机历史会话的标题和路径标签 |
+| `codex_watch.py` | 增量读取原生轮次完成，订阅共享 Codex App Server 的待审批会话 |
+| `codex_workspace.py` | 同工作区的提醒、待审批项、审批决定和回执 |
 | `channels_dingtalk.py` | 签名 HTTPS Webhook、业务返回检查、脱敏和不确定送达处理 |
 | `dingtalk_commands.py` | 可选 Stream SDK 接入、身份三元组、消息去重与一次确认码 |
 | `attachments.py` | 辅助会话接入/观察类，保留独立测试；当前主控制流程使用 `TaskControl` |
@@ -51,9 +53,19 @@ Claude 不调用 Codex 的 `Scheduler.tick()` 或 `ManagedTasks.sync()`。其显
 
 审批绑定原连接和 request ID，处理过期、服务端撤销和断连。自动规则只覆盖显式允许的 Codex 完整命令；其余请求由桌面或经身份校验的 Stream 单次处理。文件审批缺少具体变更详情时无法批准，不把旧客户端弹窗当作本服务请求。
 
+### 全局 Codex 监控与审批队列
+
+独立的 `codex-watch` worker 增量读取当前 Codex 用户目录下的原生会话完成事件。它也收集 RPC 完成事件，按会话和轮次发出一次 Windows 完成提醒。共享 App Server 已运行时，后台通过本机 `app-server proxy` 发现等待审批的会话并订阅实时请求，用户无需在澜汐接入该任务。独立进程中的原生审批仍由它自己的客户端处理。后台只通过原请求连接处理可核对的审批请求。
+
+连接云服务器时，各台运行澜汐的电脑通过现有私人工作区记录通道交换完成事件和待审批项。记录包含来源设备和审批详情，协调服务按工作区鉴权。离线记录通过心跳判定过期。跨机决定带有独立请求 ID，来源电脑逐项检查有效期、详情和权限后执行，并发布实际结果。原请求重复投递沿用原结果。
+
+前端可用 `monitor.approval_snapshot()` 获取 `pending`、`decisions`、`sharedCodex` 和 `workspace`。`pending` 中的 `token` 标识具体请求，`canAllow` 表示当前可同意，`deviceName` 标识来源，`decisionQueued` 表示跨机决定待回执。`decisions` 是近期跨机决定的结果字典。`sharedCodex` 为 `shared` 或 `own_connection`。`workspace` 为 `connected`、`retrying` 或 `local`。
+
+用 `monitor.decide_approvals(tokens, allow)` 提交显式选中的令牌列表，返回逐项结果。全部同意时，前端提交当前窗口内可同意的全部令牌。`queued` 表示已安排发往来源电脑，实际结果随后写入 `decisions`。Web 对应的认证接口为 `GET /api/approvals` 与 `POST /api/approvals/batch`，后者接受 `{"tokens":["…"],"allow":true}`，单批最多 256 项。原单项接口继续可用。
+
 ## 通知
 
-两个客户端各自在回复库内维护待通知队列。安装到旧回复库时首次收录已有的助手回复，沿用原通知键去重。每轮最多处理 64 条，新到的回复优先于迁移的历史记录。发送后中断时，下次轮询继续处理未确认的批次。
+Claude 继续在回复库维护待通知队列。Codex 使用真实轮次完成事件发提醒。应用启动之前已完成的原生历史跳过，来自 RPC、原生日志或同工作区设备的同一完成按会话和轮次去重。
 
 Windows 通知使用分客户端的 SQLite 去重，正文显示摘要；完整内容保存在本地日志。调用通知 API 成功与系统实际显示通知是两个验收层次。
 

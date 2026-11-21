@@ -2,6 +2,7 @@
 
 import json
 import re
+import secrets
 import socket
 import threading
 import time
@@ -77,7 +78,7 @@ class CodexWorkspace:
             if allow and not row['canAllow']:
                 return 'details_unavailable'
             self.results.pop(token, None)
-            self.outgoing[token] = {'target': row['device'], 'token': row['sourceToken'], 'allow': allow,
+            self.outgoing[token] = {'target': row['device'], 'token': row['sourceToken'], 'id': secrets.token_urlsafe(24), 'allow': allow,
                                     'time': now, 'expires': row['expires']}
             return 'queued'
 
@@ -129,23 +130,32 @@ class CodexWorkspace:
                                  'details': details, 'device': peer, 'deviceName': name, 'remote': True, 'expires': expires,
                                  'decision': None, 'canAllow': can_allow(details), 'liveUntil': row['time'] + LIVE}
             for item in self.entries(row, 'decisions'):
-                source = item.get('token')
-                key = peer, source
-                if (item.get('target') == device and valid_token(source) and type(item.get('allow')) is bool
+                source, request_id = item.get('token'), item.get('id')
+                key = peer, request_id
+                if (item.get('target') == device and valid_token(source) and valid_token(request_id) and type(item.get('allow')) is bool
                         and recent(item.get('time'), now, RETENTION) and key not in self.incoming_results):
-                    decision = self.approvals.decide_pending(source, item['allow'], client='codex')
-                    self.incoming_results[key] = {'target': peer, 'token': source, 'decision': decision, 'time': now}
+                    expires = item.get('expires')
+                    decision = 'expired'
+                    if type(expires) in (int, float) and expires > now:
+                        decision = self.approvals.decide_pending(source, item['allow'], client='codex')
+                    self.incoming_results[key] = {'target': peer, 'token': source, 'id': request_id, 'decision': decision, 'time': now}
             for item in self.entries(row, 'receipts'):
                 source, decision = item.get('token'), item.get('decision')
                 if item.get('target') == device and valid_token(source) and isinstance(decision, str):
                     token = f'remote:{peer}:{source}'
                     with self.lock:
-                        if token in self.outgoing:
+                        if token in self.outgoing and self.outgoing[token]['id'] == item.get('id'):
                             self.outgoing.pop(token)
                             self.results[token] = decision[:60], now
         with self.lock:
             self.remote = remote
         return turns
+
+    def disconnect(self, store):
+        key = PREFIX + store.client.device
+        previous = store.index().get(key, EMPTY)
+        if previous != EMPTY:
+            store.put(key, previous, None)
 
     def sync(self, store):
         now = self.clock()

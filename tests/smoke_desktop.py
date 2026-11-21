@@ -229,6 +229,39 @@ def check_manual_sync(window):
         dialog.close()
 
 
+def check_external_approval_alert(window):
+    from codex_approval_alerts import ALERTS
+
+    editor = QFrame()
+    editor.setWindowTitle('VS Code test window')
+    editor.resize(580, 420)
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        inbox = root / '.local' / ALERTS
+        inbox.mkdir(parents=True)
+        with patch.object(monitor, 'ROOT', root):
+            window.hide()
+            editor.show()
+            editor.raise_()
+            editor.activateWindow()
+            try:
+                (inbox / ('a' * 32 + '.json')).write_text(json.dumps({
+                    'project': 'Sample project', 'tool': 'Bash', 'thread': CODEX,
+                }), encoding='utf-8')
+                assert wait_until(lambda: any(box.windowTitle() == 'Codex 等待审批' for box in window._dialogs))
+                alert = next(box for box in window._dialogs if box.windowTitle() == 'Codex 等待审批')
+                assert alert.isVisible() and not window.isVisible()
+                assert alert.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
+                assert all(text in alert.text() for text in ('Sample project', '请在发起请求的 Codex 窗口确认'))
+                assert not list(inbox.iterdir())
+                alert.accept()
+            finally:
+                editor.close()
+                window.show()
+                window.raise_()
+                window.activateWindow()
+
+
 def check_project_occupancy(window):
     from uuid import uuid4
 
@@ -1501,6 +1534,7 @@ def main():
             check_diagnostics_pairing(window)
             check_manual_sync(window)
             check_project_occupancy(window)
+            check_external_approval_alert(window)
             check_automatic_pairing(window)
             check_markdown(window, data, args.output)
             check_process_bubbles(window, args.output)

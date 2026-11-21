@@ -30,6 +30,7 @@ if ($LASTEXITCODE -ne 0) { throw "Lanxi-Verify 构建失败，退出码：$LASTE
   --paths $project `
   --icon "$(Join-Path $project 'app.ico')" `
   --add-data "$(Join-Path $project 'windows_notify.ps1');." `
+  --add-data "$(Join-Path $project 'scripts\codex-approval-alert.ps1');scripts" `
   --add-data "$(Join-Path $project 'app.ico');." `
   --add-data "$(Join-Path $helpers 'Lanxi-Verify.exe');." `
   --add-data "$(Join-Path $project 'docs\assets\os-x-mavericks-wave.jpg');docs/assets" `

@@ -45,6 +45,8 @@ R35 在项目母目录有 Git 标记时仍扫描子项目。使用「本机使�
 - 跨机提交后，状态先显示「等待回执」，来源设备处理后逐项显示结果。送达结果不确定时显示「结果未确认」。独立 Codex App Server 的审批由原客户端处理。Codex 完成提醒由后台读取已完成轮次后发送。
 - 从 R36 起，共享连接在本机或跨机同意前都会核对项目控制权。旧任务已交还或控制权已转移时，审批返回「控制权已变更」。 [工单与复测状态](DELIVERY_STATUS.md#r35-review)
 
+R41 支持 Windows 上独立 Codex 的审批提醒。在澜汐托盘选择「VS Code 审批提醒…」并启用。重启 VS Code，在 Codex 输入框旁的 **Review hooks** 审查并信任「澜汐审批提醒」。也可在同一 Windows 账号的终端打开 Codex，用 `/hooks` 完成审查。使用自定义 `CODEX_HOME` 时，澜汐、终端和扩展需使用同一配置目录。澜汐运行时，收到支持的审批事件会置顶显示项目和工具名。实际确认在发起请求的 Codex 窗口操作。再次打开同一菜单可停用此提醒。 [Codex Hook 官方说明](https://learn.chatgpt.com/docs/hooks#permissionrequest)
+
 已完成 R35 包内界面的隔离 Qt 验证和双设备模拟联调。R36 包内的最终界面改动已通过独立复测，实体双机及真实客户端审批仍待现场验证。 [R35-03](DELIVERY_STATUS.md#r35-03) · [后端接口及支持范围](ARCHITECTURE.md#全局-codex-监控与审批队列)
 
 ## EXE 与数据

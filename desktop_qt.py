@@ -27,6 +27,9 @@ from PySide6.QtWidgets import (
 import monitor
 from cloud_pairing import bundled_workspace
 from code_sync import trust_git_directory
+from codex_approval_alerts import (
+    configure as configure_approval_alerts, hook_home, installed as approval_alerts_installed, take_alerts,
+)
 from desktop_approvals import ApprovalQueueDialog, INACTIVE, approval_status
 from desktop_glass import ClientSwitch, FrostedPanel, OceanBackdrop, motion_enabled
 from desktop_diagnostics import DiagnosticsDialog
@@ -722,6 +725,7 @@ class MainWindow(QMainWindow):
         self.timer.start(1000)
         self.approval_timer = QTimer(self)
         self.approval_timer.timeout.connect(self.refresh_approvals)
+        self.approval_timer.timeout.connect(self.refresh_external_approval_alerts)
         self.approval_timer.start(500)
         self.activity_timer = QTimer(self)
         self.activity_timer.timeout.connect(self.refresh_activity)
@@ -1072,6 +1076,7 @@ class MainWindow(QMainWindow):
         sync_menu = menu.addMenu('跨机接续')
         sync_menu.aboutToShow.connect(lambda: self.fill_sync_menu(sync_menu))
         menu.addAction('查看待审批请求', lambda: self.offer_approval(force=True))
+        menu.addAction('VS Code 审批提醒…', self.configure_external_approval_alerts)
         menu.addAction('打开用户数据目录', lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(monitor.ROOT))))
         menu.addAction('设置项目母目录…', lambda: self.choose_project_root())
         if getattr(sys, 'frozen', False):
@@ -1751,8 +1756,10 @@ class MainWindow(QMainWindow):
     def _popup(self, title, message):
         QTimer.singleShot(0, lambda title=title, message=message: self._popup_now(title, message))
 
-    def _popup_now(self, title, message):
+    def _popup_now(self, title, message, *, on_top=False):
         box = QMessageBox(self)
+        if on_top:
+            box.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint)
         box.setObjectName('lanxiDialog')
         box.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         box.setIcon(QMessageBox.Icon.Warning)
@@ -1763,7 +1770,11 @@ class MainWindow(QMainWindow):
         box.button(QMessageBox.StandardButton.Ok).setText('知道了')
         self._dialogs.append(box)
         box.finished.connect(lambda _result: self._dialogs.remove(box) if box in self._dialogs else None)
-        box.open()
+        if on_top:
+            box.show()
+            box.raise_()
+        else:
+            box.open()
 
     def submit_composer(self):
         text = self.message_edit.toPlainText().strip()
@@ -2009,6 +2020,44 @@ class MainWindow(QMainWindow):
                     if window.get('resetsAt'):
                         lines.append('重置：' + self.local_time(window['resetsAt']))
         self.quota_text.setPlainText('\n'.join(lines) or '尚无额度窗口数据')
+
+    def configure_external_approval_alerts(self):
+        self.show_window()
+        try:
+            home = hook_home()
+            enabled = approval_alerts_installed(monitor.ROOT, home)
+            question = ('停用澜汐的 Codex 审批提醒？' if enabled else
+                        '启用本机 Codex 审批提醒？澜汐会添加一个通知 Hook。首次启用后请在 Codex 中审查并信任它。')
+            if QMessageBox.question(self, 'VS Code 审批提醒', question) != QMessageBox.StandardButton.Yes:
+                return
+            configure_approval_alerts(monitor.ROOT, home, not enabled)
+        except (OSError, ValueError, RuntimeError) as error:
+            self._popup('无法更新审批提醒', str(error))
+            return
+        if enabled:
+            self._popup('审批提醒已停用', '重启 VS Code 后应用配置。')
+        else:
+            self._popup('审批提醒已配置',
+                        '重启 VS Code，在 Codex 输入框旁的 Review hooks 审查并信任「澜汐审批提醒」。'
+                        '\n也可以在同一账号的 Codex 终端使用 /hooks。'
+                        '\n审批仍在发起请求的 Codex 窗口确认。')
+
+    def refresh_external_approval_alerts(self):
+        if self._quitting:
+            return
+        threads = {request['details'].get('threadId') for request in self._pending_approvals.values()}
+        alerts = [row for row in take_alerts(monitor.ROOT) if row['thread'] not in threads]
+        if not alerts:
+            return
+        descriptions = dict.fromkeys(f"{row['project'] or 'Codex 会话'} · {row['tool'] or '审批请求'}" for row in alerts)
+        text = '\n'.join(list(descriptions)[:6])
+        title = 'Codex 等待审批'
+        for box in self._dialogs:
+            if box.windowTitle() == title:
+                box.setText(display_text(text + '\n请在发起请求的 Codex 窗口确认。'))
+                box.raise_()
+                return
+        self._popup_now(title, text + '\n请在发起请求的 Codex 窗口确认。', on_top=True)
 
     def refresh_approvals(self):
         if self._quitting:

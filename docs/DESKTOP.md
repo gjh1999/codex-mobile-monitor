@@ -48,7 +48,17 @@ R34 后续修复的源码版在项目母目录有 Git 标记时仍扫描子项�
 
 澜汐启动时会读取 Windows「图片」下的 `澜汐/macOS`，包括各版本子目录。横版和方形 JPG、PNG 原图用于全窗背景，窗口取画面中央等比裁切。默认每 30 分钟换一张。图库里有 `10.9 Mavericks` 时从这张海浪开始，其余按路径排序。原图可从每张壁纸详情页的下载按钮取得。[AppleWalls macOS 合集](https://applewalls.com/zh/macos-wallpapers)
 
-源码和 EXE 共用当前用户的图片库。新电脑上可复制整个 `澜汐/macOS` 文件夹，未安装图库时使用内置的 Mavericks 海浪、Big Sur 白昼和 Catalina 夜景。可用 `desktopWallpaperMinutes` 调整间隔，设为 0 固定显示 Mavericks。系统关闭动画效果时直接切换。[内置壁纸来源](https://512pixels.net/projects/default-mac-wallpapers-in-5k/)
+源码和 EXE 共用当前用户的 Windows「图片」图库。新电脑上可复制整个 `澜汐/macOS` 文件夹。没有可用的本机或自选图片时，会轮换未移出的内置壁纸。用 `desktopWallpaperMinutes` 调整间隔，设为 0 后停止自动轮换，启动优先显示可用的 Mavericks。系统关闭动画效果时直接切换。 [内置壁纸来源](https://512pixels.net/projects/default-mac-wallpapers-in-5k/)
+
+### 壁纸管理
+
+在源码版主窗口里，把鼠标移到顶边，打开「设置 → 壁纸管理」。打开时选中当前壁纸。左侧可浏览本机图库、自选图片和内置壁纸，右侧显示选中图片的预览、原图分辨率、来源及路径。内置壁纸显示随包文件名。浏览其他图片后，可点「查看当前壁纸」回到正在显示的那张。
+
+- 「添加图片」可多选本地 JPG、JPEG、PNG。澜汐保存副本并自动区分同名文件。自选图片可为竖版，整窗显示时仍使用居中裁切。
+- 「立即显示」马上切换窗口壁纸，自动轮换开启时从此刻重新计时。固定模式下，本次运行会停在手动选中的图。
+- 「移出轮换」保留原文件与导入的副本。移出当前图后会换成下一张可用图片。都移出后显示纯色背景。列表中标为「已移出」的图可以恢复。
+
+自选图片和移出记录保存在当前实例的数据目录，关闭窗口或重启后仍保留。该入口已完成 Windows 源码界面验收，待随便携包发布。 [配置和存储位置](CONFIGURATION.md)
 
 R21 起，便携 EXE 将 `local-config.json`、任务数据库、回复记录和草稿保存在 `%LOCALAPPDATA%\Lanxi\data`。源码运行继续使用项目根目录。 [配置说明](CONFIGURATION.md)
 

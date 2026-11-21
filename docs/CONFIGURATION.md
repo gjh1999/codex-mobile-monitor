@@ -28,7 +28,7 @@
 | `claudeAutoAttachThreads` | `[]` | 启动时写入 Claude 接入列表的会话 ID |
 | `autoApprovalRules` | `[]` | Codex 精确命令自动审批规则 |
 | `streamIdentities` | `[]` | 钉钉 Stream 私聊身份白名单；空列表拒绝全部命令 |
-| `desktopWallpaperMinutes` | `30` | 每隔多少分钟轮换桌面壁纸。填写 1–1440 的整数，填 0 固定使用 Mavericks 海浪。重启生效 |
+| `desktopWallpaperMinutes` | `30` | 每隔多少分钟轮换桌面壁纸。填写 1–1440 的整数，填 0 停止自动轮换，启动优先显示可用的 Mavericks。重启生效 |
 
 服务循环会重新读取任务配置与审批规则；自动接入 seed、Stream 路由身份在启动时建立。为统一应用更改，修改后重启对应实例。已移出的任务意图保存在控制数据库，seed 不会覆盖已有的移出状态。
 
@@ -65,6 +65,7 @@
 | `local-model-api.json` | 自动分组使用的接口地址、模型及由当前 Windows 用户保护的 API 密钥 |
 | `lanxi-groups.sqlite3` | 案头任务、随记和待办的模型分组结果及手动分组 |
 | `lanxi-notebook.sqlite3` | 吉光片羽的随记、待办、每日记录历史和同步记录 |
+| `.local/desktop-wallpapers/` | 壁纸管理的自选图片副本（`images/`）和移出轮换记录（`hidden.json`） |
 | `scheduler.sqlite3` | Codex 下次调度、退避、发送预留，以及 `quota_waits` 额度等待/恢复预留 |
 | `managed.sqlite3` | Codex 受管任务注册与配置指纹 |
 | `task-control.sqlite3`、`claude-task-control.sqlite3` | 分客户端的接入、暂停、托管意图和控制操作队列 |

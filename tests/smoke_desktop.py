@@ -181,10 +181,12 @@ def check_manual_sync(window):
         future.set_result({'connection': '已连接协调服务', 'projects': 2, 'memoryChecked': True,
                            'projectPaths': {'owner/a': 'D:/work/a', 'owner/b': 'D:/work/b'},
                            'status': {'owner/a': '已同步', 'owner/b': '两端修改发生冲突'},
+                           'codeBackups': {'owner/a': '服务器存储暂不可用', 'owner/b': '已备份'},
                            'largeInventory': {'owner/a': {'data.bin': {'localSize': None}}}})
         assert wait_until(lambda: 'data.bin · 本机缺少' in dialog.body.toPlainText())
         assert all(text in dialog.body.toPlainText() for text in ('已同步 1 个，未同步 1 个', '项目记忆已检查', '发生冲突',
-                                                                 'owner/a · 已同步', 'D:/work/b'))
+                                                                 'owner/a · 已同步', 'D:/work/b',
+                                                                 '服务器代码备份已确认 1 个', '服务器备份 · 已备份'))
         dialog.close()
 
 

@@ -86,6 +86,7 @@ class CodexWatchTests(unittest.TestCase):
             source = CodexWorkspace(approvals, lambda: now)
             viewer = CodexWorkspace(Approvals(clock=lambda: now), lambda: now)
             outsider = CodexWorkspace(Approvals(clock=lambda: now), lambda: now)
+            source.set_identity(('https://example.invalid', 'desktop', 'same-token'))
             source.complete({'threadId': THREAD, 'turnId': 'finished', 'time': now, 'title': 'Fixture'})
             source.sync(store('desktop'))
             turns = viewer.sync(store('laptop'))
@@ -106,6 +107,9 @@ class CodexWatchTests(unittest.TestCase):
             peer.send.assert_called_once_with({'id': 1, 'result': {'decision': 'accept'}})
             now += 40
             self.assertFalse(viewer.pending())
+            source.set_identity(('https://example.invalid', 'desktop', 'other-token'))
+            source.sync(store('desktop', 'other'))
+            self.assertEqual(outsider.sync(store('third', 'other')), [])
 
 
 if __name__ == '__main__':

@@ -111,6 +111,7 @@ def codex_activity_roundtrip(source, viewer, other):
     sender = CodexWorkspace(approvals)
     peer = CodexWorkspace(Approvals())
     outsider = CodexWorkspace(Approvals())
+    sender.set_identity((source.client.url, source.client.device, source.client.token))
     sender.complete({'threadId': '11111111-2222-4333-8444-555555555555', 'turnId': 'fixture-complete',
                      'time': time.time(), 'title': 'Fixture'})
     sender.sync(source)

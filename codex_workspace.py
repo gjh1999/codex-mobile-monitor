@@ -51,9 +51,14 @@ class CodexWorkspace:
                 self.outgoing.clear()
                 self.incoming_results.clear()
                 self.results.clear()
+                self.completions.clear()
                 self.published = 0
 
     def complete(self, event):
+        if self.identity is None:
+            return
+        now = self.clock()
+        self.completions = {key: item for key, item in self.completions.items() if recent(item['time'], now, RETENTION)}
         key = event['threadId'], event['turnId']
         current = self.completions.get(key)
         if current is None or not current['title'] and event['title']:

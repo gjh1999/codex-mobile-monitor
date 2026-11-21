@@ -285,7 +285,8 @@ def watch_codex(stop):
   name=item.get('title') or history_labels.get(item['threadId'],{}).get('title') or 'Codex 会话'
   if item.get('deviceName'):name=item['deviceName']+' · '+name
   key=f"codex:turn-complete:{item['threadId']}:{item['turnId']}"
-  native.notify(key,'Codex 对话已完成',name)
+  try:native.notify(key,'Codex 对话已完成',name)
+  except sqlite3.Error:return
 
  def local(item):
   workspace_codex.complete(item)
@@ -293,6 +294,16 @@ def watch_codex(stop):
 
  try:
   while not stop.is_set():
+   workspace_status='local'
+   try:
+    client=device_client(config())
+    identity=(client.url,client.device,client.token) if client and client.token else None
+    workspace_codex.set_identity(identity)
+    store=RemoteRecords(client) if identity else None
+   except (OSError,ValueError,KeyError,TypeError):
+    workspace_codex.set_identity(None)
+    store=None
+    workspace_status='retrying'
    while not stop.is_set():
     try:item=codex_completions.get_nowait()
     except queue.Empty:break
@@ -311,23 +322,17 @@ def watch_codex(stop):
     next_probe=now+8
    update(codexApprovalWatch='shared' if daemon and not daemon.closed else 'own_connection')
    try:
-    client=device_client(config())
-    if client and client.token:
-     workspace_codex.set_identity((client.url,client.device,client.token))
-     store=RemoteRecords(client)
+    if store:
      for row in workspace_codex.sync(store):
       stamp=row.get('time')
       if not recent(stamp,now,RETENTION) or stamp<started:continue
       name=row.get('title')
       item=completion(row.get('threadId'),row.get('turnId'),stamp,name if isinstance(name,str) else '')
       if item:alert({**item,'deviceName':row['deviceName']})
-     update(codexWorkspaceWatch='connected')
-    else:
-     store=None
-     workspace_codex.set_identity(None)
-     update(codexWorkspaceWatch='local')
+     workspace_status='connected'
    except (OSError,ValueError,KeyError,TypeError):
-    update(codexWorkspaceWatch='retrying')
+    workspace_status='retrying'
+   update(codexWorkspaceWatch=workspace_status)
    stop.wait(2)
  finally:
   if daemon:daemon.close()

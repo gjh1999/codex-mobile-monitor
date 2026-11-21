@@ -63,6 +63,10 @@ class ProjectLibraryTests(unittest.TestCase):
         second = parent / "second"
         for folder in (parent, first.parent, first):
             (folder / ".git").mkdir(parents=True)
+        git = first / ".git"
+        (git / "refs" / "heads").mkdir(parents=True)
+        (git / "refs" / "heads" / "main").touch()
+        (git / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
         second.mkdir()
         (second / "package.json").touch()
         (first / "src").mkdir()

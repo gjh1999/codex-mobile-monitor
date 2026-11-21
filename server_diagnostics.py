@@ -96,17 +96,37 @@ def server_checks(client, emit, project=None):
                 f"{sum(k.startswith('folder-projects/') for k in active)} 个普通项目映射。")
 
     run("服务器项目清单", catalog)
+    backup_project = project
     if active is not None:
-        scope = (project + "/") if project else ""
+        identities = [project] if project else []
+        if project and project.startswith(".folder/"):
+            from plain_projects import CATALOG, folder_id
+            key = CATALOG + project.split("/", 1)[1]
+            backup_project = None
+            if key in active:
+                def mapping():
+                    nonlocal backup_project
+                    entry = json.loads(store.read(key))
+                    relative = entry["relativePath"]
+                    require(isinstance(relative, str) and folder_id(relative) == project, "普通项目映射摘要不匹配。")
+                    remote = entry.get("githubProject")
+                    if remote and github_id("https://github.com/" + remote) == remote:
+                        identities.append(remote)
+                        backup_project = remote
+                    return f"已登记 {relative}" + (f"，GitHub 仓库 {remote}。" if backup_project else "。")
+                run("服务器普通项目映射", mapping)
+            else:
+                emit("服务器普通项目映射", "skipped", "尚未找到这个相对路径的登记。请在来源机完成一轮合流。")
+        scopes = [identity + "/" for identity in identities] or [""]
         # A grown session can have both a legacy snapshot and a newer chunk manifest.
-        names = {k.partition("/")[2] for k in active
-                 if k.startswith(("sessions/" + scope, "session-manifests/" + scope))}
+        names = {k.rsplit("/", 1)[-1] for k in active
+                 if any(k.startswith(("sessions/" + scope, "session-manifests/" + scope)) for scope in scopes)}
         emit("已完成会话索引", "passed", f"只读查询{'当前项目' if project else '当前工作区'}索引，共 {len(names)} 条有效会话。")
         for label, prefix in (("项目记忆索引", "notes/"),
                               ("大文件清单索引", "large-inventory/"), ("吉光片羽索引", "notebook/")):
-            specific = "" if prefix == "notebook/" else scope
-            count = sum(k.startswith(prefix + specific) for k in active)
-            context = "当前项目" if specific else "当前工作区"
+            selected = [""] if prefix == "notebook/" else scopes
+            count = sum(any(k.startswith(prefix + scope) for scope in selected) for k in active)
+            context = "当前项目" if selected != [""] else "当前工作区"
             emit(label, "passed", f"只读查询{context}索引，共 {count} 条有效记录。")
         peers = sorted(k for k in active if k.startswith("codex-live/"))
         if peers:
@@ -124,7 +144,7 @@ def server_checks(client, emit, project=None):
         emit("会话、记忆、大文件、随记和审批索引", "skipped", "读取服务器项目清单失败。")
 
     def backups():
-        selected = project
+        selected = backup_project
         if not selected:
             registered = sorted(k[5:] for k in (active or ()) if k.startswith("repo/")
                                 and github_id("https://github.com/" + k[5:]) == k[5:])
@@ -142,7 +162,7 @@ def server_checks(client, emit, project=None):
         version, _, size = release_fields(json.loads(raw))
         return f"已读取 R{version} 清单，版本、大小（{size} 字节）及 SHA-256 字段有效。"
 
-    if project and project.startswith(".folder/"):
+    if project and project.startswith(".folder/") and (not backup_project or backup_project == project):
         emit("服务器代码备份目录", "skipped", "当前查询普通目录的会话通道。代码备份按 GitHub 仓库登记。")
     else:
         run("服务器代码备份目录", backups)

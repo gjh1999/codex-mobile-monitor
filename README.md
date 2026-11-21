@@ -6,7 +6,7 @@ Windows 原生桌面软件，用于集中查看和控制本机 Codex / Claude Co
 
 ## 快速开始
 
-本机 `release/` 中的桌面版本保留两份：稳定版为已发布的 `Lanxi-R36-Windows-Private.zip`，开发版为从 `main` 构建的 `Lanxi.exe`。日常使用稳定版，验证开发改动时运行开发版。 [发布目录维护](docs/RUNBOOK.md#构建-exe)
+本机 `release/` 根目录保留当前稳定版 `Lanxi-R36-Windows-Private.zip` 和开发版 `Lanxi.exe`。从下次正式发版起，`release/history/` 另存最近两个被替换的稳定版 ZIP，供回滚使用。 [发布目录维护](docs/RUNBOOK.md#构建-exe)
 
 R36 私人 Windows 便携版启动时可选「连接云服务器」或「本机使用」。第一次使用再设置项目母目录。你的电脑使用同一私人包连接后会加入同一个工作区。顶部菜单栏提供「连接云服务器」「测试」和「合流」。点「合流」可手动同步。 [安装、升级与验收](docs/PORTABLE_CHECK.md)
 

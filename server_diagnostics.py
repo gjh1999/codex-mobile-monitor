@@ -92,12 +92,17 @@ def server_checks(client, emit, project=None):
             isinstance(key, str) and isinstance(rev, str) and (rev == EMPTY or re.fullmatch("[0-9a-f]{64}", rev))
             for key, rev in rows.items()), "个人同步索引格式有误。")
         active = {key for key, rev in rows.items() if rev != EMPTY}
-        return f"只读查询成功：{sum(k.startswith('repo/') for k in active)} 个登记仓库。"
+        return (f"只读查询成功：{sum(k.startswith('repo/') for k in active)} 个 Git 仓库，"
+                f"{sum(k.startswith('folder-projects/') for k in active)} 个普通项目映射。")
 
     run("服务器项目清单", catalog)
     if active is not None:
         scope = (project + "/") if project else ""
-        for label, prefix in (("已完成会话索引", "sessions/"), ("项目记忆索引", "notes/"),
+        # A grown session can have both a legacy snapshot and a newer chunk manifest.
+        names = {k.partition("/")[2] for k in active
+                 if k.startswith(("sessions/" + scope, "session-manifests/" + scope))}
+        emit("已完成会话索引", "passed", f"只读查询{'当前项目' if project else '当前工作区'}索引，共 {len(names)} 条有效会话。")
+        for label, prefix in (("项目记忆索引", "notes/"),
                               ("大文件清单索引", "large-inventory/"), ("吉光片羽索引", "notebook/")):
             specific = "" if prefix == "notebook/" else scope
             count = sum(k.startswith(prefix + specific) for k in active)
@@ -137,5 +142,8 @@ def server_checks(client, emit, project=None):
         version, _, size = release_fields(json.loads(raw))
         return f"已读取 R{version} 清单，版本、大小（{size} 字节）及 SHA-256 字段有效。"
 
-    run("服务器代码备份目录", backups)
+    if project and project.startswith(".folder/"):
+        emit("服务器代码备份目录", "skipped", "当前查询普通目录的会话通道。代码备份按 GitHub 仓库登记。")
+    else:
+        run("服务器代码备份目录", backups)
     run("私人更新清单", manifest)

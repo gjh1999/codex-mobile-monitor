@@ -544,7 +544,8 @@ class ManualSyncDialog(QDialog):
         if backups:
             saved = sum(value == '已备份' for value in backups.values())
             lines.append(f'服务器代码备份已确认 {saved} 个，待处理 {len(backups) - saved} 个。')
-        if not paths:
+        folders = result.get('folderProjects') or {}
+        if not paths and not folders:
             lines.append('未发现可同步的 GitHub 项目，请核对项目母目录、仓库 origin 和项目登记。')
         if result['connection']:
             lines.append(result['connection'])
@@ -563,7 +564,11 @@ class ManualSyncDialog(QDialog):
                     lines.append(f'{project}/{name} · {state}')
         elif '大文件' not in status:
             lines.append('大文件清单未发现缺少或大小不同的文件。')
-        lines.extend(f'{key} · {value}' for key, value in sorted(status.items()) if key not in paths)
+        if folders:
+            lines.append(f'普通项目会话映射 {len(folders)} 个。')
+            for key, path in sorted(folders.items(), key=lambda entry: str(entry[1]).casefold()):
+                lines.append(f"{path} · {status.get(key, '已登记')}")
+        lines.extend(f'{key} · {value}' for key, value in sorted(status.items()) if key not in paths and key not in folders)
         for project, path in sorted(paths.items(), key=lambda row: (status.get(row[0]) == '已同步', row[0])):
             lines.append(f"{project} · {status.get(project, '未检查')}")
             if project in backups:

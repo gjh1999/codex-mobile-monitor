@@ -69,4 +69,4 @@ npx.cmd playwright test
 Pop-Location
 ```
 
-浏览器测试使用本机 Edge 无头模式、模拟接口，输出 `web/test-results/lanxi-v1/` 截图。测试不执行真实模型任务、审批或创建新会话。历史验证记录见 [Web 验证记录](WEB_VALIDATION.md)。
+浏览器测试使用本机 Edge 无头模式、模拟接口，输出 `web/test-results/lanxi-v1/` 截图。测试不执行真实模型任务、审批或创建新会话。历史验证记录见 [Web 验证记录](archive/WEB_VALIDATION.md)。

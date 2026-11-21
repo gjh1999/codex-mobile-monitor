@@ -292,7 +292,7 @@ figcaption { color: var(--ink); font-weight: 650; margin-bottom: 15px; }
   <p><strong>R36 已发布共享审批修复。</strong> 后端在发送同意前核对项目控制权。项目交还或权限转移后拦截旧审批，结果经同一通道返回。独立源码复测通过。Windows 隔离 HTTPS 报告确认配对凭据可保存，协调服务重启后可用保存的凭据重连。包内审批界面已验，实体双机待验。<a href="DELIVERY_STATUS.md#r35-04-测试回执">工单与验收</a></p>
   <p><strong>R36 私人协调服务已启用备份完整性校验。</strong> 修正后的服务先在有界资源内读取并校验所有 ZIP 成员，再替换上一份备份。隔离环境已验证损坏包被拒后仍可下载并恢复旧副本。<a href="DELIVERY_STATUS.md#r35-02">工单与验收</a></p>
   <p><strong>R36 已部署旧备份兼容修复。</strong> 既有 R35 备份可继续列出、下载和替换，新上传执行有界校验。隔离源码测试已通过。<a href="DELIVERY_STATUS.md#r36-01">工单与验收</a></p>
-  <p><strong>R36 Windows 候选包的独立界面验收通过。</strong> 集中审批、壁纸管理和每日记录使用隔离数据验证。真实客户端审批、实体双机和正式发布待核验。<a href="DELIVERY_STATUS.md#r36-02">R36-02 工单与验收</a></p>
+  <p><strong>R36 Windows 候选包的独立界面验收通过。</strong> 集中审批、壁纸管理和每日记录使用隔离数据验证。正式发布及生产下载已核验，真实客户端审批和实体双机待现场验证。<a href="DELIVERY_STATUS.md#r36-02">R36-02 工单与验收</a></p>
   <div class="tbl"><table>
     <thead><tr><th scope="col">现在能做什么</th><th scope="col">使用入口与行为</th></tr></thead>
     <tbody>
@@ -355,7 +355,7 @@ figcaption { color: var(--ink); font-weight: 650; margin-bottom: 15px; }
       <tr><th>Codex 输入框</th><td><code>/model</code>、<code>/permissions</code></td><td>在已接入的会话里输入 <code>/</code>，用键盘或鼠标选模型和权限档位。候选值来自当前 Codex，选择适用于该会话的后续轮次。</td></tr>
       <tr><th>任务操作</th><td>执舟、暂泊、续航、扬帆、收帆、移离案头、启卷</td><td>分别对应接入、暂停、继续、开启和关闭自动推进、移出、在 VS Code 打开项目。扬帆与收帆随当前状态切换。指针进入对谈标题或键盘焦点移入时显现，在原位淡出，正文保持原位。双击对谈标题或聚焦后按 F2 可就地编辑任务名称。</td></tr>
       <tr><th>窗口顶部菜单栏</th><td>澜汐、任务、显示、设置、窗口</td><td>默认隐藏。指针触及窗口内顶边时淡入，离开后淡出。淡出中返回时从当前透明度接续。展开下拉菜单时顶栏保持可见。居中滑块和封面位置固定。系统关闭动画时即时切换。大模型 API 位于「设置」下。</td></tr>
-      <tr><th>窗口顶部应用菜单</th><td>澜汐</td><td>源码已实现并通过 Windows Qt 验收，待随便携包发布。左上角「澜汐」提供系统托盘的全部命令，包括跨机接续子菜单及便携版更新入口，并保留「关于澜汐」。托盘和顶栏共用菜单动作与实时状态。<a href="DESKTOP.md">桌面使用与验收</a></td></tr>
+      <tr><th>窗口顶部应用菜单</th><td>澜汐</td><td>R36 已提供此菜单。左上角「澜汐」提供系统托盘的全部命令，包括跨机接续子菜单及便携版更新入口，并保留「关于澜汐」。托盘和顶栏共用菜单动作与实时状态。<a href="DESKTOP.md">桌面使用与验收</a></td></tr>
       <tr><th>吉光片羽</th><td>拾得片羽、待理诸事</td><td>左侧组名切换列表与右侧标题。写一句即可保存，正文首行作为列表预览。待办点方框打勾，条目留在原位，文字淡成灰蓝。</td></tr>
       <tr><th>吉光片羽每日归档</th><td>拾得片羽、待理诸事、每日记录</td><td>R35 包内界面已通过隔离 Qt 验证。左栏顶部使用圆角矩形的玻璃滑块，沿用工作台顶部的点击和拖动交互。切到「每日记录」后，左栏按本机日期列出记录，每个日期在右栏合看当天的随记和待办状态。跨天后未完成的待办可继续处理，旧正文和完成状态保留并同步。 <a href="DESKTOP.md#吉光片羽">桌面操作</a></td></tr>
       <tr><th>日报与项目记忆</th><td>一日手记、项目旧笺</td><td>日报引言用「今日行过哪一程，且在灯下记一笔。」；项目记忆的搜索框用「寻一段旧谈」，仍按项目和日期查找原文。</td></tr>
@@ -390,7 +390,7 @@ figcaption { color: var(--ink); font-weight: 650; margin-bottom: 15px; }
 <tr><th>手机与 Web</th><td><code>web_server.py</code> 和 <code>web/</code> 提供 FastAPI、React 工作台和手机布局。目前桌面与 Web 分别启动后台，同一运行目录要求互斥；整合时改为共用一个后台。</td></tr>
 </tbody></table></div>
 <p>2026-11-17 的项目记录显示，Python 回归运行 118 项、跳过 1 项、失败 0 项。Edge 模拟桌面和手机视口通过两项浏览器检查。三机换机、iPhone Safari 真机、GPU 调度和夜间策略均属于新增验收。</p>
-<p class="refs">仓库依据　<a href="ARCHITECTURE.md">架构说明</a><a href="WEB.md">Web 工作台</a><a href="WEB_VALIDATION.md">历史验证记录</a><a href="RUNBOOK.md">运行手册</a></p></section>
+<p class="refs">仓库依据　<a href="ARCHITECTURE.md">架构说明</a><a href="WEB.md">Web 工作台</a><a href="archive/WEB_VALIDATION.md">历史验证记录</a><a href="RUNBOOK.md">运行手册</a></p></section>
 
 <section id="architecture"><h2>总体架构</h2><figure><figcaption>设备拓扑与职责</figcaption><div class="topology"><div class="node"><b>公司台式机 · 私人笔记本</b>本地代码与 CLI<br>设备代理、同步与探测</div><div class="wire"><strong>↔</strong><span>私网</span></div><div class="node core"><b>家里台式机</b>本地开发客户端<br>协调服务、LFS、计算 worker</div><div class="wire"><strong>↔</strong><span>HTTPS</span></div><div class="node"><b>iPhone · Safari</b>任务状态、每日报告、审批<br>查看结果与暂停</div></div></figure>
 <p>三台电脑分别连接项目原有的 Git 远程。家里节点保存已确认的交接版本，并协调写入权。桌面、CLI 和手机都以同一个项目标识关联任务，磁盘盘符只保存在各设备的映射里。</p>
@@ -495,7 +495,7 @@ figcaption { color: var(--ink); font-weight: 650; margin-bottom: 15px; }
 
 <section id="personal-release">
   <h2>个人开发与版本发布</h2>
-  <p>本机 <code>release/</code> 只保留当前稳定版和开发版两份桌面构建。稳定版使用已发布的版本化 ZIP，开发版使用固定入口 <code>Lanxi.exe</code>。当前两者均基于 R36。新候选包在独立构建目录验收，发布后替换稳定版。<a href="RUNBOOK.md#构建-exe">保留规则与本机归档</a></p>
+  <p>本机 <code>release/</code> 只保留当前稳定版和开发版两份桌面构建。稳定版使用已发布的版本化 ZIP，开发版使用固定入口 <code>Lanxi.exe</code>。当前两者均基于 R36。新候选包在独立构建目录验收。正式发布并核对摘要后，清理本机淘汰的 ZIP、EXE 和打包中间文件，验收记录按版本归档。<a href="RUNBOOK.md#构建-exe">保留规则与本机归档</a></p>
   <p>用户将需求交给项目负责人「代码review以及发版」。各角色通过项目工单派工、回执、交付和反馈审核结果。负责人按范围向「前端开发」「后端开发」「bug修复」派工，协调接口、依赖与验收条件。开发和修复工程师在工单提交改动及自测结果。测试工程师的对话为「测试」，负责按验收条件设计和执行测试、复现缺陷、验证修复，并报告测试版本、结果和未验证项。负责人集成代码、审核送审版本，结合测试结果核验候选包并决定正式发布。<a href="../AGENTS.md">项目工作约定</a> · <a href="DELIVERY_STATUS.md#项目工单">项目工单</a></p>
   <h3>从修改到发布</h3>
   <ol>

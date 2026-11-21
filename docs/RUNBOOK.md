@@ -55,7 +55,7 @@ if (-not (Test-Path './local-config.json')) {
 & './scripts/build-exe.ps1'
 ```
 
-本机 `release/` 只保留两份桌面构建。稳定版是当前私人更新服务已发布并核过摘要的 ZIP；开发版固定为 `release/Lanxi.exe`，由最新待验证源码构建。目前稳定版为 R36，本机开发版基于 `a9bc851`，使用 R36 版本号。下载与配对工具、服务器部署包及本机运行数据另行保留。2026-11-21 整理的旧桌面包和旧解压目录可在 `build-exe/release-archive/20261121/` 找回。
+本机 `release/` 只保留两份桌面构建。稳定版是当前私人更新服务已发布并核过摘要的 ZIP；开发版固定为 `release/Lanxi.exe`，由最新待验证源码构建。目前稳定版为 R36，本机开发版基于 `a9bc851`，使用 R36 版本号。下载与配对工具、服务器部署包及本机运行数据另行保留。本机旧版本二进制和重复打包产物已清理，历史目录中的报告、日志和数据库继续保留。
 
 默认开发构建输出为 `release/Lanxi.exe`。临时预览使用独立输出目录。
 
@@ -69,7 +69,7 @@ if (-not (Test-Path './local-config.json')) {
 & './.venv/Scripts/python.exe' -B scripts/build-portable.py --work build-exe/release-candidate --pycharm 'C:\Program Files\JetBrains\PyCharm 2026.3'
 ```
 
-包名与 `portable_update.py` 的版本一致，打包时在独立工作树中执行上述命令，ZIP 写入该工作树的 `release/`。构建日志和用于发布的 `windows-release.json` 位于 `--work` 目录。主程序内置验收工具，ZIP 根目录还有简明使用说明及可选 IDE 工具包。正式发布并核验后，将同一份 ZIP 放入主工作区的 `release/`，将上一份稳定包移至本机归档。开发版沿用固定文件名更新。
+包名与 `portable_update.py` 的版本一致，打包时在独立工作树中执行上述命令，ZIP 写入该工作树的 `release/`。构建日志和用于发布的 `windows-release.json` 位于 `--work` 目录。主程序内置验收工具，ZIP 根目录还有简明使用说明及可选 IDE 工具包。正式发布并核验后，将同一份 ZIP 放入主工作区的 `release/`，核对新稳定版和开发版后清理淘汰的本机安装包与可重建的打包中间文件。开发版沿用固定文件名更新。
 
 ### 发版审查与交接
 

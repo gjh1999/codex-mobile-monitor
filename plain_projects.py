@@ -115,7 +115,9 @@ def folder_bindings(parent, home, store, index, cache, git_projects, code_folder
             owns = record.get("originDevice") == device
             linked = record.get("githubProject")
             git_project = by_root.get(directory)
-            if owns and directory in code_folders and git_project and git_project != linked:
+            if linked and git_project and git_project != linked:
+                raise ValueError("普通项目登记的 GitHub 仓库与本机不一致")
+            if owns and directory in code_folders and git_project and not linked:
                 linked = git_project
                 record = {**record, "githubProject": linked}
                 store.put(key, revision or EMPTY, pack(record))
@@ -132,6 +134,6 @@ def folder_bindings(parent, home, store, index, cache, git_projects, code_folder
             if owns and project in native and not safe_path(directory, RECEIVER).exists():
                 sources[project] = directory
             folders[project] = directory
-        except (OSError, ValueError, KeyError, TypeError) as error:
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
             errors[project] = str(error) if isinstance(error, ValueError) else "暂不能核对普通目录映射"
     return folders, sources

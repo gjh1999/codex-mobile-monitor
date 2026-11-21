@@ -457,8 +457,9 @@ def sync_project(repo, remote, branch=None, *, memory_subdir=".codex/memories", 
             exclude_memory(stage, memory_subdir)
             run(stage, "config", "lanxi.blobLimit", str(LIMIT))
             if placeholder:
-                if (stage / ".lanxi").exists() or not receiver_placeholder(repo, placeholder_id):
+                if run(stage, "ls-tree", "--name-only", "HEAD", "--", ".lanxi").stdout or not receiver_placeholder(repo, placeholder_id):
                     raise SyncIssue("普通项目占位目录已变化，保留现有文件")
+                exclude_memory(stage, ".lanxi")
                 # Publish Git metadata first. Only restore missing tracked paths; a
                 # retry completes an interrupted checkout without replacing user data.
                 (stage / ".git" / pending_checkout).write_text(identity, encoding="utf-8")

@@ -103,10 +103,12 @@ def inspect_project(path, overrides):
 
 
 def discover(parent, overrides):
+    from plain_git import managed
+
     def scan(path):
         project = inspect_project(path, overrides)
         git = path / ".git"
-        if project and path != parent and (not git.exists() or has_git_history(git)):
+        if project and path != parent and (not git.exists() or has_git_history(git) or managed(path)):
             return {path: project}
         children = {}
         for child in folders(path):

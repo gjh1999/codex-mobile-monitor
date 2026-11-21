@@ -110,6 +110,52 @@ class FlowTests(unittest.TestCase):
                 sync_project(self.b, self.url)
             self.assertEqual((self.b / "a.py").read_text(), "conflicting B\n")
 
+    def test_clone_into_session_placeholder_preserves_history_and_user_edits(self):
+        from plain_projects import INDEX, RECEIVER, folder_id
+
+        project = folder_id("projects/x")
+        (self.b / RECEIVER).parent.mkdir(parents=True)
+        (self.b / RECEIVER).write_text(json.dumps({"folder": project}))
+        (self.b / INDEX).write_text("{}")
+        (self.b / "local.txt").write_text("keep")
+        with self.assertRaises(SyncIssue):
+            sync_project(self.b, self.url, placeholder_id=project)
+        self.assertEqual((self.b / "local.txt").read_text(), "keep")
+        (self.b / "local.txt").unlink()
+        with patch("code_sync.finish_placeholder", side_effect=OSError("interrupted")):
+            with self.assertRaises(OSError):
+                sync_project(self.b, self.url, placeholder_id=project)
+        sync_project(self.b, self.url, placeholder_id=project)
+        self.assertEqual((self.b / "a.py").read_text(), "first\n")
+        self.assertEqual((self.b / INDEX).read_text(), "{}")
+        self.assertEqual(git(self.b, "status", "--porcelain"), "")
+
+    def test_retry_ordinary_project_after_initialization_before_first_commit(self):
+        from plain_git import _initialize
+        from plain_projects import folder_id
+
+        parent = self.root / "library"
+        source = parent / "vscodePronject" / "Satisfactry"
+        source.mkdir(parents=True)
+        (source / "pyproject.toml").write_text("")
+        data = self.root / "settings"
+        data.mkdir()
+        set_project_root(data, parent)
+        worker = PersonalSync(data, {"exchange": str(self.share)}, home=data / "codex")
+        from plain_projects import folder_bindings
+        def bindings():
+            errors = {}
+            store = worker.store()
+            local, _ = worker.bindings(store, store.index(), {}, {}, errors)
+            return folder_bindings(parent, worker.home, store, store.index(), {}, local, worker.code_folders,
+                                   "source", errors, threading.Event())
+        key = folder_id("vscodePronject/Satisfactry")
+        self.assertEqual(bindings(), ({key: source}, {key: source}))
+        _initialize(source)
+        (source / "examples").mkdir()
+        (source / "examples" / "Cargo.toml").write_text("")
+        self.assertEqual(bindings(), ({key: source}, {key: source}))
+
     def test_manual_request_checks_next_cycle_and_reuses_existing_clone(self):
         source_parent = self.root / "source-projects"
         receiver_parent = self.root / "receiver-projects"

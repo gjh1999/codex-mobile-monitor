@@ -194,18 +194,19 @@ class PersonalSync:
             project = github_id(entry.get("remote"))
             if not project:
                 continue
+            remote_specs.setdefault(project, {"remote": entry["remote"], "memoryPath": ".codex/memories"})
             if entry.get("path"):
                 target = Path(entry["path"])
                 if not target.is_absolute():
-                    raise SyncIssue("项目映射需要本机绝对路径")
+                    errors[project] = "项目映射需要本机绝对路径"
+                    continue
                 if target.exists() or project not in local:
                     local[project] = target
-            remote_specs.setdefault(project, {"remote": entry["remote"], "memoryPath": ".codex/memories"})
             overrides.setdefault(project, {}).update(
                 {k: entry[k] for k in ("branch", "memoryPath") if k in entry}
             )
         for project, spec in remote_specs.items():
-            if project in local:
+            if project in local or project in errors:
                 continue
             legacy = self.checkout.joinpath(*project.split("/"))
             if len(found.get(project, [])) > 1:
@@ -221,24 +222,32 @@ class PersonalSync:
                         raise ValueError
                     base = parent or self.checkout
                     dest = safe_path(base, relative)
-                    if any((d / ".git").exists() for d in dest.parents if d.is_relative_to(base)):
+                    if any((d / ".git").exists() for d in dest.parents
+                           if d.is_relative_to(base) and (d != parent or d in local.values())):
                         raise ValueError
                     local[project] = dest
                 except ValueError:
                     errors[project] = "项目相对目录不可用，请核对母目录和仓库映射"
         for project, fields in overrides.items():
-            if project not in local:
+            if project not in local or project in errors:
                 continue
             spec = remote_specs[project].copy()
             target = local[project]
-            if parent and target != parent and target.is_relative_to(parent) and (target / ".git").exists():
-                relative = target.relative_to(parent).as_posix()
-                safe_path(parent, relative)
-                spec.setdefault("relativePath", relative)
-            for key, val in fields.items():
-                if project not in cached or published.get(project, {}).get(key) != val:
-                    spec[key] = val
-            safe_path(local[project], spec["memoryPath"])
+            try:
+                if parent and target != parent and target.is_relative_to(parent) and (target / ".git").exists():
+                    relative = target.relative_to(parent).as_posix()
+                    safe_path(parent, relative)
+                    spec.setdefault("relativePath", relative)
+                for key, val in fields.items():
+                    if project not in cached or published.get(project, {}).get(key) != val:
+                        spec[key] = val
+                subdir = spec["memoryPath"]
+                if not isinstance(subdir, str):
+                    raise ValueError("项目记忆目录无效")
+                safe_path(target, subdir)
+            except ValueError as error:
+                errors[project] = str(error)
+                continue
             if store:
                 key = "repo/" + project
                 data = pack(spec)
@@ -421,7 +430,8 @@ class PersonalSync:
             self.connection = connection
             self.task_owners = task_owners
         return {"connection": connection, "projects": len(specs), "memoryChecked": check_memory,
-                "largeInventory": inventory, "status": errors}
+                "largeInventory": inventory, "status": errors,
+                "projectPaths": {p: str(local[p]) if p in local else "" for p in specs}}
 
     def worker(self, stop):
         interval = max(2, min(300, int(self.settings.get("intervalSeconds", 10))))

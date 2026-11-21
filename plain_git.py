@@ -14,19 +14,12 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from code_sync import SyncIssue, auto_path, github_id, is_large, run, value
+from code_sync import GENERATED_DIRECTORIES, PRIVATE_DIRECTORIES, SyncIssue, auto_path, github_id, is_large, run, value
 from handoff_sync import atomic_write
 from personal_memory import safe_path
 from service_lock import ServiceLock
 
 MARKER = "lanxi-private-project.json"
-OMIT = {".lanxi", ".codex", ".cache", ".gradle", ".idea", ".vs", ".next",
-        ".nuxt", ".pytest_cache", ".tox", ".mypy_cache", ".ruff_cache", ".terraform",
-        "node_modules", ".venv", "venv", "dist", "build", "bin", "obj", "target",
-        "coverage", "out", "release", "releases", "build-exe", "__pycache__", "dist-info"}
-PRIVATE_FILES = {"token", "tokens", "password", "passwords", "secret", "apikey", "api_key",
-                 "service-account", "service_account", "serviceaccount", "client_secret",
-                 "client_secrets", "kubeconfig", ".pypirc", ".dockercfg", ".gitmodules"}
 
 
 def _read(folder):
@@ -46,6 +39,11 @@ def managed(folder):
         return False
 
 
+def complete(folder):
+    state = _read(Path(folder))
+    return bool(state and state.get("complete") is True)
+
+
 def _save(directory, state):
     atomic_write(directory / MARKER, json.dumps(state).encode())
 
@@ -56,7 +54,8 @@ def _initialize(folder):
         run(None, "init", "--template=", "-b", "main", str(scratch))
         admin = scratch / ".git"
         (admin / "info").mkdir(exist_ok=True)
-        (admin / "info/exclude").write_text("".join(p + "/\n" for p in sorted(OMIT)), encoding="utf-8")
+        ignored = PRIVATE_DIRECTORIES | GENERATED_DIRECTORIES
+        (admin / "info/exclude").write_text("".join(p + "/\n" for p in sorted(ignored)), encoding="utf-8")
         _save(admin, {"nonce": str(uuid.uuid4())})
         if os.path.lexists(folder / ".git"):
             raise SyncIssue("项目已出现 Git 元数据，请重新核对")
@@ -144,9 +143,7 @@ def _selection(folder):
             info = path.lstat()
         except (OSError, ValueError):
             continue
-        parts = name.casefold().split("/")
-        if (not stat.S_ISREG(info.st_mode) or is_large(info.st_size) or set(parts) & OMIT
-                or any(part in PRIVATE_FILES or part.split(".")[0] in PRIVATE_FILES for part in parts)
+        if (not stat.S_ISREG(info.st_mode) or is_large(info.st_size) or path.name.casefold() == ".gitmodules"
                 or not auto_path(name, False, path)):
             continue
         names.append(item)
@@ -189,13 +186,20 @@ def _push(folder, url, token, login):
     encoded = base64.b64encode((login + ":" + token).encode()).decode("ascii")
     env = {k: v for k, v in os.environ.items() if not k.upper().startswith(("GIT_", "GCM_"))}
     env.update(LANXI_HTTP_AUTH="Authorization: Basic " + encoded, GIT_TERMINAL_PROMPT="0", GCM_INTERACTIVE="Never")
+    for setting in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM"):
+        if setting in os.environ:
+            env[setting] = os.environ[setting]
+    command = ["git", "-C", str(folder), "-c", "http.followRedirects=false", "-c", "credential.helper=",
+               "-c", "core.hooksPath=" + os.devnull, "-c", "push.followTags=false", "-c", "push.recurseSubmodules=no",
+               "-c", "protocol.allow=never", "-c", "protocol.https.allow=always"]
+    options = dict(stdin=subprocess.DEVNULL, capture_output=True, env=env, timeout=90,
+                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    target = subprocess.run(command + ["remote", "get-url", "--push", "--all", "origin"], **options)
+    if target.returncode or target.stdout.strip() != url.encode("ascii"):
+        raise SyncIssue("首次推送地址与已核对的 GitHub 私有仓库不符")
     result = subprocess.run(
-        ["git", "-C", str(folder), "-c", "http.followRedirects=false", "-c", "credential.helper=",
-         "-c", "core.hooksPath=" + os.devnull, "-c", "push.followTags=false", "-c", "push.recurseSubmodules=no",
-         "--config-env=http." + url + ".extraHeader=LANXI_HTTP_AUTH",
-         "push", "--set-upstream", "origin", "HEAD:refs/heads/main"],
-        stdin=subprocess.DEVNULL, capture_output=True, env=env, timeout=90,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        command + ["--config-env=http." + url + ".extraHeader=LANXI_HTTP_AUTH",
+                   "push", "--set-upstream", "origin", "HEAD:refs/heads/main"], **options,
     )
     if result.returncode:
         raise SyncIssue("首次推送未完成，请核对网络、写入权限及远程分支，稍后可重试")

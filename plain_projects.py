@@ -13,7 +13,8 @@ INDEX = ".lanxi/lanxi-personal-sessions.json"
 RECEIVER = ".lanxi/receiver.json"
 EXCLUDED = {"appdata", "node_modules", "__pycache__", "windows", "program files",
             "program files (x86)", "programdata", "$recycle.bin", "system volume information",
-            "temp", "tmp", "cache", "caches", "build-exe", "site-packages", "venv"}
+            "temp", "tmp", "cache", "caches", "build-exe", "site-packages", "venv", "build",
+            "dist", "obj", "target"}
 
 
 def folder_id(relative):
@@ -35,6 +36,9 @@ def folder_relative(parent, directory, *, allow_git=False):
         return None
     relative = directory.relative_to(parent)
     if any(part.startswith(".") or part.casefold() in EXCLUDED for part in relative.parts):
+        return None
+    if parent == Path.home() and len(relative.parts) == 1 and relative.name.casefold() in {
+            "documents", "desktop", "downloads", "music", "videos", "pictures", "onedrive", "favorites"}:
         return None
     try:
         if not parent.is_dir() or parent.resolve() != parent or safe_path(parent, relative.as_posix()) != directory:

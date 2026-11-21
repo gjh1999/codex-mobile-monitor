@@ -13,6 +13,7 @@ import uvicorn
 from coordination_client import ControlClient
 from coordination_server import create_app
 from personal_relay import EMPTY, Records, digest
+from plain_projects import CATALOG, folder_id
 from server_diagnostics import CheckFailed, record_roundtrip, server_checks
 
 
@@ -43,20 +44,29 @@ class ServerDiagnosticsTests(unittest.TestCase):
                                 "projects": {}}, token)
         store = Records(database, "space")
         sensitive = "do-not-print-user-content"
+        relative = "vscodePronject/Satisfactry"
+        folder = folder_id(relative)
         seeds = {"repo/test/project": b"{}", "sessions/test/project/file": sensitive.encode(),
+                 CATALOG + folder.split("/")[1]: json.dumps({"relativePath": relative,
+                                                           "githubProject": "test/project"}).encode(),
+                 "session-manifests/" + folder + "/file": b"{}",
+                 "session-manifests/" + folder + "/long": b"{}",
                  "codex-live/source": json.dumps({"v": 1, "approvals": [{"details": sensitive}],
                                                  "decisions": [], "receipts": []}).encode()}
         for key, data in seeds.items():
             store.put(key, EMPTY, data)
-        def run():
+        def run(project="test/project"):
             rows = {}
-            server_checks(client, lambda name, status, detail: rows.update({name: (status, detail)}), "test/project")
+            server_checks(client, lambda name, status, detail: rows.update({name: (status, detail)}), project)
             self.assertNotIn(sensitive, str(rows))
             return rows
 
         rows = run()
         self.assertTrue(all(status == "passed" for status, _ in rows.values()), rows)
         self.assertIn("1 条", rows["已完成会话索引"][1])
+        rows = run(folder)
+        self.assertIn(relative, rows["服务器普通项目映射"][1])
+        self.assertIn("2 条", rows["已完成会话索引"][1])
         (releases / "latest.json").unlink()
         rows = run()
         self.assertEqual(rows["私人更新清单"][0], "failed")

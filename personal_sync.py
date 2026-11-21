@@ -170,9 +170,10 @@ class PersonalSync:
         local = {}
         parent = configured_root(self.root)
         found = {}
+        pending_git = set()
         self.code_folders.clear()
         if parent and parent.is_dir():
-            from plain_git import managed
+            from plain_git import complete, managed
             for path in discover(parent, {}):
                 if not (path / ".git").exists():
                     if any((path / name).is_file() for name in (
@@ -182,6 +183,9 @@ class PersonalSync:
                     continue
                 if managed(path):
                     self.code_folders.add(path)
+                    if not complete(path):
+                        pending_git.add(path)
+                        continue
                 try:
                     remote = value(path, "config", "--get", "remote.origin.url")
                 except (OSError, SyncIssue, subprocess.TimeoutExpired):
@@ -215,6 +219,9 @@ class PersonalSync:
             project = github_id(entry.get("remote"))
             if not project:
                 continue
+            raw = entry.get("path")
+            if isinstance(raw, (str, os.PathLike)) and Path(raw) in pending_git:
+                continue
             remote_specs.setdefault(project, {"remote": entry["remote"], "memoryPath": ".codex/memories"})
             path = entry.get("path")
             if path:
@@ -244,6 +251,8 @@ class PersonalSync:
                         raise ValueError
                     base = parent or self.checkout
                     dest = safe_path(base, relative)
+                    if dest in pending_git:
+                        raise ValueError
                     if any((d / ".git").exists() for d in dest.parents
                            if d.is_relative_to(base) and (d != parent or d in local.values())):
                         raise ValueError

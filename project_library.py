@@ -8,7 +8,7 @@ from pathlib import Path
 from handoff_sync import atomic_write
 from history_labels import read_label
 from personal_memory import NOTE_TYPES, safe_path
-from plain_projects import INDEX as FOLDER_INDEX
+from plain_projects import EXCLUDED, INDEX as FOLDER_INDEX
 
 SETTINGS = "project-library.json"
 ENTRY_PREFIX = "project:"
@@ -49,7 +49,7 @@ def folders(parent):
             child
             for child in parent.iterdir()
             if not child.name.startswith(".")
-            and child.name not in ("node_modules", "__pycache__", "build-exe", "site-packages")
+            and child.name.casefold() not in EXCLUDED
             and child.is_dir()
             and not child.is_symlink()
             and not getattr(child.lstat(), "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT

@@ -304,18 +304,31 @@ def sparse(repo, current, incoming, fresh=False):
     return expand_after_merge
 
 
+PRIVATE_DIRECTORIES = {".git", ".ssh", ".aws", ".azure", ".local", ".lanxi", ".codex", ".gnupg", ".kube", ".docker"}
+GENERATED_DIRECTORIES = {
+    ".cache", ".gradle", ".idea", ".vs", ".next", ".nuxt", ".pytest_cache", ".tox", ".mypy_cache",
+    ".ruff_cache", ".terraform", "node_modules", ".venv", "venv", "dist", "build", "bin", "obj",
+    "target", "coverage", "out", "release", "releases", "build-exe", "__pycache__",
+}
+PRIVATE_NAMES = {
+    ".npmrc", ".netrc", ".git-credentials", "id_rsa", "id_ed25519", ".pypirc", ".dockercfg",
+    "token", "tokens", "password", "passwords", "secret", "apikey", "api_key", "service-account",
+    "service_account", "serviceaccount", "client_secret", "client_secrets", "kubeconfig",
+}
+
+
 def auto_path(name, tracked, path):
     parts = Path(name)
     low = parts.name.lower()
     if (
         any(
-            p.lower() in {".git", ".ssh", ".aws", ".local", ".lanxi", ".venv", "node_modules", "__pycache__"}
+            p.casefold() in PRIVATE_DIRECTORIES or p.casefold() in GENERATED_DIRECTORIES
+            or p.casefold() in PRIVATE_NAMES or p.casefold().split(".", 1)[0] in PRIVATE_NAMES
             for p in parts.parts
         )
         or low.startswith(
             (".env", "credentials", "secrets", "auth.json", "local-config.", "personal-sync.json")
         )
-        or low in (".npmrc", ".netrc", ".git-credentials", "id_rsa", "id_ed25519")
         or low.endswith((".key", ".pem", ".pfx", ".p12"))
     ):
         return False

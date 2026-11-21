@@ -163,8 +163,12 @@ class PlainGitTests(unittest.TestCase):
         self.assertEqual(latest_session(dest), (tid, dest))
         self.assertFalse((dest / ".git").exists())
         self.push.side_effect = self.git_push
+        workers["a"].settings["memory"] = False
         workers["a"].git_retries.clear()
-        self.assertEqual(cycle("a")["folderGit"][project], "已接入 GitHub")
+        retry = cycle("a")
+        self.assertFalse(retry["memoryChecked"])
+        self.assertEqual(retry["folderGit"][project], "已接入 GitHub")
+        workers["a"].settings["memory"] = True
         self.assertEqual(self.push.call_count, 2)
         run(None, "config", "--global", "url." + self.bare.as_uri() + ".insteadOf",
             "https://github.com/owner/Satisfactry.git")

@@ -424,6 +424,10 @@ class PersonalSync:
             worker.join()
         check_memory = store is not None and self.settings.get("memory", True) and not stop.is_set()
         folders, sources = {}, {}
+        if (check_memory or isinstance(store, RemoteRecords)) and not stop.is_set():
+            device = store.client.device if isinstance(store, RemoteRecords) else self.scope
+            folders, sources = folder_bindings(configured_root(self.root), self.home, store, index,
+                                               self.poll_cache, local, self.code_folders, device, errors, stop)
         if check_memory:
 
             def report(key, error):
@@ -433,8 +437,6 @@ class PersonalSync:
 
             mirror = Mirror(self.local_state, store, self.poll_cache)
             try:
-                folders, sources = folder_bindings(configured_root(self.root), self.home, store, index,
-                                                   self.poll_cache, local, self.code_folders, self.scope, errors, stop)
                 # Keep the same session namespace when a folder gains a private Git origin.
                 aliased = set(folders.values())
                 session_roots = {project: row for project, row in ready.items() if row[0] not in aliased}

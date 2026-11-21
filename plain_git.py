@@ -167,11 +167,10 @@ def _initial_commit(folder, state):
             raise SyncIssue("本机暂存区包含筛选范围外的文件，请人工核对")
         if names:
             run(folder, "add", "--pathspec-from-file=-", "--pathspec-file-nul", data=b"\0".join(names) + b"\0")
-        identity = []
-        for setting, fallback in (("user.name", "Lanxi"), ("user.email", "lanxi@localhost.invalid")):
+        for setting, fallback in (("user.name", "Lanxi"), ("user.email", "noreply@lanxi.invalid")):
             if not run(folder, "config", "--get", setting, check=False).stdout.strip():
-                identity.extend(("-c", setting + "=" + fallback))
-        run(folder, *identity, "-c", "commit.gpgSign=false", "commit", "--allow-empty", "-m", title)
+                run(folder, "config", "--local", setting, fallback)
+        run(folder, "-c", "commit.gpgSign=false", "commit", "--allow-empty", "-m", title)
     elif value(folder, "log", "-1", "--format=%s", "HEAD") != title or value(folder, "log", "-1", "--format=%P", "HEAD"):
         raise SyncIssue("本机已有其他提交，请核对后手动接入")
 

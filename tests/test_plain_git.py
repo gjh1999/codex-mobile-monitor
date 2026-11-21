@@ -5,6 +5,10 @@ import os
 import subprocess
 import tempfile
 import unittest
+import socket
+import threading
+import time
+import uuid
 from pathlib import Path
 from urllib.error import HTTPError
 from unittest.mock import Mock, patch
@@ -96,6 +100,83 @@ class PlainGitTests(unittest.TestCase):
         self.push.assert_not_called()
         self.assertEqual(self.creations, 0)
 
+    def test_paired_sync_preserves_folder_sessions_across_failed_push_and_retry(self):
+        import uvicorn
+        from coordination_server import create_app
+        from personal_memory import latest_session
+        from personal_sync import PersonalSync
+        from plain_projects import folder_id
+        from project_library import set_project_root
+
+        base = self.project.parents[1]
+        source_library = base / "sender-library"
+        relative = Path("vscodePronject", "Satisfactry")
+        source_library.mkdir()
+        self.project.parent.rename(source_library / relative.parent)
+        self.project = source_library / relative
+        receiver_library = base / "receiver-library"
+        receiver_library.mkdir()
+        (self.project / "source.py").write_bytes(b"version one\n")
+        run(self.bare, "symbolic-ref", "HEAD", "refs/heads/main")
+        run(self.bare, "config", "uploadpack.allowFilter", "true")
+        devices = {d: {"token": d * 32, "projects": [], "personalSpace": "fixture"} for d in ("a", "b")}
+        server = uvicorn.Server(uvicorn.Config(create_app(base / "paired.db", devices), log_level="error"))
+        endpoint = self.enterContext(socket.socket())
+        endpoint.bind(("127.0.0.1", 0))
+        url = "http://127.0.0.1:" + str(endpoint.getsockname()[1])
+        thread = threading.Thread(target=lambda: server.run(sockets=[endpoint]), daemon=True)
+        thread.start()
+        self.addCleanup(thread.join, 5)
+        self.addCleanup(setattr, server, "should_exit", True)
+        deadline = time.monotonic() + 5
+        while not server.started and time.monotonic() < deadline:
+            time.sleep(.02)
+        self.assertTrue(server.started)
+        workers = {}
+        for d, library in (("a", source_library), ("b", receiver_library)):
+            data = base / ("device-" + d)
+            home = data / "codex"
+            home.mkdir(parents=True)
+            set_project_root(data, library)
+            workers[d] = PersonalSync(data, {}, {"device": d, "url": url, "projects": {}}, home=home)
+        tid = str(uuid.uuid4())
+        name = "rollout-2026-11-19T01-02-03-" + tid + ".jsonl"
+        session = workers["a"].home / "sessions/2026/11/19" / name
+        session.parent.mkdir(parents=True)
+        events = [("session_meta", {"id": tid, "cwd": str(self.project)}),
+                  ("event_msg", {"type": "task_started", "turn_id": "1"}),
+                  ("event_msg", {"type": "task_complete", "turn_id": "1"})]
+        session.write_bytes(b"".join(json.dumps({"type": k, "payload": p}).encode() + b"\n" for k, p in events))
+
+        def cycle(d):
+            with patch.dict(os.environ, LANXI_DEVICE_TOKEN=d * 32):
+                return workers[d].cycle(threading.Event())
+
+        project = folder_id(relative.as_posix())
+        self.push.side_effect = SyncIssue("simulated push failure")
+        self.assertEqual(cycle("a")["folderGit"][project], "simulated push failure")
+        self.assertEqual(cycle("a")["projects"], 0)
+        self.assertEqual(self.push.call_count, 1)
+        self.assertEqual(cycle("b")["projects"], 0)
+        dest = receiver_library / relative
+        self.assertEqual(latest_session(dest), (tid, dest))
+        self.assertFalse((dest / ".git").exists())
+        self.push.side_effect = self.git_push
+        workers["a"].git_retries.clear()
+        self.assertEqual(cycle("a")["folderGit"][project], "已接入 GitHub")
+        self.assertEqual(self.push.call_count, 2)
+        run(None, "config", "--global", "url." + self.bare.as_uri() + ".insteadOf",
+            "https://github.com/owner/Satisfactry.git")
+        cycle("a")
+        result = cycle("b")
+        self.assertEqual(result["projectPaths"], {"owner/satisfactry": str(dest)})
+        self.assertEqual(result["status"]["owner/satisfactry"], "已同步")
+        self.assertEqual(result["folderProjects"], {project: str(dest)})
+        self.assertEqual((dest / "source.py").read_bytes(), b"version one\n")
+        self.assertEqual(latest_session(dest), (tid, dest))
+        self.assertEqual(workers["b"].snapshot()["sessions"][tid]["project"], project)
+        self.assertEqual(self.creations, 1)
+
     def test_lost_create_response_recovers_own_remote_only(self):
         def drop_after_creation(token, endpoint, data=None):
             result = self.api_request(token, endpoint, data)
@@ -129,7 +210,7 @@ class PlainGitTests(unittest.TestCase):
             subject.promote(self.project)
         self.assertTrue(subject.managed(self.project))
         self.assertEqual(value(self.project, "show", "HEAD:main.py"), "print(42)")
-        self.assertEqual(value(self.project, "log", "-1", "--format=%ae"), "lanxi@localhost.invalid")
+        self.assertEqual(value(self.project, "log", "-1", "--format=%ae"), "noreply@lanxi.invalid")
         self.api.assert_not_called()
         self.token.side_effect = None
         self.assertEqual(subject.promote(self.project), "已接入 GitHub")

@@ -198,11 +198,31 @@ def folder_sessions(root):
     return "两套独立母目录复用原线程 ID，超过 10 MiB 的完整会话分块接收并逐字节核对"
 
 
+def offline_git(root):
+    from unittest.mock import patch
+    from code_sync import SyncIssue, value
+    from plain_git import promote
+
+    project = root / "demo"
+    project.mkdir()
+    (project / "main.py").write_text("print(1)", encoding="utf-8")
+    (project / ".env").write_text("fixture", encoding="utf-8")
+    with patch("plain_git._token", side_effect=SyncIssue("测试凭据离线")):
+        try:
+            promote(project)
+        except SyncIssue as error:
+            require(str(error) == "测试凭据离线", str(error))
+    require(value(project, "ls-tree", "-r", "--name-only", "HEAD") == "main.py", "本地首提交内容异常")
+    require(not value(project, "remote"), "离线验收产生了远程地址")
+    return "已在临时项目验证无 GitHub 凭据时创建 Git 首提交，测试用 .env 留在本机"
+
+
 def local_feature_checks(root, emit):
     checks = (
         ("吉光片羽", notebook), ("审批回执", approvals), ("IDE 项目占用", ide_ownership),
         ("大文件清单", inventory), ("代码备份打包", backup),
         ("普通目录与长会话", folder_sessions),
+        ("普通项目自动加入 Git", offline_git),
     )
     for label, check in checks:
         try:

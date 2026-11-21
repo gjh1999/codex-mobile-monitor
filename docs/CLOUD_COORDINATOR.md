@@ -1,6 +1,6 @@
 # 澜汐云协调服务
 
-台式机和笔记本使用各自的设备令牌访问协调服务。R23 可用一次性配对码连接 HTTPS，私人部署也可使用带服务器证书的公网 IP。协调服务保存项目清单、Codex 记忆和会话。代码继续从 GitHub 同步。
+台式机和笔记本使用各自的设备令牌访问协调服务。R23 可用一次性配对码连接 HTTPS，私人部署也可使用带服务器证书的公网 IP。协调服务保存项目清单、Codex 记忆和会话。R35 额外提供私人工作区的代码 ZIP 备份，GitHub 继续同步代码和管理提交历史。
 
 ## 在澜汐中连接云服务器
 
@@ -140,4 +140,4 @@ docker compose cp coordinator:/var/lib/lanxi/backup.sqlite3 backup/coordination.
 docker compose cp coordinator:/var/lib/lanxi/devices.json backup/devices.json
 ```
 
-若要在同一云主机额外备份代码，可另设 GitHub 仓库镜像。代码镜像和协调服务数据库分别维护。
+R35 代码备份写入 `coordinator-data` 卷的 `code-backups/`，按私人空间、仓库和来源设备保存最新校验成功的 ZIP。服务验证上传大小和 SHA-256 后再替换旧副本。服务器预留至少 5 GiB，单个 ZIP 上限为 1 GiB。运维备份应包含该目录。若需要完整 Git 历史的额外副本，可另设 GitHub 仓库镜像。 [下载和同步方式](PERSONAL_SYNC.md#代码的服务器备份)

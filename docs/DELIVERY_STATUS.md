@@ -73,6 +73,8 @@ R35 包含母目录含 Git 标记时的项目发现和任务分组修复，恢�
 
 2026-11-21 在 Windows 隔离源码 `af6047b`（含 `762dbbf`）上独立复测。`python -B -m unittest tests.test_coordination tests.test_codex_watch tests.test_code_backups` 共 18 项通过。隔离 HTTPS 的本机审批、跨机回执和控制权复核通过，整套云端测试随后在 Windows DPAPI 保存配对凭据时返回 `WinError 2`。Qt 桌面 smoke 使用原生 Windows 平台通过，覆盖集中审批、壁纸管理及每日记录。初次使用 Qt `offscreen` 时，取消编辑会话标题后恢复标题显示的断言失败。
 
+同一提交的全量源码回归执行 `python -B -m unittest discover -s tests -t . -p 'test_*.py'`，共 261 项，258 项通过、3 项跳过，耗时 200.091 秒。
+
 **给项目负责人「代码review以及发版」的测试提醒**　请复审 R35-04 的源码复测结果，涉及 `af6047b` 和 `762dbbf`。待验证项包括修复候选包内的最终交互、Windows 配对凭据保存、真实客户端审批和实体双机。候选包交付时请在原工单登记版本、位置和 SHA-256。
 
 ## 个人版交付版本

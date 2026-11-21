@@ -1,7 +1,9 @@
 """Versioned Windows releases authenticated by the paired HTTPS coordinator."""
 
+import base64
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -83,15 +85,58 @@ def prepare(config, manifest, root):
     return destination / executable
 
 
-def restart_after_exit(executable):
-    import base64
-    import os
+def powershell(script):
+    command = base64.b64encode(script.encode("utf-16-le")).decode()
+    return ["powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", command]
 
+
+def register_start_menu_shortcut(executable, versions, programs=None):
+    version = re.fullmatch(r"Lanxi-Glass-R([1-9][0-9]{0,5})-Portable\.exe", executable.name)
+    if (os.name != "nt" or not version or not executable.is_file()
+            or executable.parent != versions / f"Lanxi-R{version[1]}-Portable"):
+        return
+    script = r"""
+$ErrorActionPreference = 'Stop'
+$directory = [Environment]::GetFolderPath('Programs')
+if ($env:LANXI_SHORTCUT_PROGRAMS) { $directory = $env:LANXI_SHORTCUT_PROGRAMS }
+if (!$directory) { throw 'Missing Start menu folder' }
+[void][IO.Directory]::CreateDirectory($directory)
+$path = Join-Path $directory '澜汐.lnk'
+$shell = New-Object -ComObject WScript.Shell
+$entry = $shell.CreateShortcut($path)
+if ($entry.TargetPath) {
+    $name = [IO.Path]::GetFileName($entry.TargetPath)
+    if ($name -notmatch '^Lanxi-Glass-R([1-9][0-9]{0,5})-Portable\.exe$') { exit 0 }
+    if ([int]$Matches[1] -gt [int]$env:LANXI_SHORTCUT_VERSION -and [IO.File]::Exists($entry.TargetPath)) { exit 0 }
+    if ($entry.TargetPath -eq $env:LANXI_SHORTCUT_TARGET) { exit 0 }
+}
+$temporary = Join-Path $directory ('.lanxi-' + [Guid]::NewGuid().ToString('N') + '.lnk')
+try {
+    $entry = $shell.CreateShortcut($temporary)
+    $entry.TargetPath = $env:LANXI_SHORTCUT_TARGET
+    $entry.WorkingDirectory = [IO.Path]::GetDirectoryName($entry.TargetPath)
+    $entry.Description = '澜汐开发工作台'
+    $entry.Save()
+    if ([IO.File]::Exists($path)) {
+        [IO.File]::Replace($temporary, $path, $null)
+    } else {
+        [IO.File]::Move($temporary, $path)
+    }
+} finally {
+    if ([IO.File]::Exists($temporary)) { [IO.File]::Delete($temporary) }
+}
+"""
+    env = {**os.environ, "LANXI_SHORTCUT_TARGET": str(executable),
+           "LANXI_SHORTCUT_VERSION": version[1], "LANXI_SHORTCUT_PROGRAMS": str(programs or "")}
+    subprocess.run(powershell(script), env=env, capture_output=True, check=True, timeout=12,
+                   creationflags=subprocess.CREATE_NO_WINDOW)
+
+
+def restart_after_exit(executable):
     literal = "'" + str(executable).replace("'", "''") + "'"
     directory = "'" + str(executable.parent).replace("'", "''") + "'"
     script = (f"$ErrorActionPreference='Stop'; Wait-Process -Id {os.getpid()}; "
               f"Start-Process -FilePath {literal} -WorkingDirectory {directory}")
-    command = base64.b64encode(script.encode("utf-16le")).decode()
     env = {**os.environ, "PYINSTALLER_RESET_ENVIRONMENT": "1"}
-    subprocess.Popen(["powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", command],
+    subprocess.Popen(powershell(script),
                      env=env, creationflags=subprocess.CREATE_NO_WINDOW)

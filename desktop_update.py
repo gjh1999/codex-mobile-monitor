@@ -1,5 +1,6 @@
 """Prompt for a private update and switch executables after a normal exit."""
 
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -8,7 +9,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtWidgets import QMessageBox
 
 import monitor
-from portable_update import latest, prepare, restart_after_exit
+from portable_update import latest, prepare, register_start_menu_shortcut, restart_after_exit
 
 
 class DesktopUpdates(QObject):
@@ -26,8 +27,15 @@ class DesktopUpdates(QObject):
         self.timer.timeout.connect(self.check)
 
     def watch(self):
+        threading.Thread(target=self.ensure_shortcut, daemon=True, name="lanxi-start-menu").start()
         self.timer.start()
         QTimer.singleShot(12_000, self.check)
+
+    def ensure_shortcut(self):
+        try:
+            register_start_menu_shortcut(Path(sys.executable), monitor.ROOT.parent / "versions")
+        except (OSError, subprocess.SubprocessError):
+            pass
 
     def work(self, phase, callback):
         self.busy = True

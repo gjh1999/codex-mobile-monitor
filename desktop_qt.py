@@ -1080,6 +1080,7 @@ class MainWindow(QMainWindow):
         menu.addAction('打开用户数据目录', lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(monitor.ROOT))))
         menu.addAction('设置项目母目录…', lambda: self.choose_project_root())
         if getattr(sys, 'frozen', False):
+            menu.addAction('打开程序所在目录', lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(sys.executable).parent))))
             menu.addAction('检查更新…', lambda: self.updater.check(manual=True))
         menu.addSeparator()
         if include_about:

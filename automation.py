@@ -3,6 +3,11 @@ import copy, hashlib, json, secrets, sqlite3, threading, time
 from quota_recovery import QuotaRecovery, quota_state
 from coordination_client import ControlDenied
 APPROVAL_METHODS = {'item/commandExecution/requestApproval','item/fileChange/requestApproval','item/permissions/requestApproval'}
+APPROVAL_DETAILS = ('command','changes','permissions','networkApprovalContext')
+
+def can_allow(details):
+ return any(details.get(key) for key in APPROVAL_DETAILS)
+
 class Approvals:
  def __init__(self,clock=time.time):self.items={};self.lock=threading.RLock();self.clock=clock
  def add(self,rpc,request,ttl=300):
@@ -15,6 +20,10 @@ class Approvals:
    return token
  def public(self):
   with self.lock:return [dict(token=k,client=getattr(v['rpc'],'client_type','codex'),method=v['request']['method'],details=copy.deepcopy(v['request'].get('params',{})),expires=v['expires'],decision=v['decision']) for k,v in self.items.items()]
+ def pending(self,client=None):
+  now=self.clock()
+  return [{**item,'canAllow':can_allow(item['details'])} for item in self.public()
+          if item['decision'] is None and item['expires']>now and (client is None or item['client']==client)]
  def resolve(self,rpc,request_id):
   with self.lock:
    for v in self.items.values():
@@ -36,7 +45,7 @@ class Approvals:
   with self.lock:
    if v['decision'] is not None:return v['decision']
    allow=allow and self.clock()<v['expires']
-   if allow and not any(p.get(k) for k in ('command','changes','permissions','networkApprovalContext')):raise ValueError('Concrete approval details unavailable')
+   if allow and not can_allow(p):raise ValueError('Concrete approval details unavailable')
    result=({'permissions':p.get('permissions',{}) if allow else {},'scope':'turn'} if req['method']=='item/permissions/requestApproval' else {'decision':'accept' if allow else 'decline'})
    v['decision']='responding'
    try:
@@ -48,10 +57,20 @@ class Approvals:
    except Exception:v['decision']='unknown_delivery'
    else:v['decision']='allowed' if allow else 'denied'
    return v['decision']
+ def decide_pending(self,token,allow,client=None):
+  with self.lock:
+   value=self.items.get(token)
+   if value is None or client is not None and getattr(value['rpc'],'client_type','codex')!=client:return 'not_found'
+   if value['decision'] is not None:return value['decision']
+   if value['expires']<=self.clock():return 'expired'
+  try:return self.decide(token,allow)
+  except ValueError:return 'details_unavailable'
  def expire(self):
   with self.lock:
    for k,v in self.items.items():
-    if v['decision'] is None and self.clock()>=v['expires']:self.decide(k,False)
+    if v['decision'] is None and self.clock()>=v['expires']:
+     if getattr(v['rpc'],'monitor_only',False):v['decision']='expired'
+     else:self.decide(k,False)
  def pending_for(self,thread_id):return any(v['decision'] is None and v['details'].get('threadId')==thread_id for v in self.public())
 class Scheduler:
  def __init__(self,path=':memory:',approvals=None):

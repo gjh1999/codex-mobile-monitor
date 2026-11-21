@@ -219,6 +219,7 @@ def workspace_devices(root, url, cert, record, payload):
                     "--database", database)
     assert command.returncode == 0, command.stderr
     grant = command.stdout.strip()
+    check_private_downloader(root, grant)
     profiles = [root / f"private-edition-{index}" for index in range(4)]
 
     def connect(profile):
@@ -251,6 +252,40 @@ def workspace_devices(root, url, cert, record, payload):
         else:
             raise AssertionError("An invalid or revoked workspace grant was accepted")
     return members
+
+
+def check_private_downloader(root, grant):
+    from scripts.build_private_downloader import write_downloader
+
+    folder = root / "私人下载"
+    script = folder / "下载澜汐最新版.cmd"
+    write_downloader(grant, script)
+    profile = folder / "新用户"
+    config = profile / "Lanxi/data/local-config.json"
+    archive = folder / "Lanxi-R999-Windows-Private.zip"
+    env = {**os.environ, "LOCALAPPDATA": str(profile), "LANXI_DEVICE_TOKEN": ""}
+
+    def download():
+        result = subprocess.run(["cmd.exe", "/d", "/c", "call", script.name, "--no-pause"],
+                                cwd=folder, env=env, capture_output=True, timeout=45)
+        assert result.returncode == 0, result.stderr.decode("oem", errors="replace")
+
+    download()
+    assert archive.read_bytes() == (root / "releases" / archive.name).read_bytes()
+    settings = json.loads(config.read_bytes())
+    assert device_token(settings["coordination"]) not in config.read_text(encoding="utf-8")
+    config_bytes = config.read_bytes()
+    download()
+    assert config.read_bytes() == config_bytes
+
+    env["LOCALAPPDATA"] = str(folder / "本地使用过的用户")
+    previous = Path(env["LOCALAPPDATA"]) / "Lanxi/data/local-config.json"
+    previous.parent.mkdir(parents=True)
+    previous.write_text('{"desktopWallpaperMinutes":15,"personalSync":{"interval":45}}', encoding="utf-8")
+    download()
+    updated = json.loads(previous.read_bytes())
+    assert updated["desktopWallpaperMinutes"] == 15 and updated["personalSync"]["interval"] == 45
+    assert updated["coordination"]["device"] != settings["coordination"]["device"]
 
 
 def clients_roundtrip(root, url, devices):

@@ -111,6 +111,7 @@ if ($entry.TargetPath) {
     if ($entry.TargetPath -eq $env:LANXI_SHORTCUT_TARGET) { exit 0 }
 }
 $temporary = Join-Path $directory ('.lanxi-' + [Guid]::NewGuid().ToString('N') + '.lnk')
+$backup = $temporary + '.bak'
 try {
     $entry = $shell.CreateShortcut($temporary)
     $entry.TargetPath = $env:LANXI_SHORTCUT_TARGET
@@ -118,12 +119,13 @@ try {
     $entry.Description = '澜汐开发工作台'
     $entry.Save()
     if ([IO.File]::Exists($path)) {
-        [IO.File]::Replace($temporary, $path, $null)
+        [IO.File]::Replace($temporary, $path, $backup)
     } else {
         [IO.File]::Move($temporary, $path)
     }
 } finally {
     if ([IO.File]::Exists($temporary)) { [IO.File]::Delete($temporary) }
+    if ([IO.File]::Exists($backup)) { [IO.File]::Delete($backup) }
 }
 """
     env = {**os.environ, "LANXI_SHORTCUT_TARGET": str(executable),

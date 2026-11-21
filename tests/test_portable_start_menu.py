@@ -41,7 +41,8 @@ $entry = $shell.CreateShortcut($env:LANXI_TEST_FILE)
 $entry.TargetPath
 $entry.WorkingDirectory
 """)
-        output = subprocess.check_output(command, env={**os.environ, "LANXI_TEST_FILE": str(path)}, timeout=12)
+        output = subprocess.check_output(command, env={**os.environ, "LANXI_TEST_FILE": str(path)},
+                                         stderr=subprocess.PIPE, timeout=12)
         target, working_directory = output.decode("utf-8").strip().splitlines()
         self.assertEqual(Path(target), expected)
         self.assertEqual(Path(working_directory), expected.parent)

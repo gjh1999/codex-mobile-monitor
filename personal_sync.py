@@ -394,8 +394,9 @@ class PersonalSync:
                 ready[project] = (path, subdir)
                 errors[project] = "已同步"
             except UnsafeRepository as error:
-                with self.lock:
-                    untrusted.add(path)
+                if (path / ".git").exists():
+                    with self.lock:
+                        untrusted.add(path)
                 errors[project] = str(error)
             except (
                 ValueError,

@@ -212,7 +212,7 @@ def value(repo, *args):
 
 def trust_git_directory(repo):
     repo = Path(repo)
-    if not repo.is_absolute() or not repo.is_dir() or repo.resolve() != repo:
+    if not repo.is_absolute() or "*" in str(repo) or not repo.is_dir() or repo.resolve() != repo:
         raise SyncIssue("请选择本机仓库的实际目录")
     marker = repo / ".git"
     if not (marker.is_dir() or marker.is_file()) or marker.is_symlink() or (

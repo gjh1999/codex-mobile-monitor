@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from code_sync import SyncIssue, run, sync_project
+from code_sync import SyncIssue, UnsafeRepository, run, sync_project, trust_git_directory
 from coordination_server import create_app
 from personal_memory import replace
 from personal_sync import PersonalSync
@@ -51,6 +51,26 @@ class FlowTests(unittest.TestCase):
         git(self.a, "push", "-u", "origin", "main")
         self.share = root / "share"
         self.share.mkdir()
+
+    def test_manual_sync_reports_and_retries_exact_git_directory(self):
+        data = self.root / "sync-data"
+        data.mkdir()
+        set_project_root(data, self.a.parent)
+        worker = PersonalSync(data, {"exchange": str(self.share)}, home=data / "codex")
+        stop = threading.Event()
+        with patch.dict(os.environ, GIT_TEST_ASSUME_DIFFERENT_OWNER="1"):
+            first = worker.cycle(stop)
+            self.assertEqual(first["untrustedGit"], [str(self.a)])
+            with self.assertRaises(UnsafeRepository):
+                git(self.a, "rev-parse", "--show-toplevel")
+            with self.assertRaises(SyncIssue):
+                trust_git_directory(self.a.parent)
+            trust_git_directory(self.a)
+            trust_git_directory(self.a)
+            self.assertEqual(git(None, "config", "--global", "--get-all", "safe.directory"), self.a.as_posix())
+            result = worker.cycle(stop)
+        self.assertEqual(result["untrustedGit"], [])
+        self.assertEqual(result["status"]["example/flow"], "已同步")
 
     def test_projects_follow_relative_folder_on_new_device(self):
         relative = Path("客户甲/研发/项目 A")

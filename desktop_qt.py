@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 
 import monitor
 from cloud_pairing import bundled_workspace
+from code_sync import trust_git_directory
 from desktop_approvals import ApprovalQueueDialog, INACTIVE, approval_status
 from desktop_glass import ClientSwitch, FrostedPanel, OceanBackdrop, motion_enabled
 from desktop_diagnostics import DiagnosticsDialog
@@ -511,7 +512,13 @@ class ManualSyncDialog(QDialog):
         self.setWindowTitle('合流 · 手动同步')
         self.resize(540, 330)
         self.body = QTextBrowser(self)
-        QVBoxLayout(self).addWidget(self.body)
+        self.untrusted = []
+        self.trust_button = QPushButton('信任 Git 目录并重试', self)
+        self.trust_button.hide()
+        self.trust_button.clicked.connect(self.trust_and_retry)
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.body)
+        layout.addWidget(self.trust_button, alignment=Qt.AlignmentFlag.AlignRight)
         self.timer = QTimer(self)
         self.timer.setInterval(250)
         self.timer.timeout.connect(self.refresh_result)
@@ -525,7 +532,23 @@ class ManualSyncDialog(QDialog):
         self.raise_()
         self.activateWindow()
 
+    def trust_and_retry(self):
+        path, accepted = QInputDialog.getItem(
+            self, '信任 Git 目录', '选择你确认可信的本机仓库。澜汐会将此目录加入当前 Windows 用户的 Git 信任配置。',
+            self.untrusted, 0, False,
+        )
+        if not accepted or path not in self.untrusted:
+            return
+        try:
+            trust_git_directory(path)
+        except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+            detail = str(error) if isinstance(error, ValueError) else '请检查目录与 Git 配置写入权限。'
+            QMessageBox.warning(self, '暂时无法信任该目录', detail)
+            return
+        self.parent().open_manual_sync()
+
     def refresh_result(self):
+        self.trust_button.hide()
         future = self.future
         if not future.done():
             self.body.setPlainText('正在检查 GitHub、服务器代码备份、记忆和文件清单…' if future.running() else '已安排新一轮同步，等待后台开始…')
@@ -540,6 +563,10 @@ class ManualSyncDialog(QDialog):
         synced = sum(status.get(project) == '已同步' for project in paths)
         pending = result['projects'] - synced
         lines = [f"Git 项目 {result['projects']} 个，已同步 {synced} 个，未同步 {pending} 个。"]
+        self.untrusted = result.get('untrustedGit') or []
+        unlisted = [path for path in self.untrusted if path not in paths.values()]
+        lines.extend(f'{path} · Git 拒绝访问该目录' for path in unlisted)
+        self.trust_button.setVisible(bool(self.untrusted))
         backups = result.get('codeBackups') or {}
         if backups:
             saved = sum(value == '已备份' for value in backups.values())

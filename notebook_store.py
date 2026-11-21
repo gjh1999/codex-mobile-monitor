@@ -13,7 +13,7 @@ PREFIX = "notebook/"
 HISTORY_PREFIX = "notebook-history/"
 
 
-def utc_stamp(stamp):
+def parse_stamp(stamp):
     instant = datetime.fromisoformat(stamp)
     if instant.tzinfo is None:
         instant = instant.replace(tzinfo=timezone.utc)
@@ -118,7 +118,7 @@ class NotebookStore:
             """, (day,))
             for key, *entry in rows:
                 entries[key] = tuple(entry)
-            return sorted(entries.values(), key=lambda entry: utc_stamp(entry[4]))
+            return sorted(entries.values(), key=lambda entry: parse_stamp(entry[4]))
 
     def save(self, kind, entry_id, body, *, expected=None):
         with self.transaction() as db:
@@ -148,7 +148,7 @@ class NotebookStore:
             return updated
 
     def remember_previous_day(self, db, entry_id, entry, updated):
-        if utc_stamp(entry[4]).astimezone().date() == utc_stamp(updated).astimezone().date():
+        if parse_stamp(entry[4]).astimezone().date() == parse_stamp(updated).astimezone().date():
             return False
         row = db.execute("SELECT uuid FROM notebook_sync WHERE entry=?", (entry_id,)).fetchone()
         if row is None:

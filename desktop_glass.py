@@ -206,7 +206,8 @@ class ClientSwitch(FrostedPanel):
         self.select_workspace = select
         self.thumb_radius = 6 if compact else 15
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(*(4, 4, 4, 4) if compact else (14, 6, 14, 6))
+        horizontal, vertical = (4, 4) if compact else (14, 6)
+        layout.setContentsMargins(horizontal, vertical, horizontal, vertical)
         layout.setSpacing(3 if compact else 5)
         self.buttons = {}
         self.offsets = {}

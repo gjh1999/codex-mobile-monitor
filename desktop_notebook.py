@@ -1,6 +1,6 @@
 """The native notebook and its local SQLite storage."""
 import sqlite3
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 
 from PySide6.QtCore import QEvent, QMimeData, QRectF, QSignalBlocker, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QDrag, QPainter, QPainterPath, QPalette, QPen
@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 from desktop_glass import ClientSwitch, FrostedPanel
 from desktop_theme import configure_text, ui_font
 from model_groups import group_name
-from notebook_store import NotebookStore
+from notebook_store import NotebookStore, parse_stamp
 
 GROUP_NAMES = {'note': '拾得片羽', 'todo': '待理诸事', 'daily': '每日记录'}
 INK = '#f3faff'
@@ -262,6 +262,8 @@ class NotebookWorkspace(QWidget):
         self.list.setAcceptDrops(not daily)
         self.create.setVisible(not daily)
         self.more.setVisible(not daily)
+        self.stamp.setVisible(not daily)
+        self.saved_status.setVisible(not daily)
         self.create.setToolTip('落一笔' if kind == 'note' else '记一件待理之事')
         self.create.setAccessibleName(self.create.toolTip())
         self.entry_id = None
@@ -378,7 +380,7 @@ class NotebookWorkspace(QWidget):
             self.stamp.clear()
             self.saved_status.clear()
             return
-        updated = datetime.fromisoformat(record[3]).replace(tzinfo=timezone.utc).astimezone()
+        updated = parse_stamp(record[3]).astimezone()
         today = datetime.now().date()
         date = ('今夜' if updated.hour >= 18 else '今日') if updated.date() == today else updated.strftime('%m月%d日')
         self.stamp.setText(f'{date} · {updated:%H:%M}')
@@ -401,8 +403,12 @@ class NotebookWorkspace(QWidget):
     def refresh_day(self):
         today = date.today()
         if today != self.today and not self.dirty:
+            previous = self.today
             self.today = today
-            self.refresh_synced()
+            try:
+                self.refresh_synced()
+            except sqlite3.Error:
+                self.today = previous
 
     def flush(self):
         self.draft.stop()

@@ -255,6 +255,7 @@ def workspace_devices(root, url, cert, record, payload):
 
 
 def check_private_downloader(root, grant):
+    from desktop_storage import PROFILE, prepare_data
     from scripts.build_private_downloader import write_downloader
 
     folder = root / "私人下载"
@@ -275,8 +276,21 @@ def check_private_downloader(root, grant):
     settings = json.loads(config.read_bytes())
     assert device_token(settings["coordination"]) not in config.read_text(encoding="utf-8")
     config_bytes = config.read_bytes()
+    desktop_profile = config.with_name(PROFILE)
+    def desktop_workspace():
+        return prepare_data(folder, config.parent, lambda _: None)
+
+    assert desktop_workspace() == config.parent.parent
+    desktop_profile.unlink()  # An earlier downloader paired successfully but omitted the profile.
+    archive_time = archive.stat().st_mtime_ns
     download()
     assert config.read_bytes() == config_bytes
+    assert desktop_workspace() == config.parent.parent and archive.stat().st_mtime_ns == archive_time
+
+    migrated = json.dumps({"version": 1, "workspace": str(root), "importedFrom": str(folder)}).encode()
+    desktop_profile.write_bytes(migrated)
+    download()
+    assert desktop_profile.read_bytes() == migrated and desktop_workspace() == root
 
     env["LOCALAPPDATA"] = str(folder / "本地使用过的用户")
     previous = Path(env["LOCALAPPDATA"]) / "Lanxi/data/local-config.json"

@@ -41,11 +41,14 @@ function Confirm-Package([string]$path) {
         (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -eq $sha
 }
 
-function Save-Json([string]$path, $value) {
+function Save-Json([string]$path, $value, [switch]$CreateOnly) {
     $tmp = $path + '.' + [guid]::NewGuid().ToString('N') + '.tmp'
     try {
         [IO.File]::WriteAllText($tmp, ($value | ConvertTo-Json -Depth 100 -Compress))
-        if ([IO.File]::Exists($path)) {
+        if ($CreateOnly) {
+            try { [IO.File]::Move($tmp, $path) }
+            catch [IO.IOException] { if (![IO.File]::Exists($path)) { throw } }
+        } elseif ([IO.File]::Exists($path)) {
             [IO.File]::Replace($tmp, $path, [System.Management.Automation.Language.NullString]::Value)
         } else { [IO.File]::Move($tmp, $path) }
     } finally { if ([IO.File]::Exists($tmp)) { [IO.File]::Delete($tmp) } }
@@ -60,6 +63,9 @@ function Read-Settings {
 
 try {
     $config = Join-Path $env:LOCALAPPDATA 'Lanxi\data\local-config.json'
+    $data = [IO.Path]::GetDirectoryName($config)
+    $local = Join-Path $data '.local'
+    $lockPath = Join-Path $local 'download-pairing.lock'
     $settings = Read-Settings
     $coordination = $settings.coordination
     $claim = $null
@@ -71,9 +77,8 @@ try {
         $encoded += '=' * ((4 - $encoded.Length % 4) % 4)
         $grant = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encoded)) | ConvertFrom-Json
         if ($grant.code -cnotmatch '\A[A-Za-z0-9_-]{43}\z') { throw '私人下载脚本的加入授权格式有误。' }
-        $local = Join-Path ([IO.Path]::GetDirectoryName($config)) '.local'
         [IO.Directory]::CreateDirectory($local) | Out-Null
-        $pairLock = [IO.File]::Open((Join-Path $local 'download-pairing.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
+        $pairLock = [IO.File]::Open($lockPath, 'OpenOrCreate', 'ReadWrite', 'None')
         $settings = Read-Settings
         $coordination = $settings.coordination
         if (!($coordination.device -and ($coordination.protectedToken -or $env:LANXI_DEVICE_TOKEN))) {
@@ -101,6 +106,11 @@ try {
             if ($grant.trustedCertificate) { $coordination.trustedCertificate = $grant.trustedCertificate }
             $claim = $grant.code
         }
+    }
+    # R36 treats an existing data directory as installed and reads its profile immediately.
+    $profilePath = Join-Path $data 'desktop-profile.json'
+    if (![IO.File]::Exists($profilePath) -and [IO.File]::Exists($lockPath)) {
+        Save-Json $profilePath @{ version=1; workspace=[IO.Path]::GetDirectoryName($data); importedFrom=$null } -CreateOnly
     }
     $origin = $null
     if (![Uri]::TryCreate([string]$coordination.url, [UriKind]::Absolute, [ref]$origin) -or

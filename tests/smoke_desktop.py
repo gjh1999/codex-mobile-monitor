@@ -10,6 +10,7 @@ from concurrent.futures import Future
 from contextlib import closing
 from datetime import date, datetime, time as clock_time, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -24,6 +25,7 @@ from automation import Approvals
 from cloud_pairing import encode_setup
 from codex_activity import COMMAND_DELTA, MESSAGE_DELTA, CodexActivity
 from codex_history import read_codex_conversation
+from codex_workspace import CodexWorkspace
 from desktop_glass import FrostedPanel, OceanBackdrop
 from desktop_model_api import ModelApiDialog
 from desktop_notebook import GROUP_HEADER, NotebookStore
@@ -33,6 +35,7 @@ from desktop_qt import MainWindow, choose_workspace_startup
 from desktop_theme import configure_text, message_html, set_reading_html, ui_font
 from desktop_wallpapers import WallpaperDialog, WallpaperLibrary
 from model_groups import Organizer, read_settings
+from personal_relay import Records
 from reply_log import ReplyLog
 
 CODEX = '00000000-0000-4000-8000-000000000001'

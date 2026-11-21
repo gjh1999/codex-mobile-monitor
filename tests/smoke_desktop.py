@@ -206,11 +206,20 @@ def check_manual_sync(window):
                            'projectPaths': {'owner/a': 'D:/work/a', 'owner/b': 'D:/work/b'},
                            'status': {'owner/a': '已同步', 'owner/b': '两端修改发生冲突'},
                            'codeBackups': {'owner/a': '服务器存储暂不可用', 'owner/b': '已备份'},
-                           'largeInventory': {'owner/a': {'data.bin': {'localSize': None}}}})
+                           'largeInventory': {'owner/a': {'data.bin': {'localSize': None}}},
+                           'untrustedGit': ['D:/work/b']})
         assert wait_until(lambda: 'data.bin · 本机缺少' in dialog.body.toPlainText())
         assert all(text in dialog.body.toPlainText() for text in ('已同步 1 个，未同步 1 个', '项目记忆已检查', '发生冲突',
                                                                  'owner/a · 已同步', 'D:/work/b',
                                                                  '服务器代码备份已确认 1 个', '服务器备份 · 已备份'))
+        assert dialog.trust_button.isVisible()
+        retry = Future()
+        with (patch('desktop_qt.QInputDialog.getItem', return_value=('D:/work/b', True)),
+              patch('desktop_qt.trust_git_directory') as trust):
+            request.return_value = retry
+            dialog.trust_button.click()
+            trust.assert_called_once_with('D:/work/b')
+            assert request.call_count == 2 and not dialog.trust_button.isVisible()
         dialog.close()
 
 

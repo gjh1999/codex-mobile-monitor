@@ -16,6 +16,7 @@ from code_sync import (
     UnsafeRepository,
     exclude_memory,
     github_id,
+    run,
     sync_project,
     value,
     verify_checkout,
@@ -190,7 +191,13 @@ class PersonalSync:
                         pending_git.add(path)
                         continue
                 try:
-                    remote = value(path, "config", "--get", "remote.origin.url")
+                    origin = run(path, "config", "--get", "remote.origin.url", check=False)
+                    if origin.returncode:
+                        # Git config can omit the local configuration of an untrusted
+                        # repository without surfacing the ownership error itself.
+                        run(path, "rev-parse", "--show-toplevel")
+                        continue
+                    remote = origin.stdout.decode().strip()
                 except UnsafeRepository:
                     if untrusted is not None:
                         untrusted.add(path)

@@ -50,10 +50,10 @@ def probe(mode):
     original_window = desktop_qt.MainWindow
 
     class ObservedWindow(original_window):
-        def __init__(self, shared):
+        def __init__(self, shared, workspace=None):
             holder['shared'] = shared
             holder['window'] = self
-            super().__init__(shared)
+            super().__init__(shared, workspace)
             app = QApplication.instance()
 
             def about_to_quit():

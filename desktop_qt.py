@@ -527,7 +527,7 @@ class ManualSyncDialog(QDialog):
     def refresh_result(self):
         future = self.future
         if not future.done():
-            self.body.setPlainText('正在检查代码、记忆和文件清单…' if future.running() else '已安排新一轮同步，等待后台开始…')
+            self.body.setPlainText('正在检查 GitHub、服务器代码备份、记忆和文件清单…' if future.running() else '已安排新一轮同步，等待后台开始…')
             return
         self.timer.stop()
         result = None if future.cancelled() else future.result()
@@ -539,6 +539,10 @@ class ManualSyncDialog(QDialog):
         synced = sum(status.get(project) == '已同步' for project in paths)
         pending = result['projects'] - synced
         lines = [f"Git 项目 {result['projects']} 个，已同步 {synced} 个，未同步 {pending} 个。"]
+        backups = result.get('codeBackups') or {}
+        if backups:
+            saved = sum(value == '已备份' for value in backups.values())
+            lines.append(f'服务器代码备份已确认 {saved} 个，待处理 {len(backups) - saved} 个。')
         if not paths:
             lines.append('未发现可同步的 GitHub 项目，请核对项目母目录、仓库 origin 和项目登记。')
         if result['connection']:
@@ -561,6 +565,8 @@ class ManualSyncDialog(QDialog):
         lines.extend(f'{key} · {value}' for key, value in sorted(status.items()) if key not in paths)
         for project, path in sorted(paths.items(), key=lambda row: (status.get(row[0]) == '已同步', row[0])):
             lines.append(f"{project} · {status.get(project, '未检查')}")
+            if project in backups:
+                lines.append('    服务器备份 · ' + backups[project])
             if path:
                 lines.append('    ' + path)
         self.body.setPlainText('\n'.join(lines))
@@ -570,12 +576,14 @@ class MainWindow(QMainWindow):
     history_ready = Signal(object, object)
     codex_options_ready = Signal(object, object)
     grouping_changed = Signal(str)
+    code_backup_result = Signal(object, object, object)
 
     def __init__(self, shared, workspace=None):
         super().__init__()
         QApplication.instance().setStyle('Fusion')
         self.setFont(ui_font(10))
         self.shared = shared
+        self.code_backup_result.connect(self.show_code_backup_result)
         self.workspace_grant = workspace
         self.stop = threading.Event()
         self.worker = None
@@ -1014,10 +1022,15 @@ class MainWindow(QMainWindow):
         menu.addAction('使用邀请码连接…', self.open_cloud_pairing)
         if flow:
             view = flow.snapshot()
+            if flow.coordination and not flow.settings.get('codeOnly') and not flow.settings.get('exchange'):
+                menu.addAction('下载服务器代码备份…', self.choose_code_backup)
             if view.get('connection'):
                 menu.addAction(view['connection']).setEnabled(False)
             for project in sorted(view['projects']):
                 label = project + ' · ' + view['status'].get(project, '准备中')
+                backup = view.get('codeBackups', {}).get(project)
+                if backup:
+                    label += ' · 服务器' + backup
                 count = len(view.get('largeInventory', {}).get(project, {}))
                 if count:
                     label += f' · {count} 个大文件需核对'
@@ -1039,6 +1052,53 @@ class MainWindow(QMainWindow):
                 menu.addAction('通过已配置的澜汐协调服务配对', lambda: self.enable_flow({'codeOnly':False}))
         if not flow:
             menu.addAction('仅启用已登记项目的 GitHub 同步', lambda: self.enable_flow({'codeOnly':True}))
+
+    def choose_code_backup(self):
+        flow = monitor.personal_sync
+        candidates = sorted(flow.snapshot()['projects'])
+        project, accepted = QInputDialog.getItem(self, '服务器代码备份', 'GitHub 仓库（所有者/项目）', candidates, 0, True)
+        if accepted and project.strip():
+            project = project.strip().lower()
+            self.run_code_backup(project, lambda client: client.list(project))
+
+    def run_code_backup(self, project, operation):
+        flow = monitor.personal_sync
+
+        def work():
+            try:
+                client = flow.code_backups() if flow else None
+                if client is None:
+                    raise ValueError('请先连接云服务器')
+                result = operation(client)
+                self.code_backup_result.emit(project, result, None)
+            except (ValueError, OSError, KeyError) as error:
+                message = str(error) if isinstance(error, ValueError) else '无法读取服务器备份或保存目标文件'
+                self.code_backup_result.emit(project, None, message)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def show_code_backup_result(self, project, result, error):
+        if error:
+            self._popup('服务器代码备份', error)
+        elif isinstance(result, Path):
+            self._popup('服务器代码备份', f'已保存到 {result}')
+        elif not result:
+            self._popup('服务器代码备份', '服务器没有这个项目的代码副本。')
+        else:
+            labels = {f"{row['device']} · {time.strftime('%Y-%m-%d %H:%M', time.localtime(row['updated']))}": row['device']
+                      for row in result}
+            selected, accepted = QInputDialog.getItem(self, '服务器代码备份', '选择来源设备和备份时间', list(labels), 0, False)
+            if not accepted:
+                return
+            filename, _ = QFileDialog.getSaveFileName(self, '保存代码备份', project.split('/')[-1] + '.zip', 'ZIP (*.zip)')
+            if filename:
+                destination = Path(filename)
+
+                def download(client):
+                    client.download(project, labels[selected], destination)
+                    return destination
+
+                self.run_code_backup(project, download)
 
     def show_large_inventory(self):
         state = monitor.personal_sync.snapshot()

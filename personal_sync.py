@@ -340,7 +340,7 @@ class PersonalSync:
             first = self.priority
             self.priority = None
         ready = {}
-        backups = self.code_backups() if cloud else None
+        backups = self.code_backups() if isinstance(store, RemoteRecords) else None
         backup_status = {project: "等待服务器或本机项目可用" for project in specs} if cloud else {}
 
         def update(project):

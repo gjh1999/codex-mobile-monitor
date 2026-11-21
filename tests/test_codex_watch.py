@@ -30,7 +30,7 @@ class CodexWatchTests(unittest.TestCase):
             sessions = home / 'sessions' / '2026' / '11' / '21'
             sessions.mkdir(parents=True)
             path = sessions / f'rollout-fixture-{THREAD}.jsonl'
-            now = time.time()
+            now = round(time.time(), 6)
             path.write_bytes(record('session_meta', {'id': THREAD, 'cwd': str(home / 'Project A')})
                              + record('event_msg', {'type': 'task_complete', 'turn_id': 'old'}, now - 60))
             watcher = RolloutWatch(home, now - 1)

@@ -41,6 +41,31 @@ class WebTests(unittest.TestCase):
             r=self.client.post('/api/approvals',json={'token':'test','allow':True},headers={'x-monitor-request':'1'})
         self.assertEqual(r.status_code,409)
 
+    def test_approval_batch_requires_explicit_tokens_and_reports_each_decision(self):
+        import monitor
+        from automation import Approvals
+
+        self.assertEqual(self.client.get('/api/approvals').status_code, 401)
+        self.login()
+        approvals = Approvals()
+        rpc = Mock(send=Mock(), approval_guard=None, client_type='codex')
+        method = 'item/commandExecution/requestApproval'
+        first = approvals.add(rpc, {'id': 1, 'method': method, 'params': {'command': 'echo one'}})
+        second = approvals.add(rpc, {'id': 2, 'method': method, 'params': {'command': 'echo two'}})
+        with patch.object(monitor, 'approvals', approvals):
+            pending = self.client.get('/api/approvals').json()['pending']
+            self.assertEqual([item['token'] for item in pending], [first, second])
+            payload = {'tokens': [first, 'missing', first], 'allow': True}
+            self.assertEqual(self.client.post('/api/approvals/batch', json=payload).status_code, 403)
+            headers = {'x-monitor-request': '1'}
+            result = self.client.post('/api/approvals/batch', json=payload, headers=headers)
+            self.assertEqual(result.json(), {'results': [{'token': first, 'decision': 'allowed'},
+                                                         {'token': 'missing', 'decision': 'not_found'}]})
+            self.assertEqual(self.client.post('/api/approvals/batch', json={'tokens': [second], 'allow': 'true'},
+                                              headers=headers).status_code, 422)
+            self.assertEqual([item['token'] for item in approvals.pending()], [second])
+        rpc.send.assert_called_once_with({'id': 1, 'result': {'decision': 'accept'}})
+
     def test_state_and_history_are_read_only(self):
         self.login()
         with patch('monitor.snapshot', return_value={'threads':[]}), patch('monitor.conversation_for', return_value={'messages':[]}) as history:
@@ -121,7 +146,7 @@ class WebTests(unittest.TestCase):
                     self.assertIn(b'"shared_worker":true', response.read())
                 self.assertEqual(
                     {worker.name for worker in workers.threads},
-                    {'monitor-worker', 'claude-monitor-worker', 'project-library', 'monitor-web'},
+                    {'monitor-worker', 'claude-monitor-worker', 'codex-watch', 'project-library', 'monitor-web'},
                 )
             finally:
                 stop.set()

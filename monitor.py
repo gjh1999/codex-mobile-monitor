@@ -275,10 +275,10 @@ def watch_codex(stop):
  next_probe=0
 
  def alert(item):
-  if 'title' not in item or not item['title']:
-   item={**item,'title':history_labels.get(item['threadId'],{}).get('title') or 'Codex 会话'}
+  name=item.get('title') or history_labels.get(item['threadId'],{}).get('title') or 'Codex 会话'
+  if item.get('deviceName'):name=item['deviceName']+' · '+name
   key=f"codex:turn-complete:{item['threadId']}:{item['turnId']}"
-  native.notify(key,'Codex 对话已完成',item['title'])
+  native.notify(key,'Codex 对话已完成',name)
 
  def local(item):
   workspace_codex.complete(item)
@@ -313,7 +313,7 @@ def watch_codex(stop):
       if not recent(stamp,now,RETENTION) or stamp<started:continue
       name=row.get('title')
       item=completion(row.get('threadId'),row.get('turnId'),stamp,name if isinstance(name,str) else '')
-      if item:alert(item)
+      if item:alert({**item,'deviceName':row['deviceName']})
      update(codexWorkspaceWatch='connected')
     else:
      store=None

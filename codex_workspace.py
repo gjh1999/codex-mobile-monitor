@@ -55,7 +55,9 @@ class CodexWorkspace:
 
     def complete(self, event):
         key = event['threadId'], event['turnId']
-        self.completions.setdefault(key, event)
+        current = self.completions.get(key)
+        if current is None or not current['title'] and event['title']:
+            self.completions[key] = event
 
     def pending(self):
         now = self.clock()
@@ -119,7 +121,7 @@ class CodexWorkspace:
         for peer, row in records.items():
             name = row.get('name')
             name = name[:80] if isinstance(name, str) and name else peer
-            turns.extend(self.entries(row, 'completions'))
+            turns.extend({**item, 'deviceName': name} for item in self.entries(row, 'completions'))
             for item in self.entries(row, 'approvals'):
                 source, expires, details = item.get('token'), item.get('expires'), item.get('details')
                 if (not valid_token(source) or type(expires) not in (int, float) or not now < expires <= now + RETENTION + LIVE

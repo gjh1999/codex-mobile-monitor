@@ -2,6 +2,21 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+<a id="r35-backend-ticket"></a>
+## 2026-11-21 R35-01 共享 Codex 审批复核
+
+- 基线为 R35 与负责人补审提交 `e068d55`。已发布的共享连接缺少普通连接拥有的项目控制检查。修复提交 `af6047b` 在发送应答前按当前来源设备复核控制权。显式登记项目的写入凭据随版本失效。个人工作区已交还的会话即使同一设备仍有另一个任务占用项目，也会拦截原审批。
+- Windows、Python 3.14.7。执行 `.venv\Scripts\python.exe -B -m unittest tests.test_codex_watch tests.test_coordination tests.test_personal_project_lock tests.test_automation tests.test_monitor tests.test_web tests.test_codex_activity tests.test_codex_desktop tests.test_task_control tests.test_personal_flow`，86 项通过，用时 37.716 秒。覆盖持有、释放、转移及 IDE 开关后旧写入版本失效。SQLite 连接资源警告与 Starlette 弃用警告仍有输出。
+- 执行 `.venv\Scripts\python.exe -B -m tests.smoke_cloud_coordinator --output build-exe/verification/r35-01-approval-control/https-final.json`，隔离 HTTPS 通过，用时 14.67 秒。使用临时 Git 仓库、两个同工作区身份、一个隔离工作区身份和模拟 App Server 的原应答管道。持有控制权时收到原请求 ID 的同意应答。释放、转移后没有发出原应答，远端收到 `control_lost`。保留了首次同通道通过的报告 `https.json`，用时 14.51 秒。
+- 实际客户端审批、实体双机、候选包和线上发版由独立复测与发布流程继续。个人工作区复用既有接口，配置了显式项目的协调服务需使用含写入版本字段的源码。 [R35-01 工单](../DELIVERY_STATUS.md#r35-01)
+
+<a id="r35-02-backup-validation"></a>
+## 2026-11-21 R35-02 备份成员校验
+
+- Windows、Python 3.14.7。输入为回环协调服务临时目录中的有效 ZIP，以及替换 ZIP 的一个成员内容损坏、传输 SHA-256 与上传字节一致的隔离夹具。修复前执行 `.venv\Scripts\python.exe -B -m unittest tests.test_code_backups.CodeBackupTests.test_rejected_backup_preserves_previous_restorable_bytes -v`，旧服务接收损坏包，预期拒绝的测试失败，用时 0.588 秒。
+- 修复提交 `762dbbf`。上传在替换前逐成员分块读取并核对长度和 CRC。ZIP 中央目录最多 8 MiB、成员最多 10 万、总解压大小最多 4 GiB。每个服务进程同时校验至多两份上传。校验结束后再次核对服务器当前版本再执行原子替换。
+- 修复后执行 `.venv\Scripts\python.exe -B -m unittest tests.test_code_backups tests.test_personal_flow tests.test_project_library tests.test_coordination tests.test_temporary_files`，32 项通过，用时 32.469 秒。损坏包及超过展开大小或文件数限制的包均被拒绝。另一配对设备下载上一份 ZIP 后，字节与首次上传完全一致，成员内容成功恢复。测试数据和下载结果在测试独立临时目录中，结束后随夹具清理。待负责人复审、R35-04 独立复测及部署。 [工单](../DELIVERY_STATUS.md#r35-02)
+
 <a id="r35-frontend-ticket"></a>
 ## 2026-11-21 R35-03 前端验收
 

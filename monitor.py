@@ -112,6 +112,13 @@ def approval_queue(client=None):
  return local+(workspace_codex.pending() if client in (None,'codex') else [])
 
 
+def approval_snapshot():
+ with state_lock:
+  shared=state.get('codexApprovalWatch','own_connection')
+  workspace=state.get('codexWorkspaceWatch','local')
+ return {'pending':approval_queue(),'decisions':workspace_codex.decisions(),'sharedCodex':shared,'workspace':workspace}
+
+
 def decide_approvals(tokens,allow):
  if type(allow) is not bool or not isinstance(tokens,(list,tuple)) or not all(isinstance(token,str) for token in tokens):
   raise ValueError('请提供明确的审批项目和决定。')

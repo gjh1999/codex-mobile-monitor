@@ -166,10 +166,7 @@ def create_app(start_workers=True):
 
     @app.get('/api/approvals', dependencies=[Depends(auth)])
     def approval_queue():
-        state = monitor.snapshot()
-        return {'pending': monitor.approval_queue(), 'decisions': monitor.workspace_codex.decisions(),
-                'sharedCodex': state.get('codexApprovalWatch', 'own_connection'),
-                'workspace': state.get('codexWorkspaceWatch', 'local')}
+        return monitor.approval_snapshot()
 
     @app.post('/api/approvals/batch', dependencies=[Depends(auth)])
     def decide_batch(data: ApprovalBatch):

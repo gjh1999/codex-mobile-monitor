@@ -720,10 +720,14 @@ class MainWindow(QMainWindow):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refresh)
         self.timer.start(1000)
+        self.approval_timer = QTimer(self)
+        self.approval_timer.timeout.connect(self.refresh_approvals)
+        self.approval_timer.start(500)
         self.activity_timer = QTimer(self)
         self.activity_timer.timeout.connect(self.refresh_activity)
         self.activity_timer.start(200)
         _stop, self.worker = monitor.start_background_service(self.stop)
+        self.refresh_approvals()
         self.refresh()
 
     def build_ui(self):
@@ -1335,6 +1339,7 @@ class MainWindow(QMainWindow):
         self.stop.set()
         self.organizer.close()
         self.timer.stop()
+        self.approval_timer.stop()
         self.activity_timer.stop()
         self._approval_pool.shutdown(wait=False, cancel_futures=True)
         self._history_pool.shutdown(wait=True, cancel_futures=True)
@@ -1667,7 +1672,6 @@ class MainWindow(QMainWindow):
         self.render_tasks(projects, threads, controls)
         self.render_selection(snap)
         self.render_guard_quota(snap)
-        self.refresh_approvals()
 
     def render_selection(self, snap):
         if self._rename_target is not None and self._rename_target != (self.client, self.selected_thread):
@@ -1995,6 +1999,8 @@ class MainWindow(QMainWindow):
         self.quota_text.setPlainText('\n'.join(lines) or '尚无额度窗口数据')
 
     def refresh_approvals(self):
+        if self._quitting:
+            return
         snapshot = monitor.approval_snapshot()
         self._approval_scope = snapshot['workspace']
         self._pending_approvals = {item['token']: item for item in snapshot['pending']}
@@ -2025,7 +2031,6 @@ class MainWindow(QMainWindow):
         if self.approval_dialog is None:
             return
         if reviewable:
-            self._shown_approvals.update(self._pending_approvals)
             self.approval_dialog.update_requests(self._pending_approvals, self._approval_feedback,
                                                  self._approval_sending, self._approval_scope)
         else:
@@ -2034,19 +2039,19 @@ class MainWindow(QMainWindow):
     def offer_approval(self, force=False):
         if self._quitting:
             return
-        if self.approval_dialog is not None:
-            if force:
-                self.approval_dialog.show()
-                self.approval_dialog.raise_()
-                self.approval_dialog.activateWindow()
+        new_requests = self._pending_approvals.keys() - self._shown_approvals
+        if not force and not new_requests:
             return
-        has_requests = bool(self._pending_approvals or self._approval_feedback or self._approval_sending)
-        if not has_requests or not force and not (self._pending_approvals.keys() - self._shown_approvals):
+        if not (self._pending_approvals or self._approval_feedback or self._approval_sending):
             return
-        self.approval_dialog = ApprovalQueueDialog(self, self.approval_task_title, self.submit_approval)
-        self.approval_dialog.finished.connect(self.approval_closed)
-        self.render_approvals()
-        self.approval_dialog.show()
+        if self.approval_dialog is None:
+            self.approval_dialog = ApprovalQueueDialog(self, self.approval_task_title, self.submit_approval)
+            self.approval_dialog.finished.connect(self.approval_closed)
+            self.render_approvals()
+        self.approval_dialog.showNormal()
+        self.approval_dialog.raise_()
+        self.approval_dialog.activateWindow()
+        self._shown_approvals.update(self._pending_approvals)
 
     def approval_task_title(self, token, request):
         params = request['details']

@@ -55,6 +55,7 @@ class ApprovalCheckDelegate(QStyledItemDelegate):
 class ApprovalQueueDialog(QDialog):
     def __init__(self, parent, task_title, decide):
         super().__init__(parent)
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint)
         self.task_title = task_title
         self.decide = decide
         self.requests = {}

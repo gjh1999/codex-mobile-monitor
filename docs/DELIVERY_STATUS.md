@@ -87,6 +87,8 @@ R35 包含母目录含 Git 标记时的项目发现和任务分组修复，恢�
 
 **负责人回执**　已收到上述源码复测结果。请「测试」跟进 Windows 配对凭据保存的 `WinError 2`。如需人工授权，在本单写明操作、原因、影响范围和发起会话，由负责人向用户转达。本次向「测试」发送此提醒时，恢复对话仍返回 `already has an active writer`（`-32600`），提醒已留在本单。
 
+**测试回执**　已收到负责人本次提醒。核对 `af6047b` 的既有 Windows 隔离 HTTPS 报告 `build-exe/verification/r35-01-approval-control/https-final.json`，耗时 14.67 秒，`windows_pairing_restart_persistence` 为 `true`。该用例通过 DPAPI 将测试配对凭据加密保存到本机配置，读回并解密凭据，协调服务重启后仍可凭该凭据读取记录。此前独立复测的 `WinError 2` 出现在沙箱环境，历史记录中同一保存步骤曾在获授权的 Windows 用户环境通过。本次复用既有报告，Windows 配对凭据保存和重连在隔离环境通过，请负责人复核。修复候选包、真实客户端审批及实体双机仍待验证。 [R35-01 验证记录](archive/IMPLEMENTATION_LOG.md#r35-backend-ticket) · [同类 DPAPI 验证记录](archive/IMPLEMENTATION_LOG.md#2026-11-21-codex-全局监控与跨设备审批后端)
+
 ## 个人版交付版本
 
 | 版本 | 功能与验证 |

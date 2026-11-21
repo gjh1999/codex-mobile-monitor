@@ -90,13 +90,14 @@ def _api(token, endpoint, data=None):
 def _token():
     gh = shutil.which("gh")
     if gh:
-        result = subprocess.run([gh, "auth", "token", "--hostname", "github.com"],
-                                stdin=subprocess.DEVNULL, capture_output=True, timeout=10,
-                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        if result.returncode == 0 and result.stdout.strip():
-            token = result.stdout.strip().decode("ascii")
-            if re.fullmatch(r"[!-~]+", token):
-                return token
+        try:
+            result = subprocess.run([gh, "auth", "token", "--hostname", "github.com"],
+                                    stdin=subprocess.DEVNULL, capture_output=True, timeout=10,
+                                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            if result.returncode == 0 and re.fullmatch(rb"[!-~]+", result.stdout.strip()):
+                return result.stdout.strip().decode("ascii")
+        except (OSError, subprocess.TimeoutExpired):
+            pass
     credential = run(None, "credential", "fill", data=b"protocol=https\nhost=github.com\n\n",
                      check=False, timeout=15)
     fields = dict(line.split(b"=", 1) for line in credential.stdout.splitlines() if b"=" in line)
@@ -154,7 +155,7 @@ def _selection(folder):
     return [path for path, mode in zip(fields[::3], fields[2::3]) if mode in (b"unset", b"unspecified")]
 
 
-def _initial_commit(folder, state, login):
+def _initial_commit(folder, state):
     title = "Lanxi initial project " + state["nonce"]
     head = run(folder, "rev-parse", "--verify", "HEAD", check=False)
     if value(folder, "symbolic-ref", "--short", "HEAD") != "main":
@@ -166,8 +167,11 @@ def _initial_commit(folder, state, login):
             raise SyncIssue("本机暂存区包含筛选范围外的文件，请人工核对")
         if names:
             run(folder, "add", "--pathspec-from-file=-", "--pathspec-file-nul", data=b"\0".join(names) + b"\0")
-        run(folder, "-c", "user.name=" + login, "-c", "user.email=" + login + "@users.noreply.github.com",
-            "-c", "commit.gpgSign=false", "commit", "--allow-empty", "-m", title)
+        identity = []
+        for setting, fallback in (("user.name", "Lanxi"), ("user.email", "lanxi@localhost.invalid")):
+            if not run(folder, "config", "--get", setting, check=False).stdout.strip():
+                identity.extend(("-c", setting + "=" + fallback))
+        run(folder, *identity, "-c", "commit.gpgSign=false", "commit", "--allow-empty", "-m", title)
     elif value(folder, "log", "-1", "--format=%s", "HEAD") != title or value(folder, "log", "-1", "--format=%P", "HEAD"):
         raise SyncIssue("本机已有其他提交，请核对后手动接入")
 
@@ -216,12 +220,8 @@ def promote(folder):
         exists = os.path.lexists(folder / ".git")
         if exists and not managed(folder):
             raise SyncIssue("本机目录已有 Git 仓库，请核对后手动接入")
-        _identity("account", folder.name)
         if not exists:
-            token = _token()
             _initialize(folder)
-        else:
-            token = None
         with closing(ServiceLock(folder / ".git" / "lanxi-private.lock")):
             state = _read(folder)
             if not state:
@@ -232,7 +232,9 @@ def promote(folder):
                     raise SyncIssue("已接入的 origin 有变更，请核对")
                 _origin(folder, url)
                 return "已接入 GitHub"
-            token = token or _token()
+            _initial_commit(folder, state)
+            _identity("account", folder.name)
+            token = _token()
             login = _api(token, "/user").get("login")
             if not isinstance(login, str) or not re.fullmatch(r"[A-Za-z0-9-]{1,39}", login):
                 raise SyncIssue("无法确认 GitHub 登录账户")
@@ -240,7 +242,6 @@ def promote(folder):
                 raise SyncIssue("GitHub 登录账户与首次接入时不同")
             url = _identity(login, folder.name)
             _origin(folder, url)
-            _initial_commit(folder, state, login)
             _private_repo(folder, token, state, login)
             _origin(folder, url, add=True)
             _push(folder, url, token, login)

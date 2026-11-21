@@ -1,7 +1,6 @@
 """Ordinary project enrollment using local Git and a simulated personal GitHub account."""
 
 import base64
-import json
 import os
 import subprocess
 import tempfile
@@ -11,7 +10,8 @@ from urllib.error import HTTPError
 from unittest.mock import Mock, patch
 
 import plain_git as subject
-from code_sync import LIMIT, SyncIssue, run, value
+from code_backups import saved_files
+from code_sync import LIMIT, SyncIssue, commit_saved, run, value
 
 
 class PlainGitTests(unittest.TestCase):
@@ -122,12 +122,37 @@ class PlainGitTests(unittest.TestCase):
         self.token.assert_not_called()
         self.api.assert_not_called()
 
-    def test_failed_login_preserves_ordinary_folder(self):
+    def test_failed_login_keeps_local_git_and_retries_first_push(self):
+        (self.project / "main.py").write_text("print(42)")
         self.token.side_effect = SyncIssue("请登录")
         with self.assertRaisesRegex(SyncIssue, "登录"):
             subject.promote(self.project)
-        self.assertFalse((self.project / ".git").exists())
+        self.assertTrue(subject.managed(self.project))
+        self.assertEqual(value(self.project, "show", "HEAD:main.py"), "print(42)")
+        self.assertEqual(value(self.project, "log", "-1", "--format=%ae"), "lanxi@localhost.invalid")
         self.api.assert_not_called()
+        self.token.side_effect = None
+        self.assertEqual(subject.promote(self.project), "已接入 GitHub")
+        self.assertEqual(value(self.project, "rev-parse", "HEAD"), value(self.bare, "rev-parse", "main"))
+
+    def test_clone_subsequent_commit_and_server_backup_share_filters(self):
+        (self.project / "main.py").write_text("print(42)")
+        self.assertEqual(subject.promote(self.project), "已接入 GitHub")
+        clone = self.bare.parent / "new-computer"
+        run(None, "clone", "--branch", "main", str(self.bare), str(clone))
+        run(clone, "config", "user.name", "qa")
+        run(clone, "config", "user.email", "qa@localhost.invalid")
+        for name in (".lanxi/notes.txt", ".codex/data.json", "dist/entry.js", "client_secret.json",
+                     ".kube/config", "secret/further.txt", "credentials.txt", "build/output.py"):
+            path = clone / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("sensitive")
+        (clone / "main.py").write_text("print(43)")
+        self.assertTrue(commit_saved(clone, ".codex/memories"))
+        run(clone, "push", "origin", "main")
+        self.assertEqual(value(self.bare, "ls-tree", "-r", "--name-only", "main"), "main.py")
+        self.assertEqual(value(self.bare, "show", "main:main.py"), "print(43)")
+        self.assertEqual([name for name, path, stamp in saved_files(clone, ".codex/memories")], ["main.py"])
 
 
 class GithubTransportTests(unittest.TestCase):
@@ -143,7 +168,9 @@ class GithubTransportTests(unittest.TestCase):
 
     def test_push_sends_credentials_only_in_child_environment(self):
         url, token = "https://github.com/test/repo.git", "test-only"
-        with patch.object(subject.subprocess, "run", return_value=Mock(returncode=1)) as git:
+        with patch.object(subject.subprocess, "run", side_effect=[
+            Mock(returncode=0, stdout=url.encode()), Mock(returncode=1)
+        ]) as git:
             with self.assertRaises(SyncIssue) as failure:
                 subject._push(Path.cwd(), url, token, "test")
         encoded = base64.b64encode(b"test:test-only").decode()

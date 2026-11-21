@@ -534,8 +534,12 @@ class ManualSyncDialog(QDialog):
             self.body.setPlainText('这轮同步未完成。请检查连接和项目登记后重试。')
             return
         status = result['status']
-        synced = sum(value == '已同步' for value in status.values())
-        lines = [f"项目 {result['projects']} 个，已同步 {synced} 个。"]
+        paths = result['projectPaths']
+        synced = sum(status.get(project) == '已同步' for project in paths)
+        pending = result['projects'] - synced
+        lines = [f"Git 项目 {result['projects']} 个，已同步 {synced} 个，未同步 {pending} 个。"]
+        if not paths:
+            lines.append('未发现可同步的 GitHub 项目，请核对项目母目录、仓库 origin 和项目登记。')
         if result['connection']:
             lines.append(result['connection'])
         if result['memoryChecked'] and '记忆' not in status:
@@ -553,7 +557,11 @@ class ManualSyncDialog(QDialog):
                     lines.append(f'{project}/{name} · {state}')
         elif '大文件' not in status:
             lines.append('大文件清单未发现缺少或大小不同的文件。')
-        lines.extend(f'{key} · {value}' for key, value in sorted(status.items()) if value != '已同步')
+        lines.extend(f'{key} · {value}' for key, value in sorted(status.items()) if key not in paths)
+        for project, path in sorted(paths.items(), key=lambda row: (status.get(row[0]) == '已同步', row[0])):
+            lines.append(f"{project} · {status.get(project, '未检查')}")
+            if path:
+                lines.append('    ' + path)
         self.body.setPlainText('\n'.join(lines))
 
 
@@ -1200,7 +1208,8 @@ class MainWindow(QMainWindow):
     def open_manual_sync(self):
         flow = monitor.personal_sync
         if flow is None:
-            self._popup('合流 · 手动同步', '请先连接云服务器。')
+            self._popup('合流 · 手动同步', '跨机同步尚未启用。请先连接云服务器，或从「跨机接续」启用 GitHub 同步。'
+                       '\n本机 Codex 任务可在「案头诸事」继续查看。')
             return
         if self.manual_sync_dialog is None:
             self.manual_sync_dialog = ManualSyncDialog(self)

@@ -194,6 +194,8 @@ def run(repo, *args, data=None, check=True, trace=False, timeout=90):
             b"authentication failed", b"permission denied (publickey)", b"repository not found",
         )):
             raise SyncIssue("GitHub 登录或仓库权限不可用，请在本机确认 Git 凭据及仓库访问权限")
+        if b"dubious ownership" in stderr or b"unsafe repository" in stderr:
+            raise SyncIssue("Git 拒绝访问该目录，请核对仓库所有者及 safe.directory 设置")
         if b"not a git repository" in stderr or b"invalid gitfile" in stderr:
             raise SyncIssue("本机 Git 工作区不可用，请核对项目路径和 Git 元数据")
         raise SyncIssue(f"Git {args[0]} 未完成，请核对网络、凭据和仓库状态")

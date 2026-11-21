@@ -195,11 +195,12 @@ class PersonalSync:
             if not project:
                 continue
             remote_specs.setdefault(project, {"remote": entry["remote"], "memoryPath": ".codex/memories"})
-            if entry.get("path"):
-                target = Path(entry["path"])
-                if not target.is_absolute():
+            path = entry.get("path")
+            if path:
+                if not isinstance(path, (str, os.PathLike)) or not Path(path).is_absolute():
                     errors[project] = "项目映射需要本机绝对路径"
                     continue
+                target = Path(path)
                 if target.exists() or project not in local:
                     local[project] = target
             overrides.setdefault(project, {}).update(

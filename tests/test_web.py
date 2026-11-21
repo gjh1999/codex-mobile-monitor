@@ -123,6 +123,7 @@ class WebTests(unittest.TestCase):
                 patch.object(monitor, 'ROOT', Path(directory)), \
                 patch.object(monitor, 'poll', lambda stop: stop.wait()), \
                 patch.object(monitor, 'poll_claude', lambda stop: stop.wait()), \
+                patch.object(monitor, 'watch_codex', lambda stop: stop.wait()), \
                 patch.object(monitor, 'snapshot', return_value=states), \
                 patch.dict(os.environ, MONITOR_PASSWORD='test-password-123456', MONITOR_HOST='127.0.0.1',
                            MONITOR_PORT=str(port), MONITOR_HTTPS='0', DINGTALK_CLIENT_ID=''):

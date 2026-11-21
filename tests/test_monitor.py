@@ -105,7 +105,7 @@ class Tests(unittest.TestCase):
   finally:monitor.update(**original);scheduler.db.close()
 
  def test_desktop_worker_lifecycle_never_opens_a_listener(self):
-  entered = {client: threading.Event() for client in ('codex', 'claude')}
+  entered = {client: threading.Event() for client in ('codex', 'claude', 'watch')}
   stopped = {client: threading.Event() for client in entered}
   def worker(client, stop):
    entered[client].set()
@@ -115,6 +115,7 @@ class Tests(unittest.TestCase):
   with patch.dict('os.environ', {'DINGTALK_CLIENT_ID': '', 'DINGTALK_CLIENT_SECRET': ''}), \
        patch.object(monitor, 'poll', side_effect=lambda event: worker('codex', event)), \
        patch.object(monitor, 'poll_claude', side_effect=lambda event: worker('claude', event)), \
+       patch.object(monitor, 'watch_codex', side_effect=lambda event: worker('watch', event)), \
        patch('socket.socket') as socket:
    signal, workers = monitor.start_background_service(stop)
    try:

@@ -48,6 +48,7 @@ class CodexWatchTests(unittest.TestCase):
     def test_shared_daemon_observation_uses_original_request(self):
         peer = SharedCodex.__new__(SharedCodex)
         peer.approvals = Approvals()
+        peer.approval_coordination = lambda: (None, False)
         peer.subscriptions = set()
         peer.send = Mock()
         ordinary = '22222222-3333-4444-8555-666666666666'

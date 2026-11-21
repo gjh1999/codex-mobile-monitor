@@ -87,6 +87,13 @@ def personal_settings(settings):
  return personal
 
 
+def shared_approval_coordination():
+ settings=config()
+ client=device_client(settings)
+ personal=personal_settings(settings) if client else None
+ return client, personal is not None and not personal.get('exchange') and not personal.get('codeOnly')
+
+
 def activate_cloud_pairing(stop, workers):
  settings=config()
  personal=personal_settings(settings)
@@ -315,7 +322,7 @@ def watch_codex(stop):
      daemon.close();daemon=None
     if daemon is None and now>=next_probe and (home/'app-server-control').is_dir():
      next_probe=now+8
-     daemon=SharedCodex(approvals,codex_completed)
+     daemon=SharedCodex(approvals,codex_completed,shared_approval_coordination)
     if daemon:daemon.poll_approvals(stop)
    except (OSError,ValueError,RPCError,queue.Empty):
     if daemon:daemon.close();daemon=None

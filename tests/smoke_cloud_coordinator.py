@@ -23,8 +23,10 @@ from zipfile import ZipFile
 
 from cloud_pairing import WORKSPACE_PREFIX, SETUP_PREFIX, create_invite, decode_invite, join, join_workspace, post
 from automation import Approvals
+from code_sync import run
+from codex_watch import SharedCodex
 from codex_workspace import CodexWorkspace
-from coordination_client import ControlClient, device_token
+from coordination_client import ControlClient, PersonalTaskLocks, device_token
 from personal_relay import EMPTY, MAX_RECORD, Changed, RemoteRecords
 from portable_update import endpoint, latest, prepare
 
@@ -102,32 +104,65 @@ def http_error(action, expected):
         raise AssertionError(f"Expected HTTP {expected}")
 
 
-def codex_activity_roundtrip(source, viewer, other):
+def codex_activity_roundtrip(root, source, viewer, other):
+    thread = '11111111-2222-4333-8444-555555555555'
+    sibling = '22222222-3333-4444-8555-666666666666'
+    project = 'lanxi-approval-fixture/control-review'
+    cwd = root / 'approval-repo'
+    cwd.mkdir()
+    run(cwd, 'init')
+    run(cwd, 'remote', 'add', 'origin', f'https://github.com/{project}.git')
+    locks = PersonalTaskLocks(source.client)
+    ticket = locks.claim(thread, project, None)
+    sibling_ticket = locks.claim(sibling, project, None)
+
     approvals = Approvals()
-    rpc = SimpleNamespace(client_type='codex', send=Mock())
+    rpc = SharedCodex.__new__(SharedCodex)
+    rpc.approvals = approvals
+    rpc.approval_coordination = lambda: (source.client, True)
+    rpc.call = Mock(return_value={'thread': {'cwd': str(cwd)}})
+    rpc.closed = False
+    rpc.write_lock = threading.Lock()
+    rpc.p = SimpleNamespace(stdin=Mock())
     method = 'item/commandExecution/requestApproval'
-    first = approvals.add(rpc, {'id': 1, 'method': method, 'params': {'command': 'echo fixture one'}})
-    second = approvals.add(rpc, {'id': 2, 'method': method, 'params': {'command': 'echo fixture two'}})
+    first, second, third = [approvals.add(rpc, {'id': index, 'method': method,
+                            'params': {'threadId': thread, 'command': f'echo fixture {index}'}})
+                            for index in (1, 2, 3)]
+    assert approvals.decide_pending(first, True) == 'allowed'
     sender = CodexWorkspace(approvals)
     peer = CodexWorkspace(Approvals())
     outsider = CodexWorkspace(Approvals())
     sender.set_identity((source.client.url, source.client.device, source.client.token))
-    sender.complete({'threadId': '11111111-2222-4333-8444-555555555555', 'turnId': 'fixture-complete',
+    sender.complete({'threadId': thread, 'turnId': 'fixture-complete',
                      'time': time.time(), 'title': 'Fixture'})
     sender.sync(source)
     assert outsider.sync(other) == [] and not outsider.pending()
     http_error(lambda: other.read('codex-live/' + source.client.device), 404)
     events = peer.sync(viewer)
     assert [event['turnId'] for event in events] == ['fixture-complete']
-    selected = next(item['token'] for item in peer.pending() if item['sourceToken'] == first)
-    assert peer.decide(selected, True) == 'queued' and not rpc.send.called
+    selected = next(item['token'] for item in peer.pending() if item['sourceToken'] == second)
+    assert peer.decide(selected, True) == 'queued' and rpc.p.stdin.write.call_count == 1
     peer.sync(viewer)
     sender.sync(source)
     peer.sync(viewer)
     assert peer.decisions()[selected] == 'allowed'
-    assert [item['sourceToken'] for item in peer.pending()] == [second]
+    refused = peer.pending()
+    assert [item['sourceToken'] for item in refused] == [third]
+    checkpoint = '1' * 64
+    locks.handoff(thread, ticket, checkpoint)
+    assert locks.request()['projects'][project] == source.client.device
+    assert approvals.decide_pending(third, True) == 'control_lost'
+    assert peer.decide(refused[0]['token'], True) == 'queued'
+    peer.sync(viewer)
     sender.sync(source)
-    rpc.send.assert_called_once_with({'id': 1, 'result': {'decision': 'accept'}})
+    peer.sync(viewer)
+    assert peer.decisions()[refused[0]['token']] == 'control_lost'
+    assert locks.request('/' + thread) == {'device': None, 'checkpoint': checkpoint}
+    locks.handoff(sibling, sibling_ticket, checkpoint)
+    PersonalTaskLocks(viewer.client).claim(thread, project, lambda _: checkpoint)
+    assert approvals.decide_pending(third, True) == 'control_lost'
+    responses = [json.loads(call.args[0]) for call in rpc.p.stdin.write.call_args_list]
+    assert responses == [{'id': value, 'result': {'decision': 'accept'}} for value in (1, 2)]
 
 
 def automatic_pairing(root, url, cert, record, payload):
@@ -347,7 +382,7 @@ def verify(root):
                 devices["second"]["token"] in config.stdout and devices["first"]["token"] not in config.stdout
             )
             a, b, other = (client(url, name) for name in devices)
-            codex_activity_roundtrip(a, b, other)
+            codex_activity_roundtrip(root, a, b, other)
             http_error(lambda: endpoint(a.client, "/999"), 404)
             scope.write_text(hashlib.sha256(devices["first"]["personalSpace"].encode()).hexdigest(), encoding="ascii")
             for suffix in ("", "/999"):
@@ -420,6 +455,7 @@ def verify(root):
         "https": True,
         "device_isolation": True,
         "codex_activity_workspace_roundtrip": True,
+        "codex_approval_project_control": True,
         "conflict_preserved": True,
         "persisted_after_restart": True,
         "accepted_bytes": len(large),

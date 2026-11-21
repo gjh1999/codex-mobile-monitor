@@ -62,7 +62,8 @@ class Ownership:
     def state(self, db, project):
         write = self.writer(db, project)
         return dict(version=self.version(db, project),
-                    writer=dict(device=write['device'], thread=write['thread']) if write else None,
+                    writer=dict(device=write['device'], thread=write['thread'],
+                                version=write['version']) if write else None,
                     humans=[dict(device=row['device'], session=row['session'], source=row['source'],
                                  stale=self.clock() - row['stamp'] > 30)
                             for row in self.humans(db, project)])

@@ -1,12 +1,14 @@
 """Read local Codex completions and watch approvals on its shared app-server."""
 
 import json
+import queue
 import re
 import time
 from datetime import datetime
 from pathlib import Path
 
 from codex_history import LINE_LIMIT
+from coordination_client import ControlDenied, PersonalTaskLocks, personal_project_at
 from rpc_errors import RPCError
 from universal_rpc import UniversalRPC
 
@@ -107,12 +109,58 @@ class SharedCodex(UniversalRPC):
     monitor_only = True
     client_type = 'codex'
 
-    def __init__(self, approvals, report_completion):
+    def __init__(self, approvals, report_completion, approval_coordination):
         self.approvals = approvals
         self.report_completion = report_completion
+        self.approval_coordination = approval_coordination
         self.subscriptions = set()
         process = self._find_process('codex', arguments=['app-server', 'proxy'])
         super().__init__('codex', custom_process=process)
+
+    def approval_guard(self, thread):
+        try:
+            client, personal = self.approval_coordination()
+            if client is None or not (client.paths or personal):
+                return None
+            if not isinstance(thread, str) or not THREAD_ID.fullmatch(thread):
+                raise ControlDenied(detail='无法核对审批所属的 Codex 会话。')
+            result = self.call('thread/read', {'threadId': thread, 'includeTurns': False}, timeout=3)
+            cwd = (result.get('thread') or {}).get('cwd')
+            if not isinstance(cwd, str) or not Path(cwd).is_absolute():
+                raise ControlDenied(detail='无法核对审批所属的项目目录。')
+            mapped = client.project_at(cwd)
+            registered = client.threads.get(thread)
+            if registered and mapped and registered != mapped:
+                raise ControlDenied(detail='会话与实际目录属于不同登记项目。')
+            registered = registered or mapped
+            if personal and not Path(cwd).is_dir():
+                raise ControlDenied(detail='审批所属的本机项目目录不可用。')
+            project = personal_project_at(cwd) if personal else None
+        except ControlDenied:
+            raise
+        except (OSError, RPCError, queue.Empty, ValueError, TypeError, KeyError, AttributeError) as error:
+            raise ControlDenied(detail='无法核对审批所属的项目控制权。') from error
+
+        if not (project or registered):
+            return None
+
+        def guard():
+            try:
+                if project:
+                    PersonalTaskLocks(client).require_approval_owner(thread, project)
+                if registered:
+                    state = client.request(registered, 'control')
+                    writer = state['writer'] or {}
+                    if (writer.get('device') != client.device or writer.get('version') != state['version']
+                            or state['humans']):
+                        raise ControlDenied(detail='本机已失去登记项目的写入权。')
+            except ControlDenied:
+                raise
+            except (OSError, ValueError, TypeError, KeyError, AttributeError) as error:
+                raise ControlDenied(detail='无法复核审批所属的项目控制权。') from error
+            return True
+
+        return guard
 
     def poll_approvals(self, stop):
         loaded = set(self.call('thread/loaded/list', {}, timeout=3).get('data', []))

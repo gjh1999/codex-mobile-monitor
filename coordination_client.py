@@ -310,6 +310,18 @@ class PersonalTaskLocks:
             raise ControlDenied(detail='上一设备已交还任务，本机正在同步最新会话，请稍后重试。')
         return self.request(route + '/claim', {'project': project, 'checkpoint': required})['ticket']
 
+    def require_approval_owner(self, thread, project):
+        """Verify ownership without claiming a task from an observer."""
+        thread = str(uuid.UUID(thread))
+        active = self.request()
+        owner = active['tasks'].get(thread)
+        if active['projects'].get(project) != self.client.device or owner not in (None, self.client.device):
+            raise ControlDenied(detail='本机已失去该项目或会话的控制权。')
+        if owner is None:
+            task = self.request('/' + thread)
+            if task['checkpoint'] or task['device'] not in (None, self.client.device):
+                raise ControlDenied(detail='该会话已交还或转移，无法在来源设备放行。')
+
     def handoff(self, thread, ticket, checkpoint):
         self.request('/' + str(uuid.UUID(thread)) + '/handoff', {'ticket': ticket, 'checkpoint': checkpoint})
 

@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch
 from fastapi.testclient import TestClient
 
 from automation import Approvals, Scheduler
+from codex_watch import SharedCodex
 from coordination import Conflict, Ownership
 from coordination_client import ControlDenied, ProjectWrites, terminal
 from coordination_server import create_app
@@ -208,6 +209,36 @@ class CoordinationTests(unittest.TestCase):
         self.assertTrue(rpc.reconcile_writes())
         rpc.p.stdin.close.assert_called_once()
         self.assertIsNone(self.db.status('vision')['writer'])
+
+    def test_shared_approval_checks_registered_project_before_writing(self):
+        thread = '11111111-2222-4333-8444-555555555555'
+        rpc = SharedCodex.__new__(SharedCodex)
+        rpc.approvals = Approvals()
+        rpc.approval_coordination = lambda: (self.device('A'), False)
+        rpc.call = Mock(return_value={'thread': {'cwd': str(self.path.parent)}})
+        rpc.closed = False
+        rpc.write_lock = Lock()
+        rpc.p = SimpleNamespace(stdin=Mock())
+
+        def pending(request_id):
+            return rpc.approvals.add(rpc, {'id': request_id, 'method': 'item/commandExecution/requestApproval',
+                                          'params': {'threadId': thread, 'command': 'echo fixture'}})
+
+        first = pending(1)
+        self.assertEqual(rpc.approvals.decide_pending(first, True), 'control_lost')
+        rpc.p.stdin.write.assert_not_called()
+        ticket = self.db.reserve('vision', 'A', 'fixture-instance', thread, 0)
+        self.assertEqual(rpc.approvals.decide_pending(first, True), 'allowed')
+        second = pending(2)
+        self.db.report('vision', 'B', 'ide-1', 'vscode', 1, 'open')
+        self.db.report('vision', 'B', 'ide-1', 'vscode', 2, 'close')
+        self.assertEqual(rpc.approvals.decide_pending(second, True), 'control_lost')
+        self.db.release('vision', 'A', ticket)
+        self.db.reserve('vision', 'B', 'fixture-instance', thread, self.db.status('vision')['version'])
+        self.assertEqual(rpc.approvals.decide_pending(second, True), 'control_lost')
+        self.assertEqual(rpc.approvals.decide_pending(second, False), 'denied')
+        self.assertEqual([json.loads(call.args[0]) for call in rpc.p.stdin.write.call_args_list],
+                         [{'id': 1, 'result': {'decision': 'accept'}}, {'id': 2, 'result': {'decision': 'decline'}}])
 
     def test_scheduler_retries_same_revision_after_known_denial(self):
         rpc = self.mock_rpc()

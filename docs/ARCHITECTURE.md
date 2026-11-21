@@ -61,6 +61,8 @@ Claude 不调用 Codex 的 `Scheduler.tick()` 或 `ManagedTasks.sync()`。其显
 
 连接云服务器时，各台运行澜汐的电脑通过现有私人工作区记录通道交换完成事件和待审批项。记录包含来源设备和审批详情，协调服务按工作区鉴权。离线记录通过心跳判定过期。跨机决定带有独立请求 ID，来源电脑逐项检查有效期、详情和权限后执行，并发布实际结果。原请求重复投递沿用原结果。
 
+R35-01 的源码修复在共享连接发出同意应答前，使用来源设备的当前配置向协调服务复核控制权。本机决定和跨机决定走同一检查。已交还会话即使仍有其他本机任务占用同一项目，也会返回 `control_lost`。审批复核只读取控制状态。已显式登记的项目还核对写入者版本与当前控制版本。
+
 前端可用 `monitor.approval_snapshot()` 获取 `pending`、`decisions`、`sharedCodex` 和 `workspace`。`pending` 中的 `token` 标识具体请求，`canAllow` 表示当前可同意，`deviceName` 标识来源，`decisionQueued` 表示跨机决定待回执。`decisions` 是近期跨机决定的结果字典。`sharedCodex` 为 `shared` 或 `own_connection`。`workspace` 为 `connected`、`retrying` 或 `local`。
 
 用 `monitor.decide_approvals(tokens, allow)` 提交显式选中的令牌列表，返回逐项结果。全部同意时，前端提交当前窗口内可同意的全部令牌。`queued` 表示已安排发往来源电脑，实际结果随后写入 `decisions`。Web 对应的认证接口为 `GET /api/approvals` 与 `POST /api/approvals/batch`，后者接受 `{"tokens":["…"],"allow":true}`，单批最多 256 项。原单项接口继续可用。

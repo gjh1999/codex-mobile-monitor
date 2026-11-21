@@ -48,6 +48,8 @@ if (-not (Test-Path './local-config.json')) {
 
 ## 构建 EXE
 
+前端完成源码验证后，将改动范围、提交、验收结果和待验证事项交给「代码review以及发版」会话。该会话负责合并、审核、正式定版、发布标签、安装包上传与更新渠道切换。下方正式便携包构建命令供该角色选定候选提交后使用。 [项目发布流程](跨设备开发工作台方案.html#personal-release)
+
 ```powershell
 & './.venv/Scripts/python.exe' -m pip install -r requirements-build.txt
 & './scripts/build-exe.ps1'
@@ -65,7 +67,11 @@ if (-not (Test-Path './local-config.json')) {
 & './.venv/Scripts/python.exe' -B scripts/build-portable.py --work build-exe/release-candidate --pycharm 'C:\Program Files\JetBrains\PyCharm 2026.3'
 ```
 
-包名与 `portable_update.py` 的版本一致，ZIP 写入 `release/`。构建日志和用于发布的 `windows-release.json` 位于 `--work` 目录。主程序内置验收工具，ZIP 根目录还有简明使用说明及可选 IDE 工具包。验收通过后发布同一份 ZIP。
+包名与 `portable_update.py` 的版本一致，ZIP 写入 `release/`。构建日志和用于发布的 `windows-release.json` 位于 `--work` 目录。主程序内置验收工具，ZIP 根目录还有简明使用说明及可选 IDE 工具包。将本地验收通过的同一份 ZIP 交发版负责人审查。
+
+### 发版审查与交接
+
+工程师验证完成后，将提交、变更范围、测试结果、候选包与清单的位置交给「代码review以及发版」。该任务审查通过后执行正式发布、生产部署或更新清单切换，并核验上线结果。回滚同样由该任务负责。按约定提交及推送源码属于开发交付。
 
 构建指定工作区的私人版时，额外传入 `--workspace-grant <服务管理员签发结果的本地文件>`。打包会把加入授权放入主程序。构建输入和私人 ZIP 留在受控目录，通过已认证的更新服务分发。 [授权签发与回收](CLOUD_COORDINATOR.md#在澜汐中连接云服务器)
 

@@ -24,6 +24,11 @@ class Approvals:
   now=self.clock()
   return [{**item,'canAllow':can_allow(item['details'])} for item in self.public()
           if item['decision'] is None and item['expires']>now and (client is None or item['client']==client)]
+ def refresh_live(self,rpc,thread,ttl=300):
+  with self.lock:
+   for value in self.items.values():
+    if value['rpc'] is rpc and value['decision'] is None and value['request'].get('params',{}).get('threadId')==thread:
+     value['expires']=self.clock()+ttl
  def resolve(self,rpc,request_id):
   with self.lock:
    for v in self.items.values():

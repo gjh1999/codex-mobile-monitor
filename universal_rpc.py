@@ -48,7 +48,8 @@ class UniversalRPC:
                     'version': '0.4.0',
                     'client': executable_name
                 },
-                'capabilities': {'experimentalApi': True}
+                'capabilities': {'experimentalApi': True, **(
+                    {'requiredHumanApproval': True} if getattr(self, 'monitor_only', False) else {})}
             })
             self.send({'method': 'initialized'})
         except Exception:
@@ -56,7 +57,7 @@ class UniversalRPC:
             raise
 
     @staticmethod
-    def _find_process(executable_name: str, env_var: Optional[str] = None):
+    def _find_process(executable_name: str, env_var: Optional[str] = None, *, arguments=None):
         """Locate and launch the executable."""
         exe = None
 
@@ -88,7 +89,7 @@ class UniversalRPC:
 
 
         process = subprocess.Popen(
-            [exe, 'app-server', '--stdio'],
+            [exe, *(arguments if arguments is not None else ('app-server', '--stdio'))],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -111,6 +112,9 @@ class UniversalRPC:
 
     def dispatch(self, x: Dict[str, Any]):
         """Dispatch incoming message."""
+        completed = getattr(self, 'report_completion', None)
+        if completed is not None and x.get('method') == 'turn/completed':
+            completed(x.get('params') or {})
         if getattr(self, 'journal', None):
             self.journal.record(x, self.owned_threads)
         if 'id' in x and 'method' in x:

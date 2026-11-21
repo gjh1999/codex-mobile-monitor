@@ -8,7 +8,7 @@ from codex_activity import DELTAS
 
 
 class ReplyLog:
-    def __init__(self, path, activity=None):
+    def __init__(self, path, activity=None, *, reply_notifications=True):
         self.lock = threading.Lock()
         self.activity = activity
         self.active_turns = set()
@@ -25,10 +25,13 @@ class ReplyLog:
                 self.db.execute('CREATE INDEX notification_order ON pending_reply_notifications(legacy)')
                 self.db.execute("""INSERT INTO pending_reply_notifications SELECT thread,turn,item,1 FROM replies
                                    WHERE kind='agentMessage' ORDER BY rowid""")
-            self.db.execute("""CREATE TRIGGER IF NOT EXISTS queue_agent_reply AFTER INSERT ON replies
-                               WHEN NEW.kind='agentMessage' BEGIN
-                               INSERT OR IGNORE INTO pending_reply_notifications(thread,turn,item) VALUES(NEW.thread,NEW.turn,NEW.item);
-                               END""")
+            if reply_notifications:
+                self.db.execute("""CREATE TRIGGER IF NOT EXISTS queue_agent_reply AFTER INSERT ON replies
+                                   WHEN NEW.kind='agentMessage' BEGIN
+                                   INSERT OR IGNORE INTO pending_reply_notifications(thread,turn,item) VALUES(NEW.thread,NEW.turn,NEW.item);
+                                   END""")
+            else:
+                self.db.execute('DROP TRIGGER IF EXISTS queue_agent_reply')
 
     def track_turn(self, thread, turn):
         """A start acknowledgement or an active-turn read can arrive after completion."""

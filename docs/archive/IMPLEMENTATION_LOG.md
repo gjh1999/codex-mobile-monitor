@@ -15,7 +15,7 @@
 
 - Windows、Python 3.14.7。输入为回环协调服务临时目录中的有效 ZIP，以及替换 ZIP 的一个成员内容损坏、传输 SHA-256 与上传字节一致的隔离夹具。修复前执行 `.venv\Scripts\python.exe -B -m unittest tests.test_code_backups.CodeBackupTests.test_rejected_backup_preserves_previous_restorable_bytes -v`，旧服务接收损坏包，预期拒绝的测试失败，用时 0.588 秒。
 - 修复提交 `762dbbf`。上传在替换前逐成员分块读取并核对长度和 CRC。ZIP 中央目录最多 8 MiB、成员最多 10 万、总解压大小最多 4 GiB。每个服务进程同时校验至多两份上传。校验结束后再次核对服务器当前版本再执行原子替换。
-- 修复后执行 `.venv\Scripts\python.exe -B -m unittest tests.test_code_backups tests.test_personal_flow tests.test_project_library tests.test_coordination tests.test_temporary_files`，32 项通过，用时 32.469 秒。损坏包及超过展开大小或文件数限制的包均被拒绝。另一配对设备下载上一份 ZIP 后，字节与首次上传完全一致，成员内容成功恢复。测试数据和下载结果在测试独立临时目录中，结束后随夹具清理。待负责人复审、R35-04 独立复测及部署。 [工单](../DELIVERY_STATUS.md#r35-02)
+- 修复后执行 `.venv\Scripts\python.exe -B -m unittest tests.test_code_backups tests.test_personal_flow tests.test_project_library tests.test_coordination tests.test_temporary_files`，32 项通过，用时 32.469 秒。损坏包及超过展开大小或文件数限制的包均被拒绝。另一配对设备下载上一份 ZIP 后，字节与首次上传完全一致，成员内容成功恢复。测试数据和下载结果在测试独立临时目录中，结束后随夹具清理。R35-04 的独立源码复测已在工单回执，待负责人复审及部署。 [工单](../DELIVERY_STATUS.md#r35-02)
 
 <a id="r35-frontend-ticket"></a>
 ## 2026-11-21 R35-03 前端验收

@@ -141,3 +141,5 @@ docker compose cp coordinator:/var/lib/lanxi/devices.json backup/devices.json
 ```
 
 R35 代码备份写入 `coordinator-data` 卷的 `code-backups/`，按私人空间、仓库和来源设备保存最新校验成功的 ZIP。服务验证上传大小和 SHA-256 后再替换旧副本。服务器预留至少 5 GiB，单个 ZIP 上限为 1 GiB。运维备份应包含该目录。若需要完整 Git 历史的额外副本，可另设 GitHub 仓库镜像。 [下载和同步方式](PERSONAL_SYNC.md#代码的服务器备份)
+
+R35-02 修复待复审和部署。修正后的服务在替换前逐个读取 ZIP 成员，校验完整长度和 CRC，读错或超过资源上限时保留上一份。单包中央目录上限 8 MiB，最多 10 万成员，总解压大小上限 4 GiB，每个服务进程同时校验至多两份上传。 [R35-02 工单](DELIVERY_STATUS.md#r35-02)

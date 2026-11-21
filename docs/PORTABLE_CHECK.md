@@ -1,6 +1,6 @@
 # 澜汐安装、升级与验收
 
-已发布的 R35 便携 ZIP 顶层包含主程序、`开始使用.txt` 和可选的 `IDE上报工具.zip`。验收功能内置于主程序。 [发布与验收记录](archive/IMPLEMENTATION_LOG.md#2026-11-21-r35-github-与服务器代码备份) · [IDE 安装步骤](PROJECT_CONTROL.md#个人版项目占用)
+已发布的 R36 便携 ZIP 顶层包含主程序、`开始使用.txt` 和可选的 `IDE上报工具.zip`。验收功能内置于主程序。 [发布与验收记录](archive/IMPLEMENTATION_LOG.md#r36-release) · [IDE 安装步骤](PROJECT_CONTROL.md#个人版项目占用)
 
 ## 在另一台 Windows 电脑使用
 
@@ -9,7 +9,7 @@
 从未连接的电脑可以直接使用同一份已交付的私人 ZIP。包内带有加入工作区的授权，只在自己的设备之间传递。
 
 1. 将便携包解压到目标电脑本地可写目录。
-2. 双击便携目录里的 `Lanxi-Glass-R35-Portable.exe`，在启动窗口选择「连接云服务器」或「本机使用」。代码同步需要 Git for Windows，终端接续需要本机安装并登录 Codex CLI。
+2. 双击便携目录里的 `Lanxi-Glass-R36-Portable.exe`，在启动窗口选择「连接云服务器」或「本机使用」。代码同步需要 Git for Windows，终端接续需要本机安装并登录 Codex CLI。
 3. 首次使用时选择本机项目母目录。启动后，可在顶部菜单栏点击「连接云服务器」。同一私人包的各台电脑连接后会加入同一个工作区。 [云服务器连接说明](CLOUD_COORDINATOR.md#在澜汐中连接云服务器)
 
 鼠标移到窗口顶边，点「合流」可立即安排一轮同步，结果分别显示 GitHub、服务器代码备份、记忆及大文件清单的情况。 [手动同步](PERSONAL_SYNC.md#手动同步)

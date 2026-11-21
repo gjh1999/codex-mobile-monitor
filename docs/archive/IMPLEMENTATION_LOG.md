@@ -2,6 +2,15 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+<a id="r36-release"></a>
+## 2026-11-21 R36 私人 Windows 版与协调服务发布
+
+- 基线为 R35。负责人复核 `af6047b` 的共享审批控制权检查及 `762dbbf` 的 ZIP 成员校验，补审发现大中央目录的旧备份可能无法枚举与替换，追加 R36-01。修复提交 `41743e4`。负责人在 Windows 执行 `.venv\Scripts\python.exe -B -m unittest tests.test_coordination tests.test_codex_watch tests.test_code_backups -q`，19 项通过，3.572 秒。原修复版本的全量源码回归复用 R35-04 结果，258 项通过、3 项跳过。
+- 客户端在独立工作树 `build-exe/r36-src` 的 `210bde1` 构建。使用项目虚拟环境执行 `scripts/build-portable.py`，`--work` 为项目绝对路径下的 `build-exe/verification/portable-r36-20261121/windows`，PyCharm 2026.3，复用 R33 私人工作区授权文件。产物为 `release/Lanxi-R36-Windows-Private.zip`，95,239,953 字节，SHA-256 为 `4321740483e1374c91ffd4730b1038f71b14a12ca4bf0c93c3c6bea9d6de5110`。服务端单独使用 `41743e4`，这个提交在客户端构建后增加了服务器兼容性修复和相应回归。
+- 运行 `build-exe/verification/portable-r36-20261121/verify_package.py`。R35 更新器校验并解包 R36，实包代码与构建提交比对通过，内置验收在隔离 Windows 数据目录运行，6 项通过，13.79 秒。测试工程师在独立目录 `build-exe/verification/r36-02-qt-20261121/packaged-widgets-01/` 对包内 Qt 代码进行原生交互，4.393 秒通过审批、壁纸和每日记录。 [R36-02 独立验收](../DELIVERY_STATUS.md#r36-02)
+- 部署脚本、发布脚本与线上检查位于 `build-exe/verification/portable-r36-20261121/`。第一次部署暂存清单采用 Windows 行尾，远端摘要检查失败，发生在服务切换之前。改为 LF 后部署成功，生产容器健康，两份运行模块摘要通过比对，原数据卷与旧镜像保留。两套配对身份通过真实 HTTPS 上传、下载合成项目并逐字节比较，随后清理示例数据。
+- 服务器复核 ZIP 摘要后切换私人更新清单。两套 R35 配对身份均查到 R36，另以笔记本配对身份通过生产 HTTPS 完整下载并复核大小和 SHA-256。配对身份验证在同一台 Windows 电脑执行；两台实体电脑与真实 Codex 客户端的审批往返仍待现场验证。 [安装与升级](../PORTABLE_CHECK.md)
+
 <a id="r36-01-backup-metadata"></a>
 ## 2026-11-21 R36-01 既有 R35 备份兼容性
 

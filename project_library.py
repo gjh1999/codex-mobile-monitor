@@ -101,26 +101,16 @@ def inspect_project(path, overrides):
 
 
 def discover(parent, overrides):
-    projects = {}
+    def scan(path, within_project=False):
+        independent = (path / ".git").exists()
+        project = inspect_project(path, overrides) if independent or not within_project else None
+        children = {}
+        for child in folders(path):
+            children.update(scan(child, within_project or (project is not None and path != parent)))
+        # A directory containing separate projects acts as their parent, even if it has markers of its own.
+        return children or ({path: project} if project else {})
 
-    def record(path):
-        project = inspect_project(path, overrides)
-        if project:
-            projects[path] = project
-        else:
-            for child in folders(path):
-                record(child)
-
-    if (parent / ".git").exists():
-        record(parent)
-    else:
-        for child in folders(parent):
-            record(child)
-        if not projects:
-            project = inspect_project(parent, overrides)
-            if project:
-                projects[parent] = project
-    return projects
+    return scan(parent)
 
 
 class ProjectLibrary:
@@ -131,8 +121,6 @@ class ProjectLibrary:
 
     def snapshot(self):
         root = configured_root(self.data)
-        if not root:
-            return []
         overrides = {}
         try:
             entries = json.loads((self.data / "personal-sync.json").read_bytes()).get("projects", [])
@@ -143,9 +131,7 @@ class ProjectLibrary:
             }
         except (OSError, ValueError, TypeError, AttributeError):
             pass
-        projects = discover(root, overrides)
-        if not projects:
-            return []
+        projects = discover(root, overrides) if root else {}
         rows = []
         cache = {}
         for file in (self.home / "sessions").rglob("rollout-*.jsonl"):
@@ -165,12 +151,10 @@ class ProjectLibrary:
                     continue
             except ValueError:
                 continue
-            if not fields["cwd"]:
-                continue
-            path = Path(fields["cwd"])
-            parent = next((part for part in (path, *path.parents) if part in projects), None)
-            if parent:
-                rows.append({"id": thread, **fields, "cwd": str(parent)})
+            directory = fields["cwd"]
+            path = Path(directory)
+            parent = next((part for part in (path, *path.parents) if part in projects), None) if directory else None
+            rows.append({"id": thread, **fields, "cwd": str(parent) if parent else directory})
         self.headers = cache
         return [*projects.values(), *rows]
 

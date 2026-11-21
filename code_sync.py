@@ -172,6 +172,10 @@ def run(repo, *args, data=None, check=True, trace=False, timeout=90):
         "-c",
         "protocol.version=2",
         "-c",
+        "http.lowSpeedLimit=1",
+        "-c",
+        "http.lowSpeedTime=20",
+        "-c",
         "core.hooksPath=" + os.devnull,
         "-c",
         "submodule.recurse=false",
@@ -182,17 +186,22 @@ def run(repo, *args, data=None, check=True, trace=False, timeout=90):
     ]
     if repo:
         cmd += ["-C", str(repo)]
-    result = subprocess.run(
-        cmd + list(args),
-        input=data or b"",
-        check=False,
-        capture_output=True,
-        timeout=timeout,
-        env=env,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-    )
+    try:
+        result = subprocess.run(
+            cmd + list(args),
+            input=data or b"",
+            check=False,
+            capture_output=True,
+            timeout=timeout,
+            env=env,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except subprocess.TimeoutExpired:
+        raise SyncIssue("Git 操作超时，后台将重试") from None
     if check and result.returncode:
         stderr = result.stderr.lower()
+        if b"operation too slow" in stderr or b"operation timed out" in stderr:
+            raise SyncIssue("GitHub 请求超时，后台将重试")
         if any(message in stderr for message in (
             b"user interactivity has been disabled", b"unable to get password", b"could not read username",
             b"authentication failed", b"permission denied (publickey)", b"repository not found",
@@ -239,6 +248,7 @@ def remote_tip(repo, remote, branch):
         "HEAD",
         "refs/heads/" + branch if branch else "HEAD",
         trace=True,
+        timeout=25,
     )
     if not re.search(rb"< fetch=[^\r\n]*\bfilter\b", result.stderr):
         raise SyncIssue("远端未声明支持按大小过滤，已暂停下载")

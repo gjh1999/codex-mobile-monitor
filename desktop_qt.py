@@ -507,15 +507,19 @@ class Composer(QTextEdit):
 
 
 class ManualSyncDialog(QDialog):
+    trust_finished = Signal(str)
+
     def __init__(self, parent):
         super().__init__(parent)
         self.setWindowTitle('合流 · 手动同步')
         self.resize(540, 330)
         self.body = QTextBrowser(self)
         self.untrusted = []
+        self.trust_pending = False
         self.trust_button = QPushButton('信任 Git 目录并重试', self)
         self.trust_button.hide()
         self.trust_button.clicked.connect(self.trust_and_retry)
+        self.trust_finished.connect(self.on_trust_finished, Qt.ConnectionType.QueuedConnection)
         layout = QVBoxLayout(self)
         layout.addWidget(self.body)
         layout.addWidget(self.trust_button, alignment=Qt.AlignmentFlag.AlignRight)
@@ -523,8 +527,9 @@ class ManualSyncDialog(QDialog):
         self.timer.setInterval(250)
         self.timer.timeout.connect(self.refresh_result)
 
-    def observe(self, future):
+    def observe(self, future, progress):
         self.future = future
+        self.progress = progress
         self.refresh_result()
         if not future.done():
             self.timer.start()
@@ -533,25 +538,54 @@ class ManualSyncDialog(QDialog):
         self.activateWindow()
 
     def trust_and_retry(self):
+        if self.trust_pending:
+            return
         path, accepted = QInputDialog.getItem(
             self, '信任 Git 目录', '选择你确认可信的本机仓库。澜汐会将此目录加入当前 Windows 用户的 Git 信任配置。',
             self.untrusted, 0, False,
         )
         if not accepted or path not in self.untrusted:
             return
-        try:
-            trust_git_directory(path)
-        except (OSError, ValueError, subprocess.TimeoutExpired) as error:
-            detail = str(error) if isinstance(error, ValueError) else '请检查目录与 Git 配置写入权限。'
+        self.trust_pending = True
+        self.trust_button.setEnabled(False)
+        self.trust_button.setText('正在写入 Git 信任配置…')
+
+        def trust():
+            detail = ''
+            try:
+                trust_git_directory(path)
+            except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+                detail = str(error) if isinstance(error, ValueError) else '请检查目录与 Git 配置写入权限。'
+            self.trust_finished.emit(detail)
+
+        threading.Thread(target=trust, name='lanxi-git-trust', daemon=True).start()
+
+    def on_trust_finished(self, detail):
+        self.trust_pending = False
+        self.trust_button.setEnabled(True)
+        self.trust_button.setText('信任 Git 目录并重试')
+        if detail:
             QMessageBox.warning(self, '暂时无法信任该目录', detail)
             return
-        self.parent().open_manual_sync()
+        self.parent().open_manual_sync(fresh=True)
 
     def refresh_result(self):
         self.trust_button.hide()
         future = self.future
         if not future.done():
-            self.body.setPlainText('正在检查 GitHub、服务器代码备份、记忆和文件清单…' if future.running() else '已安排新一轮同步，等待后台开始…')
+            progress = self.progress()
+            lines = []
+            if not future.running():
+                lines.append('已安排同步，等待后台开始。' if not progress else '下一轮已安排，当前轮次仍在运行。')
+            if progress:
+                phase, seconds, finished, total, projects = progress
+                lines.append(f'{phase} · 已用 {seconds} 秒')
+                if total:
+                    lines.append(f'仓库已处理 {finished}/{total}')
+                    lines.extend(f'{project} · {stage}' for project, stage in sorted(projects.items()))
+            elif future.running():
+                lines.append('正在检查 GitHub、服务器代码备份、记忆和文件清单…')
+            self.body.setPlainText('\n'.join(lines))
             return
         self.timer.stop()
         result = None if future.cancelled() else future.result()
@@ -1317,7 +1351,7 @@ class MainWindow(QMainWindow):
         self.diagnostics.raise_()
         self.diagnostics.activateWindow()
 
-    def open_manual_sync(self):
+    def open_manual_sync(self, *, fresh=False):
         flow = monitor.personal_sync
         if flow is None:
             self._popup('合流 · 手动同步', '跨机同步尚未启用。请先连接云服务器，或从「跨机接续」启用 GitHub 同步。'
@@ -1325,7 +1359,7 @@ class MainWindow(QMainWindow):
             return
         if self.manual_sync_dialog is None:
             self.manual_sync_dialog = ManualSyncDialog(self)
-        self.manual_sync_dialog.observe(flow.request_manual_sync())
+        self.manual_sync_dialog.observe(flow.request_manual_sync(fresh=fresh), flow.sync_progress)
 
     def show_details(self):
         self.refresh()

@@ -427,14 +427,13 @@ class PersonalSync:
                     with self.lock:
                         untrusted.add(path)
                 errors[project] = str(error)
-            except subprocess.TimeoutExpired as error:
-                errors[project] = f"Git {error.cmd[error.cmd.index('-C') + 2] if '-C' in error.cmd else '操作'} 超时，后台将重试"
             except (
                 ValueError,
                 OSError,
                 KeyError,
                 TypeError,
                 sqlite3.Error,
+                subprocess.TimeoutExpired,
             ) as error:
                 errors[project] = str(error) if isinstance(error, ValueError) else "本机目录或网络暂不可用"
 

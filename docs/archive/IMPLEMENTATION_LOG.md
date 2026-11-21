@@ -2,6 +2,13 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-21 R35 GitHub 与服务器代码备份
+
+- 以已发布的 R34 为基线。连接私有协调服务时，自动同步和手动「合流」均执行 GitHub 同步与服务器备份，分别报告结果。服务器按项目和设备保存最新的校验成功 ZIP。恢复工作流从「跨机接续」下载 ZIP。GitHub 失败时仍可备份本机已保存的有效文件。
+- Windows、Python 3.14.7。执行 `.venv\Scripts\python.exe -B -m unittest tests.test_code_backups tests.test_personal_flow tests.test_project_library tests.test_desktop_projects tests.test_coordination tests.test_temporary_files`，33 项通过，32.448 秒。新增回环测试验证两种同步触发、GitHub 故障时保存未提交源码、未变化重复轮次、仓库凭据与忽略文件过滤、空间隔离、下载内容和错误上传保留旧副本。初次夹具缺少 `projects` 配置，第二次比较未兼容 Windows 的 CRLF。修正后以本机原始字节比较。Qt smoke 使用 `build-exe/verification/code-backups-20261121/qt` 输出，通过既有合流界面回归。
+- `build-exe/verification/code-backups-20261121/server_rollout.py` 在原云协调镜像上安装两个模块，保留旧镜像和数据卷。部署后两套已配对身份都能查询备份。`live_check.py` 用同一真实 HTTPS 服务上传合成 Python 文件，从另一设备身份下载并逐字节比较，清理了测试项目的 ZIP。真实项目尚未执行首次 R35 备份。
+- 使用 `scripts/build-portable.py --work build-exe/verification/code-backups-20261121/windows --pycharm 'C:\Program Files\JetBrains\PyCharm 2026.3' --workspace-grant build-exe/verification/portable-r33-20261120/lanxi-private-workspace.join` 构建私人版。ZIP 大小 95,230,904 字节，SHA-256 为 `6cf1aa158b855b1c744579c655a607aea8e987cbfe0d0eac2225a6b5fe00c3d1`。`verify_package.py` 验证包清单、R34 更新器校验解包和内含备份模块，隔离的实包自检 6 项通过，17.69 秒。`publish.py` 校验服务器收到的包并激活清单，两套已配对 R34 身份的更新检查均可见 R35。 [安装与更新](../PORTABLE_CHECK.md) · [使用说明](../PERSONAL_SYNC.md#代码的服务器备份)
+
 ## 2026-11-21 桌面集中审批窗口
 
 - 以 `babdfdb` 的审批后端为基线。Qt 窗口使用主页面的壁纸和双栏毛玻璃，通过现有队列显示本机与跨机请求。在临时私人记录库中用两套设备身份和模拟 RPC 验证单项勾选、混合来源全部同意、缺少详情跳过、拒绝当前项，以及收到回执前保持等待状态。

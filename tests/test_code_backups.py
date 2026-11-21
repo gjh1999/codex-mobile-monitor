@@ -1,4 +1,5 @@
 import hashlib
+import io
 import socket
 import tempfile
 import threading
@@ -106,3 +107,40 @@ class CodeBackupTests(unittest.TestCase):
                 "previous": current["version"], "sha256": hashlib.sha256(damaged).hexdigest(),
             })
         self.assertEqual(self.reader.list(self.project), [current])
+
+    def test_rejected_backup_preserves_previous_restorable_bytes(self):
+        writer = self.client("desktop", "a")
+
+        def archive(version, content):
+            data = io.BytesIO()
+            with ZipFile(data, "w") as zip_file:
+                zip_file.comment = version.encode("ascii")
+                zip_file.writestr("code.py", content)
+            return data.getvalue()
+
+        def upload(data, previous):
+            with writer.open(self.project, method="PUT", data=data, size=len(data), extra={
+                "previous": previous, "sha256": hashlib.sha256(data).hexdigest(),
+            }):
+                pass
+
+        initial = archive("a" * 64, b"original working code\n")
+        replacement = archive("b" * 64, b"replacement code\n")
+        damaged = replacement.replace(b"replacement code\n", b"Replacement code\n", 1)
+        self.assertNotEqual(damaged, replacement)
+        with patch("code_backup_server.RESERVE", 0):
+            upload(initial, "-")
+            with self.assertRaisesRegex(SyncIssue, "格式"):
+                upload(damaged, "a" * 64)
+            limits = {"MAX_EXPANDED_BYTES": 8, "MAX_MEMBERS": 0}
+            for limit, value in limits.items():
+                with (self.subTest(limit=limit), patch(f"code_backup_server.{limit}", value),
+                      self.assertRaisesRegex(SyncIssue, "大小")):
+                    upload(replacement, "a" * 64)
+
+        self.assertEqual(self.reader.list(self.project)[0]["version"], "a" * 64)
+        destination = self.root / "restored.zip"
+        self.reader.download(self.project, "desktop", destination)
+        self.assertEqual(destination.read_bytes(), initial)
+        with ZipFile(destination) as zip_file:
+            self.assertEqual(zip_file.read("code.py"), b"original working code\n")

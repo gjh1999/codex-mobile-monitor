@@ -1,7 +1,8 @@
 ﻿"""Connection-bound approvals and durable wake reservations."""
-import copy, hashlib, json, secrets, sqlite3, threading, time
+import copy, hashlib, json, queue, secrets, sqlite3, threading, time
 from quota_recovery import QuotaRecovery, quota_state
 from coordination_client import ControlDenied
+from rpc_errors import RPCError
 APPROVAL_METHODS = {'item/commandExecution/requestApproval','item/fileChange/requestApproval','item/permissions/requestApproval'}
 APPROVAL_DETAILS = ('command','changes','permissions','networkApprovalContext')
 
@@ -75,6 +76,7 @@ class Approvals:
    if value['expires']<=self.clock():return 'expired'
   try:return self.decide(token,allow)
   except ValueError:return 'details_unavailable'
+  except (OSError,RPCError,queue.Empty):return 'unavailable'
  def expire(self):
   with self.lock:
    for k,v in self.items.items():

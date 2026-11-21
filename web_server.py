@@ -6,7 +6,7 @@ import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import FastAPI, HTTPException, Request, Response, Depends
 from fastapi.staticfiles import StaticFiles

@@ -64,6 +64,7 @@ class FlowTests(unittest.TestCase):
             data.mkdir()
             parent = self.root / (machine + "-library")
             parent.mkdir(exist_ok=True)
+            (parent / ".git").mkdir()
             set_project_root(data, parent)
             workers.append(PersonalSync(data, {"exchange": str(self.share)}, home=data / "codex"))
         stop = threading.Event()

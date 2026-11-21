@@ -2,6 +2,12 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+## 2026-11-21 桌面集中审批窗口
+
+- 以 `babdfdb` 的审批后端为基线。Qt 窗口使用主页面的壁纸和双栏毛玻璃，通过现有队列显示本机与跨机请求。在临时私人记录库中用两套设备身份和模拟 RPC 验证单项勾选、混合来源全部同意、缺少详情跳过、拒绝当前项，以及收到回执前保持等待状态。
+- Windows、Python 3.14.7、PySide6 6.12.0。`.venv\Scripts\python.exe -B tests/smoke_desktop.py --output build-exe/verification/approval-queue-20261121/run-03` 通过。首轮审批用例关闭窗口后紧接键盘用例，桌面窗口焦点未及时恢复。调整验证顺序后复跑通过。截图为 `run-03/approval-queue.png` 和 `run-03/approval-awaiting-receipt.png`，Qt总耗时未单独测量。
+- `.venv\Scripts\python.exe -B -m unittest tests.test_codex_watch tests.test_monitor tests.test_web tests.test_automation tests.test_codex_activity tests.test_codex_desktop tests.test_task_control tests.test_coordination -q` 的 72 项回归通过，用时 8.127 秒。真实客户端、两台实体电脑和便携版待验收。 [桌面使用](../DESKTOP.md#审批窗口)
+
 ## 2026-11-21 壁纸管理
 
 - 以 R34 的本机图库和内置壁纸轮换为基线。从「设置 → 壁纸管理」查看当前壁纸信息，导入本地图片，立即显示，移出或恢复轮换。原始文件保留，图片副本和移出记录随实例数据保留。

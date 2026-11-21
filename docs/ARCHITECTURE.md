@@ -63,6 +63,8 @@ Claude 不调用 Codex 的 `Scheduler.tick()` 或 `ManagedTasks.sync()`。其显
 
 用 `monitor.decide_approvals(tokens, allow)` 提交显式选中的令牌列表，返回逐项结果。全部同意时，前端提交当前窗口内可同意的全部令牌。`queued` 表示已安排发往来源电脑，实际结果随后写入 `decisions`。Web 对应的认证接口为 `GET /api/approvals` 与 `POST /api/approvals/batch`，后者接受 `{"tokens":["…"],"allow":true}`，单批最多 256 项。原单项接口继续可用。
 
+桌面的 `desktop_approvals.py` 渲染统一队列和原始详情；`desktop_qt.py` 后台提交本次批次的令牌，并在后续队列刷新时以 `decisions` 更新跨机结果。等待回执的项不可重复操作。近期结果保留五分钟。 [桌面审批操作](DESKTOP.md#审批窗口)
+
 ## 通知
 
 Claude 继续在回复库维护待通知队列。Codex 使用真实轮次完成事件发提醒。应用启动之前已完成的原生历史跳过，来自 RPC、原生日志或同工作区设备的同一完成按会话和轮次去重。

@@ -294,8 +294,8 @@ def install_history(home, filename, tid, data, backups):
             replace(path, prior, data, backups, limit=MAX_FILE)
 
 
-def sync_memories(mirror, index, home, projects, poll_cache, report, stop):
-    """Each project maps its stable GitHub identity to a device-local root and shared notes subdir."""
+def sync_memories(mirror, index, home, projects, poll_cache, report, stop, *, git_projects=None):
+    """Keep native sessions under their stable identity and notes under their Git repository."""
 
     def attempt(key, fn, *args):
         try:
@@ -321,10 +321,11 @@ def sync_memories(mirror, index, home, projects, poll_cache, report, stop):
     roots = {}
     thread_projects = {}
     for project, (root, subdir) in projects.items():
-        dest = safe_path(root, subdir)
-        roots[project] = dest
-        if not project.startswith(".folder/"):
-            sync_notes("notes/" + project + "/", dest)
+        roots[project] = safe_path(root, subdir)
+    if git_projects is None:
+        git_projects = {key: row for key, row in projects.items() if not key.startswith(".folder/")}
+    for project, (root, subdir) in git_projects.items():
+        sync_notes("notes/" + project + "/", safe_path(root, subdir))
     # Cache unchanged native files; never move an active writer's live database or WAL.
     for path in (home / "sessions").rglob("rollout-*.jsonl"):
         if stop.is_set():
@@ -461,10 +462,11 @@ def sync_memories(mirror, index, home, projects, poll_cache, report, stop):
                     thread_projects[tid] = project
 
                 attempt(prefix + filename, apply, project, prefix, folder, filename)
-            if project.startswith(".folder/"):
-                continue
+        session_owner = {root: project for project, (root, _) in projects.items()}
+        for project, (root, subdir) in git_projects.items():
+            dest = safe_path(root, subdir)
             row_prefix = "long-term/" + project + "/"
-            known = {tid for tid, owner in thread_projects.items() if owner == project}
+            known = {tid for tid, owner in thread_projects.items() if owner == session_owner.get(root)}
             known.update(k[len(row_prefix) :] for k in index if k.startswith(row_prefix))
             for tid in known:
                 if stop.is_set():

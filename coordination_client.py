@@ -330,7 +330,7 @@ class PersonalTaskLocks:
                             prefix='/api/v1/personal/project-activity')
 
 
-def personal_project_at(cwd):
+def personal_project_at(cwd, data_root=None):
     from code_sync import github_id, run
     from desktop_storage import user_data_root
     from plain_projects import INDEX, folder_id, folder_relative
@@ -342,7 +342,7 @@ def personal_project_at(cwd):
         return None
     for folder in (location, *location.parents):
         if (folder / INDEX).is_file():
-            relative = folder_relative(configured_root(user_data_root()), folder, allow_git=True)
+            relative = folder_relative(configured_root(data_root or user_data_root()), folder, allow_git=True)
             if relative:
                 return folder_id(relative)
         if (folder / '.git').exists():

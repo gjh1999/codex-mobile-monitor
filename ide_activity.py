@@ -116,7 +116,7 @@ def main():
             raise ValueError('设备尚未配置 LANXI_DEVICE_TOKEN')
         project = client.project_at(args.root)
         if config['coordination'].get('protectedToken'):
-            project = personal_project_at(args.root)
+            project = personal_project_at(args.root, args.config.resolve().parent)
             client = PersonalTaskLocks(client)
         if not project:
             return

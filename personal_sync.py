@@ -163,7 +163,9 @@ class PersonalSync:
                 ]
                 project = max(candidates)[1] if candidates else None
             if project in paths:
-                return project, Path(paths[project])
+                root = Path(paths[project])
+                stable = next((key for key, folder in self.folders.items() if Path(folder) == root), project)
+                return stable, root
         return None
 
     def bindings(self, store, index, cached, published, errors):
@@ -441,7 +443,8 @@ class PersonalSync:
                 aliased = set(folders.values())
                 session_roots = {project: row for project, row in ready.items() if row[0] not in aliased}
                 session_roots.update({project: (root, ".lanxi") for project, root in folders.items()})
-                sessions = sync_memories(mirror, index, self.home, session_roots, self.poll_cache, report, stop)
+                sessions = sync_memories(mirror, index, self.home, session_roots, self.poll_cache, report, stop,
+                                         git_projects=ready)
                 for project, (root, _) in session_roots.items():
                     records = {
                         tid: {"cwd": s["relative"], "updated": s["updated"]}
@@ -450,7 +453,7 @@ class PersonalSync:
                     }
                     if project in folders:
                         marker = safe_path(root, FOLDER_INDEX)
-                        if not records and not marker.is_file():
+                        if not records and not root.is_dir():
                             continue
                         marker.parent.mkdir(parents=True, exist_ok=True)
                         if project not in sources:

@@ -155,6 +155,7 @@ class FlowTests(unittest.TestCase):
                 advance.set()
                 result = requested.result(timeout=15)
                 self.assertEqual(result["status"], {"example/flow": "已同步"})
+                self.assertEqual(result["projectPaths"], {"example/flow": str(receiver)})
                 self.assertTrue(result["memoryChecked"])
                 self.assertEqual((receiver / "a.py").read_text(), "manual update\n")
                 self.assertEqual((receiver / memory).read_text(), "new memory\n")
@@ -163,6 +164,19 @@ class FlowTests(unittest.TestCase):
                 stop.set()
                 advance.set()
                 worker.join(5)
+
+    def test_invalid_registration_does_not_block_projects_under_git_library(self):
+        parent = self.a.parent
+        (parent / ".git").mkdir()
+        set_project_root(self.root, parent)
+        flow = PersonalSync(self.root, {"projects": [
+            {"remote": "https://github.com/example/invalid.git", "path": "relative/path"},
+        ]}, home=self.root / "codex")
+        result = flow.cycle(threading.Event())
+        self.assertEqual(result["status"], {
+            "example/invalid": "项目映射需要本机绝对路径", "example/flow": "已同步",
+        })
+        self.assertEqual(result["projectPaths"], {"example/flow": str(self.a), "example/invalid": ""})
 
     def test_existing_clone_recovers_newly_allowed_blobs_at_same_commit(self):
         medium = self.a / "medium.dat"

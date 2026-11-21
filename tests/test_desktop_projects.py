@@ -19,6 +19,17 @@ class DesktopProjectsTests(unittest.TestCase):
             self.assertNotEqual(project_group(str(first))[0], project_group(str(second))[0])
             self.assertEqual(project_group(str(first))[1], 'codexDesk')
 
+    def test_discovered_projects_and_unmatched_tasks_do_not_group_under_library(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            first, second = root / 'first', root / 'second'
+            (root / '.git').mkdir()
+            (first / 'src').mkdir(parents=True)
+            second.mkdir()
+            known = frozenset({first})
+            self.assertEqual(project_group(str(first / 'src'), known, root)[2], str(first))
+            self.assertEqual(project_group(str(second), known, root)[2], str(second))
+
     def test_conversation_index_and_plain_user_topic_fallback(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

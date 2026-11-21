@@ -55,3 +55,29 @@ class ProjectLibraryTests(unittest.TestCase):
         self.assertEqual(library.snapshot(), [])
         set_project_root(base, base / "future")
         self.assertEqual(library.snapshot(), [])
+
+    def test_repository_containers_and_unmatched_local_history(self):
+        base = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        parent, home = base / "projects", base / "codex"
+        first = parent / "group" / "first"
+        second = parent / "second"
+        for folder in (parent, first.parent, first):
+            (folder / ".git").mkdir(parents=True)
+        second.mkdir()
+        (second / "package.json").touch()
+        (first / "src").mkdir()
+        (first / "src" / "README.md").touch()
+        sessions = home / "sessions"
+        sessions.mkdir(parents=True)
+        for name, directory in (("project", first / "src"), ("other", base / "old-workspace")):
+            thread = str(uuid.uuid4())
+            (sessions / f"rollout-{name}.jsonl").write_text(
+                json.dumps({"payload": {"id": thread, "cwd": str(directory)}}), encoding="utf-8"
+            )
+        library = ProjectLibrary(base, home)
+        self.assertEqual({row["cwd"] for row in library.snapshot()}, {str(first / "src"), str(base / "old-workspace")})
+        set_project_root(base, parent)
+        rows = library.snapshot()
+        self.assertEqual({row["cwd"] for row in rows if row["id"].startswith(ENTRY_PREFIX)}, {str(first), str(second)})
+        self.assertEqual({row["cwd"] for row in rows if not row["id"].startswith(ENTRY_PREFIX)},
+                         {str(first), str(base / "old-workspace")})

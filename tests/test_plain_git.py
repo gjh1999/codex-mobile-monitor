@@ -1,6 +1,7 @@
 """Ordinary project enrollment using local Git and a simulated personal GitHub account."""
 
 import base64
+import json
 import os
 import subprocess
 import tempfile

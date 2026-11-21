@@ -156,6 +156,27 @@ class FlowTests(unittest.TestCase):
         (source / "examples" / "Cargo.toml").write_text("")
         self.assertEqual(bindings(), ({key: source}, {key: source}))
 
+    def test_folder_catalog_refuses_unrelated_existing_directories_and_unsafe_paths(self):
+        from personal_relay import Records
+        from plain_projects import CATALOG, folder_bindings, folder_id, folder_relative
+
+        library = self.root / "library"
+        folder = library / "work" / "Satisfactry"
+        folder.mkdir(parents=True)
+        (folder / "draft.py").write_text("local")
+        store = Records(self.root / "folders.db", "paired")
+        for relative in ("work/Satisfactry", "../outside", "AppData/Local/Temp/clone", ".ssh"):
+            store.put(CATALOG + folder_id(relative).split("/")[1], "-",
+                      json.dumps({"relativePath": relative, "originDevice": "other"}).encode())
+        self.assertIsNone(folder_relative(library, library))
+        errors = {}
+        folders, sources = folder_bindings(library, self.root / "codex", store, store.index(), {},
+                                           {}, set(), "receiver", errors, threading.Event())
+        self.assertEqual((folders, sources), ({}, {}))
+        self.assertEqual(len(errors), 4)
+        self.assertEqual((folder / "draft.py").read_text(), "local")
+        self.assertFalse((folder / ".lanxi").exists())
+
     def test_manual_request_checks_next_cycle_and_reuses_existing_clone(self):
         source_parent = self.root / "source-projects"
         receiver_parent = self.root / "receiver-projects"

@@ -320,14 +320,9 @@ QMenu { background:#eaf6fc; color:#254459; border:1px solid #c5dce9; border-radi
 QMenu::item { padding:8px 20px; border-radius:5px; }
 QMenu::item:selected { background:#edf3ff; color:#275db5; }
 QToolTip { background:#1c3151; color:#ffffff; border:0; padding:7px; }
-QFrame#notebookGroup { border:0; border-radius:8px; background:transparent; }
-QFrame#notebookGroup[current="true"] { background:rgba(198, 231, 245, 53); }
 QFrame#notebookDivider { background:rgba(210, 237, 250, 45); border:0; }
-QPushButton#notebookCategory, QPushButton#notebookIcon { background:transparent; border:1px solid transparent; border-radius:8px; color:#a9c8d7; padding:0; }
-QPushButton#notebookCategory { text-align:left; padding-left:9px; outline:0; }
-QPushButton#notebookCategory:checked, QPushButton#notebookIcon:hover { color:#f3faff; }
-QFrame#notebookGroup[current="true"] QPushButton#notebookIcon, QPushButton#notebookIcon { color:#e3f3fa; }
-QPushButton#notebookIcon:hover { background:rgba(207, 234, 249, 28); }
+QPushButton#notebookIcon { background:transparent; border:1px solid transparent; border-radius:8px; color:#e3f3fa; padding:0; }
+QPushButton#notebookIcon:hover { background:rgba(207, 234, 249, 28); color:#f3faff; }
 QPushButton#notebookIcon:pressed { background:rgba(207, 234, 249, 45); }
 QPushButton#notebookIcon:focus { border-color:rgba(201, 232, 248, 145); }
 QPushButton#notebookIcon:disabled { color:#7799a8; }

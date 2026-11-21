@@ -8,6 +8,7 @@ import tempfile
 import time
 from concurrent.futures import Future
 from contextlib import closing
+from datetime import date, datetime, time as clock_time, timedelta, timezone
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -590,18 +591,17 @@ def check_notebook(window, output):
             assert isinstance(panel, FrostedPanel)
             assert (panel.mapTo(window, QPoint()), panel.size()) == (position, size)
         assert workspace.heading.text() == '拾得片羽' and workspace.list.count() == 1
-        category = workspace.category_buttons['note']
-        idle_category = category.grab().toImage()
-        QTest.mouseMove(category)
-        QTest.mouseClick(category, left)
-        assert category.isChecked() and category.grab().toImage() == idle_category
+        categories = workspace.category_switch
+        assert categories.thumb_radius < window.client_switch.thumb_radius
+        QTest.mouseClick(categories.buttons['note'], left)
+        assert categories.buttons['note'].isChecked()
         assert workspace.body.toPlainText() == '旧的随记\n\n从前写下的正文。'
         assert workspace.list.item(0).data(Qt.ItemDataRole.CheckStateRole) is None
         workspace.show_archive()
         assert workspace.body.toPlainText() == '旧的归档\n\n留在旧笺里的文字。'
         workspace.file_note()
         assert not store.entries('note', True)
-        QTest.mouseClick(workspace.create_buttons['note'], left)
+        QTest.mouseClick(workspace.create, left)
         workspace.body.setPlainText('给下次打开留一条线索。')
         QTest.qWait(520)
         assert workspace.list.currentItem().text() == '给下次打开留一条线索。'
@@ -609,12 +609,13 @@ def check_notebook(window, output):
         assert workspace.saved_status.text() == '已收于此'
         window.grab().save(str(output / 'notebook-desktop.png'))
 
-        QTest.mouseClick(workspace.create_buttons['todo'], left)
-        assert workspace.category_buttons['todo'].isChecked() and workspace.heading.text() == '待理诸事'
+        QTest.mouseClick(categories.buttons['todo'], left)
+        QTest.mouseClick(workspace.create, left)
+        assert categories.buttons['todo'].isChecked() and workspace.heading.text() == '待理诸事'
         workspace.body.setPlainText('让海色随窗口慢慢透进来。')
-        QTest.mouseClick(workspace.category_buttons['note'], left)
+        QTest.mouseClick(categories.buttons['note'], left)
         assert workspace.heading.text() == '拾得片羽' and workspace.body.toPlainText() == '给下次打开留一条线索。'
-        QTest.mouseClick(workspace.category_buttons['todo'], left)
+        QTest.mouseClick(categories.buttons['todo'], left)
         assert workspace.body.toPlainText() == '让海色随窗口慢慢透进来。'
         rows = [workspace.list.item(index) for index in range(workspace.list.count())]
         assert len(rows) == 3
@@ -637,7 +638,8 @@ def check_notebook(window, output):
         assert pending.checkState() == Qt.CheckState.Unchecked and workspace.list.row(pending) == 1
         assert [row[3] for row in store.entries('todo')] == [0, 0, 1]
 
-        QTest.mouseClick(workspace.create_buttons['note'], left)
+        QTest.mouseClick(categories.buttons['note'], left)
+        QTest.mouseClick(workspace.create, left)
         workspace.body.setPlainText('离开工作区时保存。')
         QTest.mouseClick(switch.buttons[previous_client], left)
         assert not workspace.isVisible() and window.task_workspace.isVisible()
@@ -670,10 +672,62 @@ def check_notebook(window, output):
             assert store.entries('todo')[-1][3] == 1
             QApplication.processEvents()
             window.grab().save(str(output / 'grouped-todo-desktop.png'))
+            check_daily_records(workspace, database, window, output)
             window.select_workspace(previous_client)
         finally:
             workspace.organizer = original_organizer
             organizer.close()
+
+
+def check_daily_records(workspace, database, window, output):
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+    stamp = datetime.combine(yesterday, clock_time(12)).astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+    with closing(sqlite3.connect(database)) as db, db:
+        db.executemany('INSERT INTO notebook(kind,title,body,filed,updated_at) VALUES(?, ?, ?, ?, ?)', [
+            ('note', '', '昨日随记', 0, stamp),
+            ('todo', '', '昨日已经办好', 1, stamp),
+            ('todo', '', '留到今天接着做', 0, stamp),
+        ])
+    switch = workspace.category_switch
+    left = Qt.MouseButton.LeftButton
+    with patch('desktop_glass.motion_enabled', return_value=False):
+        QTest.mouseClick(switch.buttons['note'], left)
+        assert '昨日随记' not in [workspace.list.item(i).text() for i in range(workspace.list.count())]
+        QTest.mouseClick(switch.buttons['todo'], left)
+        visible = [workspace.list.item(i).text() for i in range(workspace.list.count())]
+        assert '留到今天接着做' in visible and '昨日已经办好' not in visible
+        assert switch.position == switch.offsets['todo']
+
+    with patch('desktop_glass.motion_enabled', return_value=True):
+        todo = switch.buttons['todo']
+        start = todo.rect().center()
+        end = start + QPoint(70, 0)
+        QTest.mousePress(todo, left, pos=start)
+        point = QPointF(todo.mapToGlobal(end))
+        QApplication.sendEvent(todo, QMouseEvent(QEvent.Type.MouseMove, QPointF(end), point,
+                                                 Qt.MouseButton.NoButton, left, Qt.KeyboardModifier.NoModifier))
+        assert switch.offsets['todo'] < switch.position < switch.offsets['daily'] and workspace.kind == 'todo'
+        QApplication.sendEvent(todo, QMouseEvent(QEvent.Type.MouseButtonRelease, QPointF(end), point,
+                                                 left, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier))
+        assert workspace.kind == 'daily'
+        assert wait_until(lambda: switch.position == switch.offsets['daily'] and not switch.spring.isActive())
+
+    assert [workspace.list.item(i).text() for i in range(workspace.list.count())] == [
+        today.isoformat(), yesterday.isoformat(),
+    ]
+    QTest.mouseClick(workspace.list.viewport(), left, pos=workspace.list.visualItemRect(workspace.list.item(1)).center())
+    assert workspace.heading.text() == yesterday.isoformat() and workspace.body.isReadOnly()
+    text = workspace.body.toPlainText()
+    for content in ('拾得片羽', '昨日随记', '待理诸事', '已完成 · 昨日已经办好', '待完成 · 留到今天接着做'):
+        assert content in text
+    assert not workspace.create.isVisible() and not workspace.more.isVisible()
+    window.grab().save(str(output / 'daily-records-desktop.png'))
+    with patch('desktop_notebook.date') as calendar:
+        calendar.today.return_value = today + timedelta(days=1)
+        workspace.refresh_day()
+    QTest.mouseClick(switch.buttons['note'], left)
+    assert workspace.list.count() == 0 and not workspace.body.isReadOnly()
 
 
 def main():

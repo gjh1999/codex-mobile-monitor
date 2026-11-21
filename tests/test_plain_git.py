@@ -7,10 +7,12 @@ import subprocess
 import tempfile
 import unittest
 import socket
+import sqlite3
 import threading
 import time
 import uuid
 from pathlib import Path
+from contextlib import closing
 from urllib.error import HTTPError
 from unittest.mock import Mock, patch
 
@@ -103,6 +105,7 @@ class PlainGitTests(unittest.TestCase):
 
     def test_paired_sync_preserves_folder_sessions_across_failed_push_and_retry(self):
         import uvicorn
+        from coordination_client import ControlDenied, PersonalTaskLocks, personal_project_at
         from coordination_server import create_app
         from personal_memory import latest_session
         from personal_sync import PersonalSync
@@ -138,9 +141,17 @@ class PlainGitTests(unittest.TestCase):
             data = base / ("device-" + d)
             home = data / "codex"
             home.mkdir(parents=True)
+            with closing(sqlite3.connect(home / "memories_1.sqlite")) as db, db:
+                db.execute("CREATE TABLE stage1_outputs(thread_id TEXT PRIMARY KEY, source_updated_at INTEGER,"
+                           "raw_memory TEXT, rollout_summary TEXT, rollout_slug TEXT, generated_at INTEGER)")
             set_project_root(data, library)
             workers[d] = PersonalSync(data, {}, {"device": d, "url": url, "projects": {}}, home=home)
         tid = str(uuid.uuid4())
+        note = Path(".codex/memories/decision.md")
+        (self.project / note).parent.mkdir(parents=True)
+        (self.project / note).write_text("private note")
+        with closing(sqlite3.connect(workers["a"].home / "memories_1.sqlite")) as db, db:
+            db.execute("INSERT INTO stage1_outputs VALUES(?,1,?,?,NULL,1)", (tid, "private memory", "summary"))
         name = "rollout-2026-11-19T01-02-03-" + tid + ".jsonl"
         session = workers["a"].home / "sessions/2026/11/19" / name
         session.parent.mkdir(parents=True)
@@ -162,6 +173,9 @@ class PlainGitTests(unittest.TestCase):
         dest = receiver_library / relative
         self.assertEqual(latest_session(dest), (tid, dest))
         self.assertFalse((dest / ".git").exists())
+        self.assertFalse((dest / note).exists())
+        with closing(sqlite3.connect(workers["b"].home / "memories_1.sqlite")) as db:
+            self.assertIsNone(db.execute("SELECT raw_memory FROM stage1_outputs WHERE thread_id=?", (tid,)).fetchone())
         self.push.side_effect = self.git_push
         workers["a"].settings["memory"] = False
         workers["a"].git_retries.clear()
@@ -181,6 +195,28 @@ class PlainGitTests(unittest.TestCase):
         self.assertEqual(latest_session(dest), (tid, dest))
         self.assertEqual(workers["b"].snapshot()["sessions"][tid]["project"], project)
         self.assertEqual(self.creations, 1)
+        self.assertEqual((dest / note).read_text(), "private note")
+        with closing(sqlite3.connect(workers["b"].home / "memories_1.sqlite")) as db:
+            self.assertEqual(db.execute("SELECT raw_memory FROM stage1_outputs WHERE thread_id=?", (tid,)).fetchone(),
+                             ("private memory",))
+        locks = {}
+        for d, path in (("a", self.project), ("b", dest)):
+            self.assertEqual(personal_project_at(path, workers[d].root), project)
+            self.assertEqual(workers[d].resolve(tid, path, "owner/satisfactry"), (project, path))
+            self.assertEqual(workers[d].resolve("new", path, "owner/satisfactry"), (project, path))
+            with patch.dict(os.environ, LANXI_DEVICE_TOKEN=d * 32):
+                store = workers[d].store()
+                locks[d] = PersonalTaskLocks(store.client)
+                keys = store.index()
+                self.assertIn("notes/owner/satisfactry/decision.md", keys)
+                self.assertIn("long-term/owner/satisfactry/" + tid, keys)
+                self.assertFalse(any(k.startswith(("notes/.folder/", "long-term/.folder/")) for k in keys))
+        ide = str(uuid.uuid4())
+        locks["a"].event(personal_project_at(self.project, workers["a"].root), ide, "vscode", 1, "open")
+        with self.assertRaises(ControlDenied):
+            locks["b"].claim(tid, workers["b"].resolve(tid, dest)[0], lambda _: None)
+        locks["a"].event(project, ide, "vscode", 2, "close")
+        self.assertTrue(locks["b"].claim(tid, project, lambda _: None))
 
     def test_lost_create_response_recovers_own_remote_only(self):
         def drop_after_creation(token, endpoint, data=None):

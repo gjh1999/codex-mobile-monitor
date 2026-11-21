@@ -124,11 +124,12 @@ class CodexWorkspace:
             turns.extend({**item, 'deviceName': name} for item in self.entries(row, 'completions'))
             for item in self.entries(row, 'approvals'):
                 source, expires, details = item.get('token'), item.get('expires'), item.get('details')
+                method = item.get('method')
                 if (not valid_token(source) or type(expires) not in (int, float) or not now < expires <= now + RETENTION + LIVE
-                        or not isinstance(details, dict) or item.get('method') not in APPROVAL_METHODS):
+                        or not isinstance(details, dict) or not isinstance(method, str) or method not in APPROVAL_METHODS):
                     continue
                 token = f'remote:{peer}:{source}'
-                remote[token] = {'token': token, 'sourceToken': source, 'client': 'codex', 'method': item['method'],
+                remote[token] = {'token': token, 'sourceToken': source, 'client': 'codex', 'method': method,
                                  'details': details, 'device': peer, 'deviceName': name, 'remote': True, 'expires': expires,
                                  'decision': None, 'canAllow': can_allow(details), 'liveUntil': row['time'] + LIVE}
             for item in self.entries(row, 'decisions'):

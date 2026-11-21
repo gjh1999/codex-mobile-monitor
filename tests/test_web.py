@@ -1,6 +1,6 @@
 import os
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 from fastapi.testclient import TestClient
 from web_server import create_app
 
@@ -64,7 +64,15 @@ class WebTests(unittest.TestCase):
             self.assertEqual(self.client.post('/api/approvals/batch', json={'tokens': [second], 'allow': 'true'},
                                               headers=headers).status_code, 422)
             self.assertEqual([item['token'] for item in approvals.pending()], [second])
-        rpc.send.assert_called_once_with({'id': 1, 'result': {'decision': 'accept'}})
+            third = approvals.add(rpc, {'id': 3, 'method': method, 'params': {'command': 'echo three'}})
+            pending = self.client.get('/api/approvals').json()['pending']
+            result = self.client.post('/api/approvals/batch',
+                                      json={'tokens': [item['token'] for item in pending], 'allow': True}, headers=headers)
+            self.assertEqual(result.json(), {'results': [{'token': second, 'decision': 'allowed'},
+                                                         {'token': third, 'decision': 'allowed'}]})
+            self.assertEqual(approvals.pending(), [])
+        self.assertEqual(rpc.send.call_args_list, [call({'id': request_id, 'result': {'decision': 'accept'}})
+                                                   for request_id in (1, 2, 3)])
 
     def test_state_and_history_are_read_only(self):
         self.login()

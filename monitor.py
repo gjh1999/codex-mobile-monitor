@@ -1,8 +1,10 @@
 """In-process desktop workers. No task ownership is inferred from configuration."""
-import json, os, sqlite3, threading, time, sys
+import json, os, queue, sqlite3, threading, time, sys
 from conversation import read_conversation
 from codex_history import read_codex_conversation
 from codex_activity import CodexActivity
+from codex_watch import RolloutWatch, SharedCodex, completion, completion_from_rpc
+from codex_workspace import CodexWorkspace, recent, RETENTION
 from pathlib import Path
 from automation import Approvals, Scheduler
 from channels_dingtalk import DingTalkWebhook
@@ -14,6 +16,8 @@ from attachments import Attachments
 from task_control import TaskControl
 from history_labels import load_labels
 from coordination_client import device_client
+from personal_relay import RemoteRecords
+from rpc_errors import RPCError
 from code_sync import github_id
 from ide_activity import close_queue, flush_closes
 def _runtime_root():
@@ -44,6 +48,8 @@ def prepare_desktop_data(select_legacy,source_override=None):
  return True
 
 approvals=Approvals()
+workspace_codex=CodexWorkspace(approvals)
+codex_completions=queue.SimpleQueue()
 state={'serviceVersion':'0.7.3-desktop-only','pid':os.getpid(),'updated':None,'quota':None,'quotaStatus':'unknown','threads':[],'schedule':[], 'connection':'starting','notification':'not_configured','wake':{'mode':'guarded','reason':'Only connection-owned threads with active goals are eligible.'},'claude':{'connection':'starting','threads':[],'controls':{'tasks':[],'operations':[]},'quotaStatus':'unknown','quota':None,'schedule':[]}}
 state_lock=threading.Lock()
 controller=None
@@ -97,7 +103,25 @@ def client_snapshot(snap,client='codex'):
   result=dict(snap.get('claude') or {'connection':'starting','threads':[],'controls':{'tasks':[],'operations':[]},'quota':None,'quotaStatus':'unknown','schedule':[]})
  result['client']=client
  result['approvals']=[a for a in approvals.public() if a.get('client','codex')==client]
+ if client=='codex':result['approvals']+=workspace_codex.pending()
  return result
+
+
+def approval_queue(client=None):
+ local=[{**item,'remote':False,'deviceName':'本机','decisionQueued':False} for item in approvals.pending(client)]
+ return local+(workspace_codex.pending() if client in (None,'codex') else [])
+
+
+def decide_approvals(tokens,allow):
+ if type(allow) is not bool or not isinstance(tokens,(list,tuple)) or not all(isinstance(token,str) for token in tokens):
+  raise ValueError('请提供明确的审批项目和决定。')
+ return [{'token':token,'decision':workspace_codex.decide(token,allow) if token.startswith('remote:')
+          else approvals.decide_pending(token,allow)} for token in dict.fromkeys(tokens)]
+
+
+def codex_completed(params):
+ item=completion_from_rpc(params)
+ if item:codex_completions.put(item)
 
 def get_controller(client='codex'):
  if client not in ('codex','claude'):raise ValueError('无效客户端。')
@@ -174,7 +198,7 @@ def poll(stop):
  managed=ManagedTasks(str(ROOT/'managed.sqlite3'),workspace)
  rpc=None;channel=None;failures=0;drained=[]
  controller=TaskControl(ROOT/'task-control.sqlite3');controller.seed(config().get('autoAttachThreads',[]))
- journal=ReplyLog(str(ROOT/'replies.sqlite3'),activity=codex_activity)
+ journal=ReplyLog(str(ROOT/'replies.sqlite3'),activity=codex_activity,reply_notifications=False)
  native=WindowsNotifications(str(ROOT/'windows-notifications.sqlite3'))
  try:
   while not stop.is_set():
@@ -193,6 +217,7 @@ def poll(stop):
        drained.append(rpc)
      client=device_client(cfg)
      rpc=RPC(approvals,journal=journal,coordination=client) if client else RPC(approvals,journal=journal)
+     rpc.report_completion=codex_completed
      rpc.personal_session=lambda tid: personal_sync.snapshot()['sessions'].get(tid) if personal_sync else None
      rpc.personal_flow=lambda: personal_sync
     writes=getattr(rpc,'project_writes',None)
@@ -214,8 +239,6 @@ def poll(stop):
        details=value['request'].get('params',{})
        operation=str(details.get('command') or details.get('reason') or value['request'].get('method','权限请求'))
        update(windowsNotification=native.notify('approval:'+token,'Codex：需要你审批',' '.join(operation.split())[:160]+' | 请在桌面软件中核对详情后批准或拒绝'))
-    delivery=journal.notify_replies(native,'Codex 回复',' | 完整回复保存在 replies.sqlite3')
-    if delivery is not None:update(windowsNotification=delivery)
     for result in snapshot().get('schedule',[]):
      if result.startswith(('backoff:','blocked:goal')):
       native.notify(result+':'+str(int(time.time()//3600)),'Codex task waiting',result)
@@ -239,6 +262,73 @@ def poll(stop):
   codex_activity.disconnect()
   if controller:controller.db.close()
   scheduler.db.close();notifications.db.close();managed.db.close()
+
+
+def watch_codex(stop):
+ """Observe completed turns even when the controller's RPC is offline."""
+ home=Path(os.environ.get('CODEX_HOME') or Path.home()/'.codex')
+ started=time.time()
+ rollouts=RolloutWatch(home,started)
+ native=WindowsNotifications(str(ROOT/'windows-notifications.sqlite3'))
+ daemon=None
+ store=None
+ next_probe=0
+
+ def alert(item):
+  if 'title' not in item or not item['title']:
+   item={**item,'title':history_labels.get(item['threadId'],{}).get('title') or 'Codex 会话'}
+  key=f"codex:turn-complete:{item['threadId']}:{item['turnId']}"
+  native.notify(key,'Codex 对话已完成',item['title'])
+
+ def local(item):
+  workspace_codex.complete(item)
+  alert(item)
+
+ try:
+  while not stop.is_set():
+   while not stop.is_set():
+    try:item=codex_completions.get_nowait()
+    except queue.Empty:break
+    local(item)
+   for item in rollouts.scan(stop):local(item)
+   now=time.time()
+   try:
+    if daemon and daemon.closed:
+     daemon.close();daemon=None
+    if daemon is None and now>=next_probe and (home/'app-server-control').is_dir():
+     next_probe=now+8
+     daemon=SharedCodex(approvals,codex_completed)
+    if daemon:daemon.poll_approvals(stop)
+   except (OSError,ValueError,RPCError,queue.Empty):
+    if daemon:daemon.close();daemon=None
+    next_probe=now+8
+   update(codexApprovalWatch='shared' if daemon and not daemon.closed else 'own_connection')
+   try:
+    client=device_client(config())
+    if client and client.token:
+     workspace_codex.set_identity((client.url,client.device,client.token))
+     store=RemoteRecords(client)
+     for row in workspace_codex.sync(store):
+      stamp=row.get('time')
+      if not recent(stamp,now,RETENTION) or stamp<started:continue
+      name=row.get('title')
+      item=completion(row.get('threadId'),row.get('turnId'),stamp,name if isinstance(name,str) else '')
+      if item:alert(item)
+     update(codexWorkspaceWatch='connected')
+    else:
+     store=None
+     workspace_codex.set_identity(None)
+     update(codexWorkspaceWatch='local')
+   except (OSError,ValueError,KeyError,TypeError):
+    update(codexWorkspaceWatch='retrying')
+   stop.wait(2)
+ finally:
+  if daemon:daemon.close()
+  if store:
+   try:workspace_codex.disconnect(store)
+   except (OSError,ValueError):pass
+  workspace_codex.set_identity(None)
+  native.db.close()
 
 def poll_claude(stop):
  """An independent worker keeps Codex outages from blocking Claude monitoring."""
@@ -297,7 +387,7 @@ def start_background_service(stop=None, embed_web=None):
  service_lock=ServiceLock(ROOT/'monitor.lockfile')
  worker=threading.Thread(target=poll,args=(stop,),daemon=True,name='monitor-worker')
  claude_worker=threading.Thread(target=poll_claude,args=(stop,),daemon=True,name='claude-monitor-worker')
- workers=[worker,claude_worker]
+ workers=[worker,claude_worker,threading.Thread(target=watch_codex,args=(stop,),daemon=True,name='codex-watch')]
  from project_library import ProjectLibrary
  library=ProjectLibrary(ROOT,Path(os.environ.get('CODEX_HOME') or Path.home()/'.codex'))
  workers.append(threading.Thread(target=library.run,args=(stop,update),daemon=True,name='project-library'))

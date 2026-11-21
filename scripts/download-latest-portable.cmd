@@ -8,19 +8,26 @@ exit /b %result%
 :LANXI_SCRIPT
 $ErrorActionPreference = 'Stop'
 $partial = $null
+$pairLock = $null
+$workspaceGrant = '__LANXI_WORKSPACE_GRANT__'
 
-function Open-Release([string]$suffix) {
-    $request = [Net.HttpWebRequest][Net.WebRequest]::Create($base + $suffix)
+function New-Request([string]$address) {
+    $request = [Net.HttpWebRequest][Net.WebRequest]::Create($address)
     $request.AllowAutoRedirect = $false
     $request.Timeout = 30000
     $request.ReadWriteTimeout = 30000
-    $request.Headers['Authorization'] = 'Bearer ' + $token
-    $request.Headers['X-Lanxi-Device'] = $device
     if ($certificatePin) {
         $request.Proxy = $null
         $request.ConnectionGroupName = $certificatePin
         $request.ServerCertificateValidationCallback = [LanxiReleaseTls]::ForCertificate($certificatePin)
     }
+    return $request
+}
+
+function Open-Release([string]$suffix) {
+    $request = New-Request ($base + $suffix)
+    $request.Headers['Authorization'] = 'Bearer ' + $token
+    $request.Headers['X-Lanxi-Device'] = $device
     $response = $request.GetResponse()
     if ([int]$response.StatusCode -ne 200) {
         $response.Dispose()
@@ -34,10 +41,67 @@ function Confirm-Package([string]$path) {
         (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -eq $sha
 }
 
+function Save-Json([string]$path, $value) {
+    $tmp = $path + '.' + [guid]::NewGuid().ToString('N') + '.tmp'
+    try {
+        [IO.File]::WriteAllText($tmp, ($value | ConvertTo-Json -Depth 100 -Compress))
+        if ([IO.File]::Exists($path)) {
+            [IO.File]::Replace($tmp, $path, [System.Management.Automation.Language.NullString]::Value)
+        } else { [IO.File]::Move($tmp, $path) }
+    } finally { if ([IO.File]::Exists($tmp)) { [IO.File]::Delete($tmp) } }
+}
+
+function Read-Settings {
+    if (![IO.File]::Exists($config)) { return [pscustomobject]@{} }
+    $settings = [IO.File]::ReadAllText($config) | ConvertFrom-Json
+    if ($settings -isnot [pscustomobject]) { throw '本机配置格式有误，请检查 local-config.json。' }
+    return $settings
+}
+
 try {
     $config = Join-Path $env:LOCALAPPDATA 'Lanxi\data\local-config.json'
-    if (![IO.File]::Exists($config)) { throw '当前 Windows 用户还未配对澜汐。请用已配对的用户运行。' }
-    $coordination = ([IO.File]::ReadAllText($config) | ConvertFrom-Json).coordination
+    $settings = Read-Settings
+    $coordination = $settings.coordination
+    $claim = $null
+    if (!($coordination.device -and ($coordination.protectedToken -or $env:LANXI_DEVICE_TOKEN))) {
+        if ($workspaceGrant -cnotmatch '^LANXI3\.([A-Za-z0-9_-]+)$') {
+            throw '请使用私人发行目录「笔记本下载」中的「下载澜汐最新版.cmd」完成首次配对。'
+        }
+        $encoded = $Matches[1].Replace('-', '+').Replace('_', '/')
+        $encoded += '=' * ((4 - $encoded.Length % 4) % 4)
+        $grant = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encoded)) | ConvertFrom-Json
+        if ($grant.code -cnotmatch '\A[A-Za-z0-9_-]{43}\z') { throw '私人下载脚本的加入授权格式有误。' }
+        $local = Join-Path ([IO.Path]::GetDirectoryName($config)) '.local'
+        [IO.Directory]::CreateDirectory($local) | Out-Null
+        $pairLock = [IO.File]::Open((Join-Path $local 'download-pairing.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
+        $settings = Read-Settings
+        $coordination = $settings.coordination
+        if (!($coordination.device -and ($coordination.protectedToken -or $env:LANXI_DEVICE_TOKEN))) {
+            $pending = Join-Path $local 'download-pairing.json'
+            $key = [Security.Cryptography.SHA256]::Create()
+            try { $grantHash = [Convert]::ToBase64String($key.ComputeHash([Text.Encoding]::ASCII.GetBytes($workspaceGrant))) }
+            finally { $key.Dispose() }
+            $identity = $null
+            if ([IO.File]::Exists($pending)) { $identity = [IO.File]::ReadAllText($pending) | ConvertFrom-Json }
+            if ($identity.grantHash -cne $grantHash) {
+                Add-Type -AssemblyName System.Security
+                $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+                $bytes = [byte[]]::new(32)
+                try {
+                    $rng.GetBytes($bytes)
+                    $ascii = [Text.Encoding]::ASCII.GetBytes([Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+','-').Replace('/','_'))
+                    $protected = [Security.Cryptography.ProtectedData]::Protect($ascii, $null, 'CurrentUser')
+                } finally { $rng.Dispose(); [Array]::Clear($bytes,0,$bytes.Length); if ($ascii) { [Array]::Clear($ascii,0,$ascii.Length) } }
+                $identity = @{ grantHash=$grantHash; device='lanxi-' + [guid]::NewGuid().ToString('N').Substring(0,24); protectedToken=[Convert]::ToBase64String($protected) }
+                Save-Json $pending $identity
+            }
+            $projects = $coordination.projects
+            if (!$projects) { $projects = @{} }
+            $coordination = @{ url=$grant.url; device=$identity.device; protectedToken=$identity.protectedToken; projects=$projects }
+            if ($grant.trustedCertificate) { $coordination.trustedCertificate = $grant.trustedCertificate }
+            $claim = $grant.code
+        }
+    }
     $origin = $null
     if (![Uri]::TryCreate([string]$coordination.url, [UriKind]::Absolute, [ref]$origin) -or
         $origin.Scheme -ne 'https' -or $origin.UserInfo -or $origin.Query -or
@@ -93,6 +157,35 @@ public static class LanxiReleaseTls
 '@
     }
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    if ($claim) {
+        Write-Host '正在将这台电脑加入私人工作区…'
+        $request = New-Request ($origin.GetLeftPart([UriPartial]::Authority) + '/api/v1/pairing/join-workspace')
+        $request.Method = 'POST'
+        $request.ContentType = 'application/json'
+        $payload = [Text.Encoding]::UTF8.GetBytes((@{code=$claim; device=$device; token=$token} | ConvertTo-Json -Compress))
+        $request.ContentLength = $payload.Length
+        $stream = $request.GetRequestStream()
+        try { $stream.Write($payload, 0, $payload.Length) } finally { $stream.Dispose() }
+        $reply = $request.GetResponse()
+        try {
+            $reader = [IO.StreamReader]::new($reply.GetResponseStream())
+            try { $paired = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
+            if ([int]$reply.StatusCode -ne 200 -or $paired.device -cne $device) { throw '服务器未确认本机配对，请重试。' }
+        } finally { $reply.Dispose() }
+        $settings = Read-Settings
+        if ($settings.coordination.protectedToken -or ($settings.coordination.device -and $env:LANXI_DEVICE_TOKEN)) { throw '本机配对设置已更新，请重新运行下载脚本。' }
+        $settings | Add-Member -Force NoteProperty coordination $coordination
+        $sync = $settings.personalSync
+        if (!$sync) { $sync = [pscustomobject]@{} }
+        $sync | Add-Member -Force NoteProperty exchange $null
+        $sync | Add-Member -Force NoteProperty codeOnly $false
+        $sync | Add-Member -Force NoteProperty memory $true
+        $settings | Add-Member -Force NoteProperty personalSync $sync
+        Save-Json $config $settings
+        [IO.File]::Delete($pending)
+        Write-Host '本机已完成配对。'
+    }
+    if ($pairLock) { $pairLock.Dispose(); $pairLock = $null }
     $base = $origin.GetLeftPart([UriPartial]::Authority) + '/api/v1/releases/windows'
     Write-Host '正在查询服务器上的最新版本…'
     $response = Open-Release ''
@@ -149,6 +242,7 @@ public static class LanxiReleaseTls
     [Console]::Error.WriteLine($_.Exception.Message)
     exit 1
 } finally {
+    if ($pairLock) { $pairLock.Dispose() }
     if ($partial -and [IO.File]::Exists($partial)) { [IO.File]::Delete($partial) }
 }
 exit 0

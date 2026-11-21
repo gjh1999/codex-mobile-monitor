@@ -53,18 +53,21 @@ try {
         Note ""
         Note "项目路径：$project"
         if (![IO.Directory]::Exists($project)) { Note '目录状态：未找到或不可访问'; continue }
-        if (!(Test-Path -LiteralPath (Join-Path $project '.git'))) { Note '目录存在，根目录没有 .git'; continue }
-        if (!$git) { Note '目录有 .git；未找到 git.exe，无法读取 origin 和接续索引。'; continue }
-        $origin = Read-Git @('config','--get','remote.origin.url')
-        if ($LASTEXITCODE -ne 0) { Note 'Git 未能读取 origin（可能未配置或仓库访问受限）。' }
-        elseif ($origin -match '^(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/?$') {
-            $repo = ($Matches[1] + '/' + ($Matches[2] -replace '\.git$','')).ToLowerInvariant()
-            Note "GitHub 仓库：$repo"
-        } else { Note 'origin 不是澜汐支持的标准 GitHub 地址。' }
-        $gitDir = Read-Git @('rev-parse','--absolute-git-dir')
-        if ($LASTEXITCODE -ne 0) { Note 'Git 目录不可读。'; continue }
-        $index = Join-Path $gitDir 'lanxi-personal-sessions.json'
-        if (![IO.File]::Exists($index)) { Note '本机没有此仓库的澜汐会话接续索引。'; continue }
+        $index = Join-Path $project '.lanxi/lanxi-personal-sessions.json'
+        if (Test-Path -LiteralPath (Join-Path $project '.git')) {
+            if (!$git) { Note '目录有 .git；未找到 git.exe，无法读取 origin 和接续索引。'; continue }
+            $origin = Read-Git @('config','--get','remote.origin.url')
+            if ($LASTEXITCODE -ne 0) { Note 'Git 未能读取 origin（可能未配置或仓库访问受限）。' }
+            elseif ($origin -match '^(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/?$') {
+                $repo = ($Matches[1] + '/' + ($Matches[2] -replace '\.git$','')).ToLowerInvariant()
+                Note "GitHub 仓库：$repo"
+            } else { Note 'origin 不是澜汐支持的标准 GitHub 地址。' }
+            $gitDir = Read-Git @('rev-parse','--absolute-git-dir')
+            if ($LASTEXITCODE -ne 0) { Note 'Git 目录不可读。'; continue }
+            $gitIndex = Join-Path $gitDir 'lanxi-personal-sessions.json'
+            if (![IO.File]::Exists($index)) { $index = $gitIndex }
+        } else { Note '普通目录：按母目录相对路径同步已完成会话。' }
+        if (![IO.File]::Exists($index)) { Note '本机尚无该项目的接续索引。'; continue }
         try {
             $keys = @(([IO.File]::ReadAllText($index) | ConvertFrom-Json).PSObject.Properties | Where-Object { $_.Name -match '^[0-9a-f-]{36}$' } | ForEach-Object Name)
             Note "接续索引：$($keys.Count) 条"
@@ -96,7 +99,8 @@ try {
                 }
                 if (!$found) { continue }
                 $matched++
-                $size = if ($file.Length -ge 10MB) { '已达单条同步上限' } else { '原文件小于上限' }
+                $size = if ($file.Length -gt 64MB) { '超过 R38 单份会话 64 MiB 上限' }
+                        elseif ($file.Length -ge 10MB) { '已完成轮次可分块同步' } else { '可同步大小' }
                 Note ("  {0} | {1:N2} MiB | {2} | 工作目录 {3}" -f $id,($file.Length / 1MB),$size,$cwd)
             } catch { $failed++ }
         }

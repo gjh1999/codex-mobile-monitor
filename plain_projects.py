@@ -10,15 +10,17 @@ from personal_relay import EMPTY, Changed, digest
 
 CATALOG = "folder-projects/"
 INDEX = ".lanxi/lanxi-personal-sessions.json"
+RECEIVER = ".lanxi/receiver.json"
 EXCLUDED = {"appdata", "node_modules", "__pycache__", "windows", "program files",
-            "program files (x86)", "programdata", "$recycle.bin", "system volume information"}
+            "program files (x86)", "programdata", "$recycle.bin", "system volume information",
+            "temp", "tmp", "cache", "caches", "build-exe", "site-packages", "venv"}
 
 
 def folder_id(relative):
     return ".folder/" + hashlib.sha256(relative.casefold().encode("utf-8")).hexdigest()
 
 
-def folder_relative(parent, directory):
+def folder_relative(parent, directory, *, allow_git=False):
     if not parent or not parent.is_absolute() or not directory.is_relative_to(parent) or directory == parent:
         return None
     relative = directory.relative_to(parent)
@@ -28,7 +30,8 @@ def folder_relative(parent, directory):
         if not parent.is_dir() or parent.resolve() != parent or safe_path(parent, relative.as_posix()) != directory:
             return None
         for base in (directory, *directory.parents):
-            if (base / ".git").exists() or (base.exists() and not base.is_dir()):
+            if ((base / ".git").exists() and not (allow_git and base == directory)
+                    or (base.exists() and not base.is_dir())):
                 return None
             if base == parent:
                 break
@@ -57,15 +60,18 @@ def native_directories(home, cache):
             continue
 
 
-def folder_bindings(parent, home, store, index, cache, git_paths, errors, stop):
+def folder_bindings(parent, home, store, index, cache, git_projects, code_folders, device, errors, stop):
     if not parent or not parent.is_dir():
-        return {}
+        return {}, {}
     folders = {}
+    sources = {}
     native = {}
-    for cwd in set(native_directories(home, cache)):
+    by_root = {path: project for project, path in git_projects.items()}
+    for cwd in set(native_directories(home, cache)) | set(code_folders):
         if stop.is_set():
-            return {}
-        relative = folder_relative(parent, cwd)
+            break
+        cwd = next((p for p in (cwd, *cwd.parents) if p in code_folders), cwd)
+        relative = folder_relative(parent, cwd, allow_git=cwd in code_folders)
         if relative and cwd.is_dir():
             native[folder_id(relative)] = relative
     revisions = {".folder/" + key[len(CATALOG):]: rev for key, rev in index.items()
@@ -82,22 +88,38 @@ def folder_bindings(parent, home, store, index, cache, git_paths, errors, stop):
                     payload = store.read(key)
                     if digest(payload) != revision:
                         raise Changed("普通目录登记刚刚更新")
-                    relative = json.loads(payload)["relativePath"]
+                    record = json.loads(payload)
+                    relative = record["relativePath"]
                     if not isinstance(relative, str) or folder_id(relative) != project:
                         raise ValueError("普通目录身份与相对路径不符")
-                    cache["folder-catalog", key] = revision, relative
+                    cache["folder-catalog", key] = revision, record
                 else:
-                    relative = cached[1]
+                    record = cached[1]
+                    relative = record["relativePath"]
             else:
                 relative = native[project]
+                record = {"relativePath": relative, "originDevice": device}
             directory = safe_path(parent, relative)
-            if folder_relative(parent, directory) != relative:
+            owns = record.get("originDevice") == device
+            linked = record.get("githubProject")
+            git_project = by_root.get(directory)
+            if owns and directory in code_folders and git_project and git_project != linked:
+                linked = git_project
+                record = {**record, "githubProject": linked}
+                store.put(key, revision or EMPTY, pack(record))
+                revision = digest(pack(record))
+            # Git initialization may succeed before origin is available. Keep serving
+            # the folder sessions while the owning device retries publication.
+            allow_git = owns and directory in code_folders or bool(linked and linked == git_project)
+            if folder_relative(parent, directory, allow_git=allow_git) != relative:
                 raise ValueError("普通目录路径无效或与 Git 工作区重叠")
-            if any(directory.is_relative_to(path) or path == directory for path in git_paths):
+            if any(directory.is_relative_to(path) for path in by_root if path != directory or not allow_git):
                 raise ValueError("普通目录与已登记 Git 项目重叠")
             if not revision:
-                store.put(key, EMPTY, pack({"relativePath": relative}))
+                store.put(key, EMPTY, pack(record))
+            if owns and project in native and not safe_path(directory, RECEIVER).exists():
+                sources[project] = directory
             folders[project] = directory
         except (OSError, ValueError, KeyError, TypeError) as error:
             errors[project] = str(error) if isinstance(error, ValueError) else "暂不能核对普通目录映射"
-    return folders
+    return folders, sources

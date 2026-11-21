@@ -72,7 +72,7 @@ def download(store, spec, local, scratch, stop):
         checkpoint(stop)
         begin = number * CHUNK_SIZE
         length = min(CHUNK_SIZE, spec["size"] - begin)
-        part = scratch / sha
+        part = scratch / sha[:24]
         block = local[begin:begin + length] if local else None
         if digest(block) != sha:
             if part.is_file() and part.stat().st_size == length:
@@ -107,7 +107,9 @@ def sync_large(mirror, index, legacy_key, path, stop, read_envelope, install_env
         return
     local = read_envelope(path)
     remote = read_manifest(mirror.store, key, revision) if revision != EMPTY else None
-    scratch = mirror.backups.parent / "session-parts" / digest(key.encode())
+    # Keep the retry cache inside normal Windows MAX_PATH even for long profile paths.
+    # Cache hits are always verified against the full SHA-256 before use.
+    scratch = mirror.backups.parent / "parts" / digest(key.encode())[:16]
     # Legacy clients may continue advancing the small record after promotion.
     # A fork there is visible to R38 and must never silently replace either copy.
     legacy = None
@@ -136,5 +138,5 @@ def sync_large(mirror, index, legacy_key, path, stop, read_envelope, install_env
         before = stamp()
     if scratch.is_dir() and remote:
         for sha in set(remote["parts"]):
-            (scratch / sha).unlink(missing_ok=True)
+            (scratch / sha[:24]).unlink(missing_ok=True)
     mirror.cache[cache_key] = before, index.get(key, EMPTY), legacy_revision

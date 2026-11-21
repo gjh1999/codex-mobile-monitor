@@ -21,7 +21,7 @@ from code_sync import (
 )
 from coordination_client import ControlClient, ControlDenied, PersonalTaskLocks, device_token
 from handoff_sync import atomic_write
-from personal_memory import Mirror, pack, read, safe_path, split_session, sync_memories
+from personal_memory import Mirror, confirm_published_session, pack, read_transcript, safe_path, sync_memories
 from personal_relay import EMPTY, Records, RemoteRecords, digest
 from plain_projects import INDEX as FOLDER_INDEX, folder_bindings
 from project_library import configured_root, discover
@@ -111,7 +111,8 @@ class PersonalSync:
         view = self.snapshot()
         session = view["sessions"].get(tid)
         if session and view["status"].get(session["project"]) == "已同步":
-            return digest(read(Path(session["path"])))
+            data = read_transcript(Path(session["path"]))
+            return digest(data) if data is not None else None
         return None
 
     def publish_handoff(self, tid):
@@ -122,13 +123,11 @@ class PersonalSync:
             view = self.snapshot()
             session = view["sessions"].get(tid)
             if view["epoch"] > epoch and session and view["status"].get(session["project"]) == "已同步":
-                native = Path(session["path"])
                 try:
                     store = self.store()
-                    key = f"sessions/{session['project']}/{native.name}"
-                    _, synced = split_session(store.read(key), native.name, tid)
-                    if read(native) == synced:
-                        return digest(synced)
+                    checkpoint = confirm_published_session(store, session, tid) if store else None
+                    if checkpoint:
+                        return checkpoint
                 except (OSError, ValueError, KeyError):
                     pass
             time.sleep(.25)

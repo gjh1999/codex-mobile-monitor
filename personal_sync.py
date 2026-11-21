@@ -52,7 +52,13 @@ class PersonalSync:
         self.coordination = coordination
         self.pending_settings = None
         self.priority = None
-        self._manual_sync = None
+        self._active_sync = None
+        self._pending_sync = None
+        self._sync_phase = ""
+        self._sync_started = 0
+        self._sync_total = 0
+        self._sync_finished = 0
+        self._sync_projects = {}
         self.poll_cache = {}
         self.local_state = self.root / ".local" / "personal-sync"
         self.scope = None
@@ -144,12 +150,26 @@ class PersonalSync:
         self.wake.set()
         return epoch
 
-    def request_manual_sync(self):
+    def request_manual_sync(self, *, fresh=False):
         with self.lock:
-            if self._manual_sync is None or self._manual_sync.done():
-                self._manual_sync = Future()
-                self.wake.set()
-            return self._manual_sync
+            if self._pending_sync is not None:
+                return self._pending_sync
+            if self._active_sync is not None and not fresh:
+                return self._active_sync
+            self._pending_sync = Future()
+            self.wake.set()
+            return self._pending_sync
+
+    def sync_progress(self):
+        with self.lock:
+            if self._active_sync is None:
+                return None
+            return (self._sync_phase, int(time.monotonic() - self._sync_started),
+                    self._sync_finished, self._sync_total, dict(self._sync_projects))
+
+    def _phase(self, label):
+        with self.lock:
+            self._sync_phase = label
 
     def resolve(self, tid, directory=None, remote=None):
         with self.lock:
@@ -195,7 +215,7 @@ class PersonalSync:
                     if origin.returncode:
                         # Git config can omit the local configuration of an untrusted
                         # repository without surfacing the ownership error itself.
-                        run(path, "rev-parse", "--show-toplevel")
+                        run(path, "rev-parse", "--show-toplevel", timeout=5)
                         continue
                     remote = origin.stdout.decode().strip()
                 except UnsafeRepository:
@@ -340,6 +360,7 @@ class PersonalSync:
         try:
             store = self.store()
             index = store.index() if store else {}
+            self._phase("正在扫描本机仓库并核对项目映射")
             local, specs = self.bindings(store, index, cached, published, errors, untrusted)
             if cloud:
                 connection = "已连接协调服务"
@@ -350,6 +371,7 @@ class PersonalSync:
             store = None
             local, specs = self.bindings(None, {}, cached, published, errors, untrusted)
         if connection == "已连接协调服务":
+            self._phase("正在检查随记与项目占用")
             try:
                 from notebook_store import sync_notebook
                 changed, notebook_errors = sync_notebook(self.root, store, index, stop)
@@ -405,13 +427,14 @@ class PersonalSync:
                     with self.lock:
                         untrusted.add(path)
                 errors[project] = str(error)
+            except subprocess.TimeoutExpired as error:
+                errors[project] = f"Git {error.cmd[error.cmd.index('-C') + 2] if '-C' in error.cmd else '操作'} 超时，后台将重试"
             except (
                 ValueError,
                 OSError,
                 KeyError,
                 TypeError,
                 sqlite3.Error,
-                subprocess.TimeoutExpired,
             ) as error:
                 errors[project] = str(error) if isinstance(error, ValueError) else "本机目录或网络暂不可用"
 
@@ -419,6 +442,9 @@ class PersonalSync:
         for project in sorted(local, key=lambda p: p != first):
             if project not in errors:
                 jobs.put(project)
+        with self.lock:
+            self._sync_phase = "正在检查 GitHub 与服务器代码备份"
+            self._sync_total = jobs.qsize()
 
         def consume():
             while not stop.is_set():
@@ -426,20 +452,28 @@ class PersonalSync:
                     project = jobs.get_nowait()
                 except queue.Empty:
                     return
-                update(project)
-                if backups is not None and not stop.is_set():
-                    try:
+                try:
+                    with self.lock:
+                        self._sync_projects[project] = "GitHub"
+                    update(project)
+                    if backups is not None and not stop.is_set():
+                        with self.lock:
+                            self._sync_projects[project] = "服务器备份"
                         path = local[project]
                         if not (path / ".git").exists():
                             backup_status[project] = "本机没有项目，可查找已有服务器备份"
                             continue
                         backup_status[project] = backups.sync(path, project, specs[project]["memoryPath"], stop)
-                    except UnsafeRepository as error:
-                        with self.lock:
-                            untrusted.add(path)
-                        backup_status[project] = str(error)
-                    except (OSError, KeyError, TypeError, ValueError, subprocess.TimeoutExpired) as error:
-                        backup_status[project] = str(error) if isinstance(error, ValueError) else "服务器或本机目录暂不可用"
+                except UnsafeRepository as error:
+                    with self.lock:
+                        untrusted.add(local[project])
+                    backup_status[project] = str(error)
+                except (OSError, KeyError, TypeError, ValueError, subprocess.TimeoutExpired) as error:
+                    backup_status[project] = str(error) if isinstance(error, ValueError) else "服务器或本机目录暂不可用"
+                finally:
+                    with self.lock:
+                        self._sync_projects.pop(project, None)
+                        self._sync_finished += 1
 
         workers = [threading.Thread(target=consume, daemon=True) for _ in range(min(4, len(specs)))]
         for worker in workers:
@@ -447,6 +481,7 @@ class PersonalSync:
         for worker in workers:
             worker.join()
         check_memory = store is not None and self.settings.get("memory", True) and not stop.is_set()
+        self._phase("正在同步普通项目映射、会话和记忆")
         folders, sources = {}, {}
         if (check_memory or isinstance(store, RemoteRecords)) and not stop.is_set():
             device = store.client.device if isinstance(store, RemoteRecords) else self.scope
@@ -508,6 +543,7 @@ class PersonalSync:
                     folder_git[project] = last
                     continue
                 try:
+                    self._phase(f"正在为 {directory.name} 接入 GitHub")
                     folder_git[project] = promote(directory)
                     self.git_retries.pop((self.scope, project), None)
                 except (OSError, ValueError, subprocess.SubprocessError) as error:
@@ -517,6 +553,7 @@ class PersonalSync:
         inventory = None
         if isinstance(store, RemoteRecords) and not stop.is_set():
             from large_inventory import sync_inventory
+            self._phase("正在核对大文件清单")
             try:
                 available, inventory_errors = sync_inventory(self.root, store, index, ready, stop, include_available=True)
                 inventory = {project: {name: row for name, row in files.items()
@@ -557,9 +594,15 @@ class PersonalSync:
         while not stop.is_set():
             with self.lock:
                 self.wake.clear()
-                manual = self._manual_sync
-                if manual is not None and (manual.done() or not manual.set_running_or_notify_cancel()):
-                    manual = None
+                current, self._pending_sync = self._pending_sync, None
+                if current is None or not current.set_running_or_notify_cancel():
+                    current = Future()
+                    current.set_running_or_notify_cancel()
+                self._active_sync = current
+                self._sync_started = time.monotonic()
+                self._sync_phase = "正在连接个人工作区"
+                self._sync_total = self._sync_finished = 0
+                self._sync_projects.clear()
             result = None
             try:
                 result = self.cycle(stop)
@@ -570,12 +613,13 @@ class PersonalSync:
                     if self.connection:
                         self.connection = self.status["配对"]
             finally:
-                if manual is not None:
-                    manual.set_result(None if stop.is_set() else result)
+                with self.lock:
+                    self._active_sync = None
+                current.set_result(None if stop.is_set() else result)
             for _ in range(interval * 4):
                 if stop.wait(0.25) or self.wake.is_set():
                     break
         with self.lock:
-            pending = self._manual_sync
+            pending, self._pending_sync = self._pending_sync, None
         if pending is not None:
             pending.cancel()

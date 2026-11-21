@@ -302,7 +302,7 @@ figcaption { color: var(--ink); font-weight: 650; margin-bottom: 15px; }
       <tr><th scope="row">查看占用并交还任务</th><td>同一 GitHub 项目由当前持有控制权的设备执行写操作。结束对话和审批后点「交还任务」，等代码和会话同步，再从另一设备接入。VS Code 和 PyCharm 可安装活动插件上报工作区占用。<a href="PROJECT_CONTROL.md#个人版项目占用">交还与 IDE 插件</a></td></tr>
       <tr><th scope="row">桌面对谈与随记</th><td>「灯下对谈」渲染 Markdown，接入的 Codex 会话流式显示正文与「执行札记」，也可读取独立终端已保存的消息和命令记录。「吉光片羽」按条同步随记、待办、完成状态、归档和手动分组，两端同时改正文时保留冲突副本。<a href="DESKTOP.md">桌面操作</a></td></tr>
       <tr><th scope="row">登记、借用并回传大文件</th><td>达到 100 MiB 的文件可从「跨机接续」查看清单或手动登记。需要编辑时选择来源设备借用，在原相对路径保存，再提交回传。来源校验原文件版本后应用，冲突时两端保留各自内容。<a href="PORTABLE_CHECK.md#跨机借用与回传大文件">借用与回传步骤</a></td></tr>
-      <tr><th scope="row">运行本机、服务器及项目会话测试</th><td>从顶部菜单栏或托盘打开「测试」。R37 候选版在单台已配对电脑验证服务器，项目会话诊断按选定目录对照本机和服务端索引。版本见顶栏「澜汐 → 关于澜汐」。<a href="PORTABLE_CHECK.md#运行验收">验收操作</a></td></tr>
+      <tr><th scope="row">运行本机、服务器及项目会话测试</th><td>从顶部菜单栏或托盘打开「测试」。R37 在单台已配对电脑验证服务器，项目会话诊断按选定目录对照本机和服务端索引。版本见顶栏「澜汐 → 关于澜汐」。<a href="PORTABLE_CHECK.md#运行验收">验收操作</a></td></tr>
     </tbody>
   </table></div>
   <p><strong>已验证的范围。</strong> R28 用一台 Windows 电脑的两份隔离配对在阿里云验证了大文件借用、修改回传和清理。R29 验证了从主窗口触发内置测试、云端回执和独立下载。R30 用隔离配置验证了首启、配对入口、旧版校验并解压新版，以及未配对本机自检。台式机和笔记本的真实项目、IDE 上报、原会话续写与休眠重连仍待现场验收。<a href="archive/IMPLEMENTATION_LOG.md">实施与验收记录</a></p>
@@ -497,7 +497,7 @@ figcaption { color: var(--ink); font-weight: 650; margin-bottom: 15px; }
 <section id="personal-release">
   <h2>个人开发与版本发布</h2>
   <p>新 Windows 电脑双击私人发行目录中的 <code>笔记本下载/下载澜汐最新版.cmd</code>，脚本会建立首次启动记录，完成配对，并将最新稳定版 ZIP 下载到同目录。旧脚本已配对的 R36 用户若遇到缺少 <code>desktop-profile.json</code> 的启动错误，用新版脚本重跑一次即可补齐记录，沿用原设备身份。<a href="PORTABLE_CHECK.md">新电脑安装与修复步骤</a></p>
-  <p>本机 <code>release/</code> 根目录保留当前稳定版 ZIP 和开发版 <code>Lanxi.exe</code>，目前两者均基于 R36。新候选包在独立构建目录验收。每次正式发布并核对摘要后，负责人将被替换的稳定版 ZIP 移入 <code>release/history/</code>，按发布日期保留最近两个不同的历史稳定版。验收记录按版本归档。<a href="RUNBOOK.md#构建-exe">保留规则与本机归档</a></p>
+  <p>本机 <code>release/</code> 根目录保留当前稳定版 ZIP 和开发版 <code>Lanxi.exe</code>，目前稳定版为 R37，开发版基于 R36。新候选包在独立构建目录验收。每次正式发布并核对摘要后，负责人将被替换的稳定版 ZIP 移入 <code>release/history/</code>，按发布日期保留最近两个不同的历史稳定版。验收记录按版本归档。<a href="RUNBOOK.md#构建-exe">保留规则与本机归档</a></p>
   <p>用户将需求交给项目负责人「代码review以及发版」。各角色通过项目工单派工、回执、交付和反馈审核结果。负责人按范围向「前端开发」「后端开发」「bug修复」派工，协调接口、依赖与验收条件。开发和修复工程师在工单提交改动及自测结果。测试工程师的对话为「测试」，负责按验收条件设计和执行测试、复现缺陷、验证修复，并报告测试版本、结果和未验证项。负责人集成代码、审核送审版本，结合测试结果核验候选包并决定正式发布。<a href="../AGENTS.md">项目工作约定</a> · <a href="DELIVERY_STATUS.md#项目工单">项目工单</a></p>
   <h3>从修改到发布</h3>
   <ol>

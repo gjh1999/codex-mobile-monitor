@@ -484,12 +484,16 @@ def sync_memories(mirror, index, home, projects, poll_cache, report, stop):
 
 
 def latest_session(cwd):
-    for root in (cwd, *cwd.parents):
-        if not (root / ".git").exists():
-            continue
-        from code_sync import value
+    from plain_projects import INDEX
 
-        marker = Path(value(root, "rev-parse", "--absolute-git-dir")) / "lanxi-personal-sessions.json"
+    for root in (cwd, *cwd.parents):
+        if (root / ".git").exists():
+            from code_sync import value
+            marker = Path(value(root, "rev-parse", "--absolute-git-dir")) / "lanxi-personal-sessions.json"
+        elif (root / INDEX).is_file():
+            marker = safe_path(root, INDEX)
+        else:
+            continue
         if marker.is_file():
             records = json.loads(marker.read_bytes())
             for tid, row in sorted(records.items(), key=lambda item: item[1]["updated"], reverse=True):

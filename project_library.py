@@ -8,6 +8,7 @@ from pathlib import Path
 from handoff_sync import atomic_write
 from history_labels import read_label
 from personal_memory import NOTE_TYPES, safe_path
+from plain_projects import INDEX as FOLDER_INDEX
 
 SETTINGS = "project-library.json"
 ENTRY_PREFIX = "project:"
@@ -66,6 +67,7 @@ def inspect_project(path, overrides):
         filenames.intersection(MARKERS)
         or any(name.endswith((".sln", ".slnx", ".code-workspace")) for name in filenames)
         or (path / ".codex" / "memories").is_dir()
+        or (path / FOLDER_INDEX).is_file()
     ):
         return None
     branch = ""
@@ -148,6 +150,16 @@ class ProjectLibrary:
         except (OSError, ValueError, TypeError, AttributeError):
             pass
         projects = discover(root, overrides) if root else {}
+        mapped = {}
+        for directory in projects:
+            try:
+                marker = safe_path(directory, FOLDER_INDEX)
+                if marker.is_file():
+                    for tid, entry in json.loads(marker.read_bytes()).items():
+                        location = directory if entry["cwd"] == "." else safe_path(directory, entry["cwd"])
+                        mapped[tid] = location, directory
+            except (OSError, ValueError, AttributeError, TypeError, KeyError):
+                continue
         rows = []
         cache = {}
         for file in (self.home / "sessions").rglob("rollout-*.jsonl"):
@@ -171,7 +183,10 @@ class ProjectLibrary:
             path = Path(directory)
             parent = next((part for part in (path, *path.parents) if part in projects), None) if directory else None
             row = {"id": thread, **fields}
-            if parent:
+            if thread in mapped:
+                location, project = mapped[thread]
+                row.update(cwd=str(location), projectRoot=str(project))
+            elif parent:
                 row.update(cwd=str(parent), projectRoot=str(parent))
             rows.append(row)
         self.headers = cache

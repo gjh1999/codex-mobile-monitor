@@ -20,6 +20,7 @@ New-Item -ItemType Directory -Force -Path $specDir | Out-Null
 if (-not (Test-Path $python)) { throw "找不到虚拟环境 Python：$python" }
 & $python -m PyInstaller --noconfirm --clean --onefile --console `
   --name Lanxi-Verify --paths $project `
+  --add-data "$(Join-Path $project 'scripts\诊断项目会话.cmd');scripts" `
   --distpath $helpers --workpath $work --specpath $specDir `
   (Join-Path $project 'tests\smoke_personal_exe.py')
 if ($LASTEXITCODE -ne 0) { throw "Lanxi-Verify 构建失败，退出码：$LASTEXITCODE" }

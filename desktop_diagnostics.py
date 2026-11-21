@@ -1,14 +1,13 @@
 """Expose the portable acceptance checks in the desktop."""
 
 import codecs
-import re
 import sys
 from pathlib import Path
 
 from PySide6.QtCore import QProcess, QProcessEnvironment, QTimer
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
-    QApplication, QDialog, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit,
+    QApplication, QDialog, QFileDialog, QHBoxLayout, QLabel, QPlainTextEdit,
     QPushButton, QVBoxLayout,
 )
 
@@ -28,52 +27,45 @@ class DiagnosticsDialog(QDialog):
         self.runner.finished.connect(self.process_finished)
         self.runner.errorOccurred.connect(self.process_error)
         box = QVBoxLayout(self)
-        self.status = QLabel("本机自检可直接运行，双机测试需要两台电脑都已连接云服务器。")
+        self.status = QLabel()
         self.status.setWordWrap(True)
         box.addWidget(self.status)
         self.output = QPlainTextEdit()
         self.output.setReadOnly(True)
         box.addWidget(self.output, 1)
         header = QHBoxLayout()
-        self.self_test = QPushButton("开始自检")
-        self.self_test.clicked.connect(self.run_self_test)
+        self.self_test = QPushButton("本机自检")
+        self.self_test.clicked.connect(lambda: self.run("local"))
         header.addWidget(self.self_test)
-        pairing = QPushButton("连接云服务器")
-        pairing.clicked.connect(lambda: pair_device(self))
-        header.addWidget(pairing)
-        self.source = QPushButton("发起双机测试")
-        self.source.clicked.connect(lambda: self.run("cloud-source"))
-        header.addWidget(self.source)
-        self.copy = QPushButton("复制测试码")
+        self.server_test = QPushButton("服务器测试")
+        self.server_test.clicked.connect(lambda: self.run("server"))
+        header.addWidget(self.server_test)
+        self.project_test = QPushButton("项目会话诊断")
+        self.project_test.clicked.connect(self.choose_project)
+        header.addWidget(self.project_test)
+        self.pairing = QPushButton("连接云服务器")
+        self.pairing.clicked.connect(lambda: pair_device(self))
+        header.addWidget(self.pairing)
+        self.copy = QPushButton("复制结果")
         self.copy.setEnabled(False)
-        self.copy.clicked.connect(self.copy_code)
+        self.copy.clicked.connect(lambda: QApplication.clipboard().setText(self.output.toPlainText()))
+        self.output.textChanged.connect(lambda: self.copy.setEnabled(not self.output.document().isEmpty()))
         header.addWidget(self.copy)
         box.addLayout(header)
-        row = QHBoxLayout()
-        self.code = QLineEdit()
-        self.code.setPlaceholderText("另一台电脑生成的测试码")
-        self.code.setMaxLength(32)
-        row.addWidget(self.code, 1)
-        self.receiver = QPushButton("回传测试")
-        self.receiver.clicked.connect(self.reply)
-        row.addWidget(self.receiver)
-        box.addLayout(row)
-        QTimer.singleShot(0, self.run_self_test)
+        QTimer.singleShot(0, lambda: self.run("server" if self.has_pairing() else "local"))
 
-    def run_self_test(self):
-        self.run("diagnostics" if self.has_pairing() else "local")
-
-    def reply(self):
-        code = self.code.text().strip()
-        if not re.fullmatch(r"[a-f0-9]{32}", code):
-            self.status.setText("请输入另一台电脑生成的 32 位测试码。")
-            return
-        self.run("cloud-receiver", ["--code", code])
+    def choose_project(self):
+        project = QFileDialog.getExistingDirectory(self, "选择要诊断的项目目录")
+        if project:
+            options = ["--project-dir", project]
+            if self.has_pairing():
+                options.append("--with-server")
+            self.run("project", options)
 
     def run(self, mode, options=()):
         if self.runner.state() != QProcess.ProcessState.NotRunning:
             return
-        if mode in ("cloud-source", "cloud-receiver") and not self.has_pairing():
+        if mode == "server" and not self.has_pairing():
             self.status.setText("请先点击「连接云服务器」。")
             return
         executable = Path(sys.executable)
@@ -86,28 +78,18 @@ class DiagnosticsDialog(QDialog):
             return
         self.output.clear()
         self.decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
-        self.copy.setEnabled(False)
         self.set_busy(True)
         self.status.setText("正在测试…")
         self.runner.start(str(helper), ["--exe", str(executable), "--mode", mode, *options])
 
     def set_busy(self, busy):
-        for button in (self.self_test, self.source, self.receiver):
+        for button in (self.self_test, self.server_test, self.project_test, self.pairing):
             button.setEnabled(not busy)
 
     def read_output(self):
         output = self.decoder.decode(bytes(self.runner.readAllStandardOutput()))
         self.output.moveCursor(QTextCursor.MoveOperation.End)
         self.output.insertPlainText(output)
-        self.copy.setEnabled(bool(self.test_code()))
-
-    def test_code(self):
-        return re.search(r"测试码 ([a-f0-9]{32})", self.output.toPlainText())
-
-    def copy_code(self):
-        match = self.test_code()
-        if match:
-            QApplication.clipboard().setText(match[1])
 
     def process_finished(self, code, exit_status):
         self.read_output()

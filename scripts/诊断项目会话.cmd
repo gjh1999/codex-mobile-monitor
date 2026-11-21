@@ -2,6 +2,7 @@
 setlocal DisableDelayedExpansion
 set "LANXI_DIAG_FILE=%~f0"
 set "LANXI_DIAG_PROJECT=%~1"
+set "LANXI_DIAG_DATA_DIR="
 powershell.exe -NoLogo -NoProfile -Command "$s=[IO.File]::ReadAllText($env:LANXI_DIAG_FILE,[Text.Encoding]::UTF8) -split '(?m)^:LANXI_DIAG\r?$',2; & ([ScriptBlock]::Create($s[1]))"
 set "result=%errorlevel%"
 if /i not "%~1"=="--no-pause" pause
@@ -21,7 +22,7 @@ function Path-Key([string]$path) {
     [IO.Path]::GetFullPath($path).TrimEnd('\')
 }
 try {
-    $data = Join-Path $env:LOCALAPPDATA 'Lanxi\data'
+    $data = if ($env:LANXI_DIAG_DATA_DIR) { $env:LANXI_DIAG_DATA_DIR } else { Join-Path $env:LOCALAPPDATA 'Lanxi\data' }
     $root = $null
     $library = Join-Path $data 'project-library.json'
     if ([IO.File]::Exists($library)) {
@@ -37,7 +38,7 @@ try {
         if (!$manual) { throw '请将项目文件夹直接拖到这个脚本上。' }
         $paths.Add($manual)
     }
-    if ($root) {
+    elseif ($root) {
         $paths.Add((Join-Path $root 'vscodePronject\Satisfactry'))
         foreach ($name in @('Satisfactry','VscodeProject\Satisfactry','AppData\Local\Temp\satisfactory-sbp-source')) {
             $candidate = Join-Path $root $name

@@ -907,7 +907,7 @@ class MainWindow(QMainWindow):
             '窗口': [('最大化／还原', self.toggle_maximized), ('收起到托盘', self.close)],
         }, actions=[
             (CONNECT_CLOUD, lambda: self.open_device_pairing(self), '连接云服务器或查看连接状态'),
-            ('测试', self.open_diagnostics, '检查本机同步与双机连接'),
+            ('测试', self.open_diagnostics, '运行本机自检、服务器测试和项目会话诊断'),
             ('合流', self.open_manual_sync, '手动同步代码、记忆和文件清单'),
         ])
         self.populate_app_menu(self.edge_menu.menus[WINDOW_TITLE], include_about=True)

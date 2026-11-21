@@ -1,11 +1,10 @@
-"""Run the packaged desktop against disposable repositories on one or two Windows PCs."""
+"""Exercise the packaged desktop, the paired server and project session diagnostics."""
 
 import argparse
 import ctypes
 import hashlib
 import json
 import os
-import re
 import shutil
 import sqlite3
 import subprocess
@@ -20,10 +19,12 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError
 
-from code_sync import LIMIT, run
-from coordination_client import ControlClient, PersonalTaskLocks, device_token
+from code_sync import LIMIT, github_id, run
+from coordination_client import ControlClient, device_token
 from desktop_storage import user_data_root
-from personal_relay import EMPTY, Records, RemoteRecords, digest
+from personal_relay import Records
+from local_feature_checks import local_feature_checks
+from server_diagnostics import server_checks
 
 REMOTE = "https://github.com/lanxi-check/fixture.git"
 PROJECT = "lanxi-check/fixture"
@@ -34,8 +35,8 @@ BELOW_LIMIT = "fixture-below-limit.bin"
 TIMEOUT = 90
 MENU = {
     "1": ("local", "本机自检（默认）"),
-    "2": ("cloud-source", "阿里云验收源电脑"),
-    "3": ("cloud-receiver", "阿里云验收接收电脑"),
+    "2": ("server", "服务器测试"),
+    "3": ("project", "项目会话诊断"),
 }
 
 

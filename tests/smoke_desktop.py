@@ -158,10 +158,34 @@ def check_diagnostics_pairing(window):
         shortcut = next(button for button in dialog.findChildren(QPushButton) if button.text() == CONNECT_CLOUD)
         QTest.mouseClick(shortcut, Qt.MouseButton.LeftButton)
         pair.assert_called_with(dialog)
-        settings['coordination'] = {'url': 'https://example.test'}
-        QTest.mouseClick(dialog.self_test, Qt.MouseButton.LeftButton)
-        run.assert_called_with(dialog, 'diagnostics')
+        assert {button.text() for button in dialog.findChildren(QPushButton)} == {
+            '本机自检', '服务器测试', '项目会话诊断', CONNECT_CLOUD, '复制结果',
+        }
+        folder = r'C:\项目\my project'
+        with patch('desktop_diagnostics.QFileDialog.getExistingDirectory', return_value=folder) as select:
+            dialog.project_test.click()
+            run.assert_called_with(dialog, 'project', ['--project-dir', folder])
+            settings['coordination'] = {'url': 'https://example.test'}
+            dialog.project_test.click()
+            run.assert_called_with(dialog, 'project', ['--project-dir', folder, '--with-server'])
+            select.return_value = ''
+            run.reset_mock()
+            dialog.project_test.click()
+            run.assert_not_called()
+        dialog.self_test.click()
+        run.assert_called_with(dialog, 'local')
+        dialog.server_test.click()
+        run.assert_called_with(dialog, 'server')
+        dialog.output.setPlainText('已检查服务器\n项目会话 2 条')
+        with patch('desktop_diagnostics.QApplication.clipboard') as clipboard:
+            dialog.copy.click()
+            clipboard.return_value.setText.assert_called_once_with(dialog.output.toPlainText())
         dialog.close()
+        from desktop_diagnostics import DiagnosticsDialog
+        paired_dialog = DiagnosticsDialog(window, lambda: True, pair)
+        QTest.qWait(30)
+        run.assert_called_with(paired_dialog, 'server')
+        paired_dialog.close()
 
 
 def check_manual_sync(window):

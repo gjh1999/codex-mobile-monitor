@@ -93,7 +93,7 @@ class CodeBackupTests(unittest.TestCase):
         self.reader.download(self.project, "desktop", destination)
         with ZipFile(destination) as archive:
             self.assertEqual(set(archive.namelist()), {".gitignore", "code.py", "new.py"})
-            self.assertEqual(archive.read("code.py"), b"changed without GitHub\n")
+            self.assertEqual(archive.read("code.py"), (self.repo / "code.py").read_bytes())
         other = self.client("other", "c")
         self.assertEqual(other.list(self.project), [])
         with self.assertRaises(SyncIssue):

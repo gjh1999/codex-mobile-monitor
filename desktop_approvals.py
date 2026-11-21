@@ -186,8 +186,12 @@ class ApprovalQueueDialog(QDialog):
                 if token not in self.names:
                     self.names[token] = self.task_title(token, request)
                 kind = KINDS.get(request['method'], '审批请求')
-                caption = f'{kind} · {self.names[token]}'
-                row = QTreeWidgetItem([caption, request['device'], approval_status(request['decision'])])
+                command = request['details'].get('command')
+                preview = ' '.join(command.split())[:160] if isinstance(command, str) else ''
+                caption = preview or f'{kind} · {self.names[token]}'
+                decision = request['decision']
+                status = '缺少操作详情' if decision == 'pending' and not request['canAllow'] else approval_status(decision)
+                row = QTreeWidgetItem([caption, request['device'], status])
                 row.setData(0, TOKEN, token)
                 for column in range(3):
                     row.setToolTip(column, row.text(column))

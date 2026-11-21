@@ -2008,7 +2008,10 @@ class MainWindow(QMainWindow):
 
         def completed(result):
             if not self.stop.is_set():
-                self.approval_ready.emit(result)
+                try:
+                    self.approval_ready.emit(result)
+                except RuntimeError:
+                    pass  # Qt can close the window before a pending receipt arrives.
 
         future.add_done_callback(completed)
 

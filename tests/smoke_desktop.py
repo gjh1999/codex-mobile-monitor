@@ -1420,7 +1420,6 @@ def main():
             window.show_window()
             QTest.qWait(30)
             assert window.isVisible(), 'The tray action must reopen the workspace'
-            check_approval_queue(window, args.output)
             check_codex_slash(window, codex, args.output)
             check_notebook(window, args.output)
             check_edge_menu(window, args.output)
@@ -1464,6 +1463,7 @@ def main():
                 assert str(project) in window.conversation.toPlainText()
                 monitor.update(indexedProjects=[])
                 window.refresh()
+            check_approval_queue(window, args.output)
             check_wallpaper_manager(window, args.output, Path(wallpaper_directory))
             print('Qt smoke passed: Markdown, glass, rotation, hover/focus, approval, dual-client controls, drafts, rename, failure dialogs, Chinese glyphs, layout and tray.')
     finally:

@@ -319,6 +319,9 @@ QLabel#approvalMeta { color:#24495f; }
 QTreeWidget#approvalQueue { background:transparent; border:0; color:#254459; }
 QTreeWidget#approvalQueue::item { padding:7px 5px; border-bottom:1px solid rgba(73,133,158,40); }
 QTreeWidget#approvalQueue::item:selected { color:#15394c; background:rgba(157, 212, 233, 195); }
+QTreeWidget#approvalQueue::indicator { width:13px; height:13px; border-radius:3px; border:1px solid #6a94ad; }
+QTreeWidget#approvalQueue::indicator:unchecked { background:#e8f5fc; }
+QTreeWidget#approvalQueue::indicator:checked { background:#096cb9; border-color:#096cb9; }
 QTreeWidget#approvalQueue QHeaderView::section { color:#23495b; background:rgba(228,246,252,130); border:0; padding:6px 5px; }
 QTreeWidget#approvalQueue QHeaderView { background:transparent; }
 QScrollArea { border:0; background:transparent; }

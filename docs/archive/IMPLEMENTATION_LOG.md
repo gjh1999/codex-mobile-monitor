@@ -7,7 +7,7 @@
 - Windows，Python 3.14.7。本机 R34 的项目母目录为 `D:\VscodeProject`，目录自身带 `.git`。基线扫描在母目录即停止。首轮递归方案识别出了仓库里的内嵌依赖和测试仓库，调整为已建立的 Git 仓库作为项目边界。用 `project_library.discover(Path('D:/VscodeProject'), {})` 只读扫描，最终列出 13 个本机项目入口，耗时 0.039 秒，包含 `mobile-monitor` 和 `lanxi-commercial` 的原始路径。项目入口和 GitHub 同步资格分别取决于本机项目标记与仓库配置。
 - 从本机 Windows 登录用户对 9 个登记项目执行只读 `git ls-remote --symref origin HEAD` 核查。`MCCAI` 当时与远端一致，`mobile-monitor` 当时有未推送提交。6 个仓库在非交互环境中无法取得 GitHub 凭据。`Image_Registration` 在 `git rev-parse --show-toplevel` 遇到仓库所有者与当前 Windows 用户不同。未对其余项目运行提交、拉取或推送。
 - `.venv\Scripts\python.exe -B -m unittest tests.test_project_library tests.test_desktop_projects tests.test_personal_flow tests.test_monitor tests.test_desktop_shutdown` 通过 25 项，31.645 秒。临时项目回归覆盖母目录自身带 `.git`、现有克隆复用、无效登记隔离及未匹配项目的离线会话。两项临时 Git 测试复跑通过，3.692 秒，新增验证接收端母目录自身也带 `.git` 时可按来源相对路径克隆。
-- `.venv\Scripts\python.exe -B tests/smoke_desktop.py --output build-exe/verification/sync-projects-20261121/qt-final` 通过，覆盖「合流」中的成功项目、冲突项目、本机路径和大文件差异。测试使用隔离数据和模拟后台。便携版及两台物理电脑现场待验，笔记本本机历史文件尚未核对。 [主文档](../跨设备开发工作台方案.html#current)
+- `.venv\Scripts\python.exe -B tests/smoke_desktop.py --output build-exe/verification/sync-projects-20261121/qt-groups` 通过，覆盖「合流」中的成功项目、冲突项目、本机路径和大文件差异，并在未启用个人同步的界面验收带 `.git` 母目录下的两个独立项目组。测试使用隔离数据和模拟后台，总耗时未单独测量。便携版及两台物理电脑现场待验，笔记本本机历史文件尚未核对。 [主文档](../跨设备开发工作台方案.html#current)
 
 ## 2026-11-21 吉光片羽每日记录
 

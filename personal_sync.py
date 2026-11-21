@@ -108,7 +108,7 @@ class PersonalSync:
 
     def task_locks(self):
         with self.lock:
-            settings, coordination = self.pending_settings or (self.settings, self.coordination)
+            settings, coordination = self.settings, self.coordination
         if coordination and not settings.get("exchange") and not settings.get("codeOnly"):
             return PersonalTaskLocks(ControlClient(coordination, device_token(coordination)))
         return None
@@ -119,6 +119,8 @@ class PersonalSync:
         outbox = close_queue(self.root)
         while not stop.is_set():
             try:
+                with self.lock:
+                    settings, coordination = self.settings, self.coordination
                 locks = self.task_locks()
                 owners = None
                 if locks:
@@ -128,7 +130,7 @@ class PersonalSync:
                         pass
                     owners = {"device": locks.client.device, **locks.request()}
                 with self.lock:
-                    if not stop.is_set():
+                    if not stop.is_set() and settings is self.settings and coordination is self.coordination:
                         self.task_owners = owners
             except (ControlDenied, OSError, ValueError, KeyError, TypeError):
                 pass
@@ -357,6 +359,7 @@ class PersonalSync:
             if self.pending_settings:
                 self.settings, self.coordination = self.pending_settings
                 self.pending_settings = None
+                self.task_owners = None
         errors = {}
         untrusted = set()
         channel = (

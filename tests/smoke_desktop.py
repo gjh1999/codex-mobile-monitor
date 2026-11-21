@@ -230,10 +230,12 @@ def check_manual_sync(window):
 
 
 def check_project_occupancy(window):
+    from uuid import uuid4
+
     from personal_sync import PersonalSync
 
     worker = PersonalSync(Path('unused-fixture'), {})
-    project, thread = 'owner/repo', str(uuid.uuid4())
+    project, thread = 'owner/repo', str(uuid4())
     worker.threads[thread] = {'project': project}
     worker.task_owners = {'device': 'local', 'tasks': {thread: 'peer'}, 'projects': {project: 'peer'}}
     with (patch.object(monitor, 'personal_sync', worker),

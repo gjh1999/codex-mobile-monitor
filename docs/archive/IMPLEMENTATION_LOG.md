@@ -2,6 +2,12 @@
 
 > 历史验收日志。各条结论只描述记录当时的版本和环境；旧文件名与路径的迁移见 [整理记录](REORGANIZATION_2026-11-14.md)，当前操作见 [运行与维护](../RUNBOOK.md)。
 
+<a id="r36-01-backup-metadata"></a>
+## 2026-11-21 R36-01 既有 R35 备份兼容性
+
+- Windows、Python 3.14.7。使用临时回环协调服务器与两个配对设备，放入由 `ZipFile` 正常生成的 1,500 成员 ZIP 模拟 R35 既有副本。测试将新上传的中央目录上限设为 128 KiB，旧 ZIP 的中央目录超过该上限。修复前执行 `.venv\Scripts\python.exe -B -m unittest tests.test_code_backups.CodeBackupTests.test_list_and_replace_backup_written_before_directory_limit -v`，列表返回 HTTP 500，用时 0.604 秒。
+- 修复提交 `41743e4`。查询旧副本从文件尾部读取 ZIP 版本注释，最多读取 65,557 字节。新上传继续读取并校验中央目录及成员。执行 `.venv\Scripts\python.exe -B -m unittest tests.test_code_backups tests.test_coordination tests.test_temporary_files -v`，18 项通过，用时 4.745 秒。既有包可列出与原样下载，同一大目录包作为新上传被拒，错误的待替换版本返回 HTTP 409，提交正确旧版本后新 ZIP 可以替换。临时 ZIP 随测试目录清理。服务器候选部署与上线验证待负责人审核安排。 [R36-01 工单](../DELIVERY_STATUS.md#r36-01)
+
 <a id="r35-backend-ticket"></a>
 ## 2026-11-21 R35-01 共享 Codex 审批复核
 

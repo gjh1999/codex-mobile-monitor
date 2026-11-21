@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT))
 
 from portable_update import LIMIT, VERSION
 from cloud_pairing import MAX_CODE, WORKSPACE_PREFIX, WORKSPACE_RESOURCE, decode_invite
+from build_private_downloader import release_downloader
 
 
 def main():
@@ -90,6 +91,8 @@ def main():
         json.dumps(dict(version=VERSION, sha256=sha256, size=size)) + '\n', encoding='utf-8',
     )
     release.parent.mkdir(exist_ok=True)
+    if args.workspace_grant:
+        print(release_downloader(grant))
     archive_path.rename(release)
     print(release)
 

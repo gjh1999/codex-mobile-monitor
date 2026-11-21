@@ -173,7 +173,7 @@ public static class LanxiReleaseTls
             if ([int]$reply.StatusCode -ne 200 -or $paired.device -cne $device) { throw '服务器未确认本机配对，请重试。' }
         } finally { $reply.Dispose() }
         $settings = Read-Settings
-        if ($settings.coordination.protectedToken -or ($settings.coordination.device -and $env:LANXI_DEVICE_TOKEN)) { throw '本机配对设置已更新，请重新运行下载脚本。' }
+        if ($settings.coordination.device -and ($settings.coordination.protectedToken -or $env:LANXI_DEVICE_TOKEN)) { throw '本机配对设置已更新，请重新运行下载脚本。' }
         $settings | Add-Member -Force NoteProperty coordination $coordination
         $sync = $settings.personalSync
         if (!$sync) { $sync = [pscustomobject]@{} }

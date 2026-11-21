@@ -20,7 +20,7 @@ from personal_memory import safe_path
 from service_lock import ServiceLock
 
 MARKER = "lanxi-private-project.json"
-OMIT = {".lanxi", ".codex", ".github/unused", ".cache", ".gradle", ".idea", ".vs", ".next",
+OMIT = {".lanxi", ".codex", ".cache", ".gradle", ".idea", ".vs", ".next",
         ".nuxt", ".pytest_cache", ".tox", ".mypy_cache", ".ruff_cache", ".terraform",
         "node_modules", ".venv", "venv", "dist", "build", "bin", "obj", "target",
         "coverage", "out", "release", "releases", "build-exe", "__pycache__", "dist-info"}
@@ -205,7 +205,9 @@ def promote(folder):
     folder = Path(folder)
     try:
         if (not folder.is_absolute() or not folder.is_dir() or folder.resolve() != folder
-                or any(os.path.lexists(parent / ".git") for parent in folder.parents)):
+                or any(os.path.lexists(parent / ".git") for parent in folder.parents)
+                or any((base / "HEAD").is_file() and (base / "objects").is_dir()
+                       and (base / "refs").is_dir() for base in (folder, *folder.parents))):
             raise SyncIssue("不能自动接入嵌套、链接或无效目录")
         exists = os.path.lexists(folder / ".git")
         if exists and not managed(folder):

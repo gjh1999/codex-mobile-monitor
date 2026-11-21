@@ -6,6 +6,7 @@ import json
 import queue
 import tempfile
 import threading
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 from zipfile import ZipFile
@@ -159,10 +160,49 @@ def backup(root):
     return "本机生成测试 ZIP，校验源码、文件过滤和 SHA-256"
 
 
+def folder_sessions(root):
+    from personal_sync import PersonalSync
+    from project_library import set_project_root
+
+    share = root / "relay"
+    share.mkdir()
+    clients = []
+    for name in ("source", "receiver"):
+        base = root / name
+        library, data = base / "projects", base / "settings"
+        library.mkdir(parents=True)
+        data.mkdir()
+        set_project_root(data, library)
+        clients.append(PersonalSync(data, {"exchange": str(share)}, home=base / "codex"))
+    source, receiver = clients
+    relative = Path("demo") / "Satisfactry"
+    original = root / "source/projects" / relative
+    original.mkdir(parents=True)
+    tid = str(uuid.uuid4())
+    name = f"rollout-2026-11-21T12-00-00-{tid}.jsonl"
+    native = Path("sessions/2026/11/21") / name
+    events = [
+        {"type": "session_meta", "payload": {"id": tid, "cwd": str(original)}},
+        {"type": "event_msg", "payload": {"type": "task_started", "turn_id": "fixture"}},
+        {"type": "response_item", "payload": {"text": "x" * (10 * 1024 * 1024)}},
+        {"type": "event_msg", "payload": {"type": "task_complete", "turn_id": "fixture"}},
+    ]
+    history = source.home / native
+    history.parent.mkdir(parents=True)
+    history.write_bytes(b"".join(json.dumps(row).encode() + b"\n" for row in events))
+    source.cycle(threading.Event())
+    receiver.cycle(threading.Event())
+    mapped = receiver.snapshot()["sessions"].get(tid)
+    require(mapped and Path(mapped["cwd"]) == root / "receiver/projects" / relative, "普通项目会话映射不一致")
+    require((receiver.home / native).read_bytes() == history.read_bytes(), "分块会话接收后历史不一致")
+    return "两套独立母目录复用原线程 ID，超过 10 MiB 的完整会话分块接收并逐字节核对"
+
+
 def local_feature_checks(root, emit):
     checks = (
         ("吉光片羽", notebook), ("审批回执", approvals), ("IDE 项目占用", ide_ownership),
         ("大文件清单", inventory), ("代码备份打包", backup),
+        ("普通目录与长会话", folder_sessions),
     )
     for label, check in checks:
         try:

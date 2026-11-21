@@ -1465,7 +1465,7 @@ class MainWindow(QMainWindow):
                 live = threads.get(tid, {})
                 threads[tid] = {**indexed, **live, 'cwd': live.get('cwd') or indexed['cwd']}
             snap['threads'] = list(threads.values())
-        if self.notebook is not None:
+        if self.notebook is not None and self.workspace_pages.currentWidget() is self.notebook:
             self.notebook.refresh_day()
         flow = monitor.personal_sync
         if flow:

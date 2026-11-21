@@ -728,8 +728,9 @@ def check_daily_records(workspace, database, window, output):
     with patch('desktop_notebook.date') as calendar:
         calendar.today.return_value = today + timedelta(days=1)
         workspace.refresh_day()
-    QTest.mouseClick(switch.buttons['note'], left)
-    assert workspace.list.count() == 0 and not workspace.body.isReadOnly()
+        QTest.mouseClick(switch.buttons['note'], left)
+        assert workspace.list.count() == 0 and not workspace.body.isReadOnly()
+    workspace.refresh_day()
 
 
 def main():

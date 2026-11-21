@@ -26,6 +26,9 @@ MAX_DIRECTORY_BYTES = 8 * 1024**2
 MAX_MEMBERS = 100_000
 MAX_EXPANDED_BYTES = 4 * 1024**3
 READ_CHUNK = 1024**2
+ZIP_END_SIGNATURE = b"PK\x05\x06"
+ZIP_END_BYTES = 22
+ZIP_TAIL_BYTES = ZIP_END_BYTES + 65_535
 
 
 class BackupReader(io.BufferedReader):
@@ -54,23 +57,40 @@ def verify_members(archive):
             raise BadZipFile("代码备份成员不完整")
 
 
-def metadata(path, *, verify=False):
+def metadata(source, comment):
+    version = comment.decode("ascii")
+    if not re.fullmatch(SHA, version):
+        raise ValueError("代码备份版本无效")
+    info = os.fstat(source.fileno())
+    return {"version": version, "size": info.st_size, "updated": info.st_mtime}
+
+
+def validate_upload(path):
     with BackupReader(path.open("rb", buffering=0)) as source, ZipFile(source) as archive:
-        version = archive.comment.decode("ascii")
-        if not re.fullmatch(SHA, version):
-            raise ValueError("代码备份版本无效")
-        if verify:
-            try:
-                verify_members(archive)
-            except (EOFError, RuntimeError, zlib.error) as error:
-                raise BadZipFile("代码备份成员无法解压") from error
-        info = os.fstat(source.fileno())
-        return {"version": version, "size": info.st_size, "updated": info.st_mtime}
+        record = metadata(source, archive.comment)
+        try:
+            verify_members(archive)
+        except (EOFError, RuntimeError, zlib.error) as error:
+            raise BadZipFile("代码备份成员无法解压") from error
+        return record
 
 
 def current(path):
     try:
-        return metadata(path)
+        with path.open("rb") as source:
+            # The version is in the end record even for ZIP64. Existing R35 backups may have large directories.
+            size = source.seek(0, os.SEEK_END)
+            source.seek(max(0, size - ZIP_TAIL_BYTES))
+            tail = source.read(ZIP_TAIL_BYTES)
+            end = tail.rfind(ZIP_END_SIGNATURE)
+            comment_start = end + ZIP_END_BYTES
+            if end < 0 or comment_start > len(tail):
+                raise BadZipFile("代码备份缺少 ZIP 尾记录")
+            length = int.from_bytes(tail[comment_start - 2:comment_start], "little")
+            comment = tail[comment_start:comment_start + length]
+            if len(comment) != length:
+                raise BadZipFile("代码备份版本注释不完整")
+            return metadata(source, comment)
     except FileNotFoundError:
         return None
 
@@ -121,7 +141,7 @@ def install_code_backups(app, directory, enrollment):
             if size != content_length or checksum.hexdigest() != sha256:
                 raise HTTPException(422, "代码备份校验失败")
             async with validations:
-                received = await run_in_threadpool(metadata, Path(staged), verify=True)
+                received = await run_in_threadpool(validate_upload, Path(staged))
             prior = current(target)
             if (prior["version"] if prior else "-") != previous:
                 raise HTTPException(409, "服务器备份已更新")

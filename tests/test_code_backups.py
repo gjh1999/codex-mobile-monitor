@@ -66,6 +66,13 @@ class CodeBackupTests(unittest.TestCase):
     def client(self, name, token):
         return CodeBackups(ControlClient({"url": self.url, "device": name, "projects": {}}, token * 40))
 
+    def upload(self, data, previous):
+        writer = self.client("desktop", "a")
+        with writer.open(self.project, method="PUT", data=data, size=len(data), extra={
+            "previous": previous, "sha256": hashlib.sha256(data).hexdigest(),
+        }):
+            pass
+
     def test_automatic_and_manual_backup_survive_github_failure(self):
         stop = threading.Event()
         with (patch("personal_sync.device_token", return_value="a" * 40),
@@ -109,8 +116,6 @@ class CodeBackupTests(unittest.TestCase):
         self.assertEqual(self.reader.list(self.project), [current])
 
     def test_rejected_backup_preserves_previous_restorable_bytes(self):
-        writer = self.client("desktop", "a")
-
         def archive(version, content):
             data = io.BytesIO()
             with ZipFile(data, "w") as zip_file:
@@ -118,25 +123,19 @@ class CodeBackupTests(unittest.TestCase):
                 zip_file.writestr("code.py", content)
             return data.getvalue()
 
-        def upload(data, previous):
-            with writer.open(self.project, method="PUT", data=data, size=len(data), extra={
-                "previous": previous, "sha256": hashlib.sha256(data).hexdigest(),
-            }):
-                pass
-
         initial = archive("a" * 64, b"original working code\n")
         replacement = archive("b" * 64, b"replacement code\n")
         damaged = replacement.replace(b"replacement code\n", b"Replacement code\n", 1)
         self.assertNotEqual(damaged, replacement)
         with patch("code_backup_server.RESERVE", 0):
-            upload(initial, "-")
+            self.upload(initial, "-")
             with self.assertRaisesRegex(SyncIssue, "格式"):
-                upload(damaged, "a" * 64)
+                self.upload(damaged, "a" * 64)
             limits = {"MAX_EXPANDED_BYTES": 8, "MAX_MEMBERS": 0}
             for limit, value in limits.items():
                 with (self.subTest(limit=limit), patch(f"code_backup_server.{limit}", value),
                       self.assertRaisesRegex(SyncIssue, "大小")):
-                    upload(replacement, "a" * 64)
+                    self.upload(replacement, "a" * 64)
 
         self.assertEqual(self.reader.list(self.project)[0]["version"], "a" * 64)
         destination = self.root / "restored.zip"
@@ -144,3 +143,40 @@ class CodeBackupTests(unittest.TestCase):
         self.assertEqual(destination.read_bytes(), initial)
         with ZipFile(destination) as zip_file:
             self.assertEqual(zip_file.read("code.py"), b"original working code\n")
+
+    def test_list_and_replace_backup_written_before_directory_limit(self):
+        workspace = hashlib.sha256(b"home").hexdigest()
+        stored = self.root / "code-backups" / workspace / self.project / "desktop.zip"
+        stored.parent.mkdir(parents=True)
+        legacy_version = "a" * 64
+        directory_limit = 128 * 1024
+        long_folder = "old-project-" + "a" * 60
+        member_count = 1_500
+        with ZipFile(stored, "w") as archive:
+            archive.comment = legacy_version.encode("ascii")
+            for index in range(member_count):
+                archive.writestr(f"{long_folder}/{index:04}.py", "saved code\n")
+        # Each ZIP central directory entry has a 46-byte header plus the member name.
+        self.assertGreater(member_count * (46 + len(long_folder) + len("/0000.py")), directory_limit)
+        old_bytes = stored.read_bytes()
+
+        newer = io.BytesIO()
+        with ZipFile(newer, "w") as archive:
+            archive.comment = b"b" * 64
+            archive.writestr("code.py", "new saved code\n")
+
+        with patch("code_backup_server.MAX_DIRECTORY_BYTES", directory_limit), patch("code_backup_server.RESERVE", 0):
+            records = self.reader.list(self.project)
+            self.assertEqual(records[0]["version"], legacy_version)
+            self.assertEqual(records[0]["size"], len(old_bytes))
+            destination = self.root / "legacy.zip"
+            self.reader.download(self.project, "desktop", destination)
+            self.assertEqual(destination.read_bytes(), old_bytes)
+            with self.assertRaisesRegex(SyncIssue, "格式"):
+                self.upload(old_bytes, legacy_version)
+            with self.assertRaisesRegex(SyncIssue, "刚刚更新"):
+                self.upload(newer.getvalue(), "c" * 64)
+            self.assertEqual(stored.read_bytes(), old_bytes)
+            self.upload(newer.getvalue(), legacy_version)
+            self.assertEqual(self.reader.list(self.project)[0]["version"], "b" * 64)
+            self.assertEqual(stored.read_bytes(), newer.getvalue())

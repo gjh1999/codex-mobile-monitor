@@ -10,6 +10,8 @@ Windows 原生桌面软件，用于集中查看和控制本机 Codex / Claude Co
 
 本机 `release/` 根目录保留当前稳定版 `Lanxi-R41-Windows-Private.zip` 和开发版 `Lanxi.exe`。`release/history/` 另存最近两个被替换的稳定版 ZIP，供回滚使用。 [发布目录维护](docs/RUNBOOK.md#构建-exe)
 
+R41 通过应用升级后，可从 Windows 开始菜单重新打开「澜汐」。Windows 托盘可启用 VS Code 中的 Codex 审批提醒。 [升级与重开](docs/PORTABLE_CHECK.md#升级与首次配置) · [审批提醒](docs/DESKTOP.md#审批窗口)
+
 私人 Windows 便携版首次使用时选择项目母目录，点「连接云服务器」加入私人工作区。来源机上的普通项目可自动初始化 Git 并接入同名私有 GitHub 仓库。已完成的长会话可分块接续。R40 的「合流」显示当前轮次进度，「执舟」显示任务占用原因，托盘模式仍会弹出已接入的审批。 [安装、升级与验收](docs/PORTABLE_CHECK.md)
 
 R35 支持 GitHub 与服务器双份代码同步。从顶栏或托盘的「跨机接续」可选择并下载服务器 ZIP。 [自动同步、合流与下载](docs/PERSONAL_SYNC.md#代码的服务器备份)

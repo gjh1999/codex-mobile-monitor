@@ -229,6 +229,24 @@ def check_manual_sync(window):
         dialog.close()
 
 
+def check_project_occupancy(window):
+    from personal_sync import PersonalSync
+
+    worker = PersonalSync(Path('unused-fixture'), {})
+    project, thread = 'owner/repo', str(uuid.uuid4())
+    worker.threads[thread] = {'project': project}
+    worker.task_owners = {'device': 'local', 'tasks': {thread: 'peer'}, 'projects': {project: 'peer'}}
+    with (patch.object(monitor, 'personal_sync', worker),
+          patch.object(monitor.workspace_codex, 'device_name', return_value='OTHER-PC')):
+        blocked = window.project_occupancy_message(thread)
+        assert 'OTHER-PC 持有此会话' in blocked and '「交还任务」' in blocked
+        assert '持有此项目的其他会话' in window.project_occupancy_message(project=project)
+        worker.task_owners['tasks'].clear()
+        assert '关闭项目的 IDE 窗口' in window.project_occupancy_message(project=project)
+        worker.task_owners['projects'].clear()
+        assert window.project_occupancy_message(project=project) is None
+
+
 def check_automatic_pairing(window):
     with tempfile.TemporaryDirectory() as directory:
         profile = Path(directory)
@@ -1480,6 +1498,7 @@ def main():
             check_workspace_startup()
             check_diagnostics_pairing(window)
             check_manual_sync(window)
+            check_project_occupancy(window)
             check_automatic_pairing(window)
             check_markdown(window, data, args.output)
             check_process_bubbles(window, args.output)

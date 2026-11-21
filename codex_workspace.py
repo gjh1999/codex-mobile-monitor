@@ -78,8 +78,8 @@ class CodexWorkspace:
         if peer:
             row = peer[1]
             name = row.get('name')
-            if recent(row.get('time'), self.clock(), LIVE) and isinstance(name, str) and name.strip():
-                return name.strip()[:80]
+            if recent(row.get('time'), self.clock(), LIVE) and isinstance(name, str) and re.fullmatch(r'[\w.-]{1,80}', name):
+                return name
         return device
 
     def decide(self, token, allow):

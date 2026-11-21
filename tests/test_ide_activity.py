@@ -12,13 +12,16 @@ import unittest
 from contextlib import closing
 from pathlib import Path
 from secrets import token_urlsafe
+from unittest.mock import patch
+from uuid import uuid4
 
 import uvicorn
 
 from coordination import Ownership
-from coordination_client import ControlClient, ControlDenied
+from coordination_client import ControlClient, ControlDenied, PersonalTaskLocks
 from coordination_server import create_app
-from ide_activity import flush_closes, report
+from ide_activity import close_queue, enqueue_close, flush_closes, report
+from personal_sync import PersonalSync
 
 
 class IDEActivityTests(unittest.TestCase):
@@ -87,6 +90,64 @@ class IDEActivityTests(unittest.TestCase):
         self.assertEqual([name for name, _ in self.events], ['open', 'heartbeat', 'heartbeat', 'close'])
         versions = [state['version'] for _, state in self.events]
         self.assertEqual(versions, [1, 1, 1, 2])
+
+    def test_personal_ide_close_replays_while_code_sync_is_waiting(self):
+        devices = {name: {"token": name * 43, "personalSpace": "private", "projects": []}
+                   for name in ("a", "b")}
+        server = uvicorn.Server(uvicorn.Config(create_app(self.root / "personal.sqlite3", devices),
+                                               log_level="error"))
+        stop = threading.Event()
+        running = threading.Event()
+        advanced = threading.Event()
+
+        def wait(predicate):
+            deadline = time.monotonic() + 8
+            while not predicate():
+                if time.monotonic() >= deadline:
+                    self.fail("timed out waiting for personal project occupancy")
+                time.sleep(.025)
+
+        def stalled_cycle(signal):
+            running.set()
+            signal.wait(10)
+            advanced.set()
+
+        with socket.socket() as endpoint:
+            endpoint.bind(("127.0.0.1", 0))
+            service = threading.Thread(target=server.run, kwargs={"sockets": [endpoint]}, daemon=True)
+            service.start()
+            try:
+                wait(lambda: server.started)
+                url = "http://127.0.0.1:" + str(endpoint.getsockname()[1])
+                source_config = {"url": url, "device": "a", "projects": {}}
+                holder = PersonalTaskLocks(ControlClient(source_config, devices["a"]["token"]))
+                receiver = PersonalTaskLocks(ControlClient({**source_config, "device": "b"}, devices["b"]["token"]))
+                project, ide, task = "owner/repo", str(uuid4()), str(uuid4())
+                holder.event(project, ide, "vscode", 1, "open")
+                with self.assertRaises(ControlDenied):
+                    receiver.claim(task, project, lambda _: None)
+                flow = PersonalSync(self.root, {}, source_config)
+                with (patch.dict(os.environ, LANXI_DEVICE_TOKEN=devices["a"]["token"]),
+                      patch.object(flow, "cycle", side_effect=stalled_cycle)):
+                    workers = [threading.Thread(target=target, args=(stop,), daemon=True)
+                               for target in (flow.worker, flow.watch_task_owners)]
+                    for worker in workers:
+                        worker.start()
+                    try:
+                        wait(running.is_set)
+                        wait(lambda: flow.snapshot()["taskOwners"] is not None)
+                        self.assertEqual(flow.snapshot()["taskOwners"]["projects"], {project: "a"})
+                        enqueue_close(close_queue(self.root), holder, project, ide, "vscode", 2)
+                        wait(lambda: flow.snapshot()["taskOwners"]["projects"] == {})
+                        self.assertFalse(advanced.is_set())
+                        self.assertTrue(receiver.claim(task, project, lambda _: None))
+                    finally:
+                        stop.set()
+                        for worker in workers:
+                            worker.join(5)
+            finally:
+                server.should_exit = True
+                service.join(5)
 
     def test_two_real_reporter_processes_over_loopback(self):
         token = token_urlsafe(32)

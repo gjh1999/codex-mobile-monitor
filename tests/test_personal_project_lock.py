@@ -35,6 +35,11 @@ class ProjectLockTests(unittest.TestCase):
                 activity = f"{routes}/project-activity"
                 self.assertEqual(api.post(activity, headers=headers(blocked),
                     json={"project": repo, "session": ide, "event": "open"}).status_code, 409)
+                own_ide = str(uuid4())
+                for event in ("open", "close"):
+                    self.assertEqual(api.post(activity, headers=headers(owner),
+                        json={"project": repo, "session": own_ide, "event": event}).status_code, 200)
+                self.assertEqual(claim(blocked, waiting).status_code, 409)
                 handoff = f"{routes}/tasks/{active}/handoff"
                 release = {"ticket": ticket, "checkpoint": "1" * 64}
                 self.assertEqual(api.post(handoff, headers=headers(blocked), json=release).status_code, 409)

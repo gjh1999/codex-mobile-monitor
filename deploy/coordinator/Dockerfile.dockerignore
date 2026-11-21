@@ -7,6 +7,7 @@
 !portable_releases.py
 !portable_update.py
 !temporary_file_server.py
+!code_backup_server.py
 !compute_queue.py
 !compute_artifacts.py
 !personal_relay.py

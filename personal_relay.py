@@ -5,6 +5,7 @@ import json
 import re
 import sqlite3
 from contextlib import closing
+from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request
@@ -102,6 +103,9 @@ def install_routes(app, path, enrollment):
     from fastapi import Request as APIRequest
     from fastapi.responses import Response
     from starlette.concurrency import run_in_threadpool
+    from code_backup_server import install_code_backups
+
+    install_code_backups(app, Path(path).parent / "code-backups", enrollment)
 
     def authorize(x_lanxi_device: str = Header(default=""), authorization: str = Header(default="")):
         space = enrollment.space(x_lanxi_device, authorization)

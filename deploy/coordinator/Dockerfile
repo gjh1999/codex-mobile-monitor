@@ -11,7 +11,7 @@ RUN pip install --no-cache-dir -r requirements-web.txt \
 COPY coordination_server.py coordination.py compute_queue.py compute_artifacts.py personal_relay.py device_enrollment.py personal_task_locks.py ./
 COPY handoff.py handoff_sync.py lfs_assets.py service_lock.py coordination_client.py cloud_pairing.py rpc_errors.py ./
 COPY deploy/coordinator/cloud_admin.py ./
-COPY portable_releases.py portable_update.py temporary_file_server.py ./
+COPY portable_releases.py portable_update.py temporary_file_server.py code_backup_server.py ./
 
 USER 10001:10001
 ENTRYPOINT ["python"]

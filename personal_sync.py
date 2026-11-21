@@ -40,6 +40,7 @@ class PersonalSync:
         self.projects = {}
         self.threads = {}
         self.status = {}
+        self.backup_status = {}
         self.completed = {}
         self.epoch = 0
         self.coordination = coordination
@@ -77,6 +78,7 @@ class PersonalSync:
                 "projects": dict(self.projects),
                 "sessions": dict(self.threads),
                 "status": dict(self.status),
+                "codeBackups": dict(self.backup_status),
                 "completed": dict(self.completed),
                 "epoch": self.epoch,
                 "connection": self.connection,
@@ -94,6 +96,12 @@ class PersonalSync:
     def task_locks(self):
         if self.coordination and not self.settings.get("exchange") and not self.settings.get("codeOnly"):
             return PersonalTaskLocks(ControlClient(self.coordination, device_token(self.coordination)))
+        return None
+
+    def code_backups(self):
+        if self.coordination and not self.settings.get("exchange") and not self.settings.get("codeOnly"):
+            from code_backups import CodeBackups
+            return CodeBackups(ControlClient(self.coordination, device_token(self.coordination)))
         return None
 
     def session_digest(self, tid):
@@ -332,6 +340,8 @@ class PersonalSync:
             first = self.priority
             self.priority = None
         ready = {}
+        backups = self.code_backups() if cloud else None
+        backup_status = {project: "等待服务器或本机项目可用" for project in specs} if cloud else {}
 
         def update(project):
             try:
@@ -373,6 +383,15 @@ class PersonalSync:
                 except queue.Empty:
                     return
                 update(project)
+                if backups is not None and not stop.is_set():
+                    try:
+                        path = local[project]
+                        if not (path / ".git").exists():
+                            backup_status[project] = "本机没有项目，可查找已有服务器备份"
+                            continue
+                        backup_status[project] = backups.sync(path, project, specs[project]["memoryPath"], stop)
+                    except (OSError, KeyError, TypeError, ValueError, subprocess.TimeoutExpired) as error:
+                        backup_status[project] = str(error) if isinstance(error, ValueError) else "服务器或本机目录暂不可用"
 
         workers = [threading.Thread(target=consume, daemon=True) for _ in range(min(4, len(specs)))]
         for worker in workers:
@@ -428,10 +447,12 @@ class PersonalSync:
                 self.completed[project] = self.completed.get(project, 0) + 1
             self.epoch += 1
             self.status = errors
+            self.backup_status = backup_status
             self.connection = connection
             self.task_owners = task_owners
         return {"connection": connection, "projects": len(specs), "memoryChecked": check_memory,
                 "largeInventory": inventory, "status": errors,
+                "codeBackups": backup_status,
                 "projectPaths": {p: str(local[p]) if p in local else "" for p in specs}}
 
     def worker(self, stop):

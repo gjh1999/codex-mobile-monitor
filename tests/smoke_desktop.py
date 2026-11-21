@@ -1261,15 +1261,22 @@ def main():
                 project = root / 'projects' / 'new-project'
                 project.mkdir(parents=True)
                 (project / 'pyproject.toml').touch()
+                (project.parent / '.git').mkdir()
+                second_project = project.parent / 'second-project'
+                second_project.mkdir()
+                (second_project / 'package.json').touch()
                 with patch.object(monitor, 'ROOT', root), patch('desktop_qt.QFileDialog.getExistingDirectory', return_value=str(project.parent)):
                     window.choose_project_root(first=True)
                 assert configured_root(root) == project.parent
                 library = ProjectLibrary(root, root / 'codex')
                 monitor.update(indexedProjects=library.snapshot())
-                window.refresh()
+                with patch.object(monitor, 'ROOT', root), patch.object(monitor, 'personal_sync', None):
+                    window.refresh()
                 key = ENTRY_PREFIX + str(project)
                 item = window.task_items[key]
                 assert item.text(0).startswith(project.name)
+                assert item.parent().text(0) == project.name
+                assert window.task_items[ENTRY_PREFIX + str(second_project)].parent().text(0) == second_project.name
                 window.task_choice.scrollToItem(item)
                 calls = len(codex.calls)
                 QTest.mouseClick(window.task_choice.viewport(), Qt.MouseButton.LeftButton,

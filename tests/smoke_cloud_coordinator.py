@@ -15,12 +15,15 @@ import time
 from contextlib import closing, contextmanager
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 from zipfile import ZipFile
 
 from cloud_pairing import WORKSPACE_PREFIX, SETUP_PREFIX, create_invite, decode_invite, join, join_workspace, post
+from automation import Approvals
+from codex_workspace import CodexWorkspace
 from coordination_client import ControlClient, device_token
 from personal_relay import EMPTY, MAX_RECORD, Changed, RemoteRecords
 from portable_update import endpoint, latest, prepare
@@ -97,6 +100,33 @@ def http_error(action, expected):
         error.close()
     else:
         raise AssertionError(f"Expected HTTP {expected}")
+
+
+def codex_activity_roundtrip(source, viewer, other):
+    approvals = Approvals()
+    rpc = SimpleNamespace(client_type='codex', send=Mock())
+    method = 'item/commandExecution/requestApproval'
+    first = approvals.add(rpc, {'id': 1, 'method': method, 'params': {'command': 'echo fixture one'}})
+    second = approvals.add(rpc, {'id': 2, 'method': method, 'params': {'command': 'echo fixture two'}})
+    sender = CodexWorkspace(approvals)
+    peer = CodexWorkspace(Approvals())
+    outsider = CodexWorkspace(Approvals())
+    sender.complete({'threadId': '11111111-2222-4333-8444-555555555555', 'turnId': 'fixture-complete',
+                     'time': time.time(), 'title': 'Fixture'})
+    sender.sync(source)
+    assert outsider.sync(other) == [] and not outsider.pending()
+    http_error(lambda: other.read('codex-live/' + source.client.device), 404)
+    events = peer.sync(viewer)
+    assert [event['turnId'] for event in events] == ['fixture-complete']
+    selected = next(item['token'] for item in peer.pending() if item['sourceToken'] == first)
+    assert peer.decide(selected, True) == 'queued' and not rpc.send.called
+    peer.sync(viewer)
+    sender.sync(source)
+    peer.sync(viewer)
+    assert peer.decisions()[selected] == 'allowed'
+    assert [item['sourceToken'] for item in peer.pending()] == [second]
+    sender.sync(source)
+    rpc.send.assert_called_once_with({'id': 1, 'result': {'decision': 'accept'}})
 
 
 def automatic_pairing(root, url, cert, record, payload):
@@ -316,6 +346,7 @@ def verify(root):
                 devices["second"]["token"] in config.stdout and devices["first"]["token"] not in config.stdout
             )
             a, b, other = (client(url, name) for name in devices)
+            codex_activity_roundtrip(a, b, other)
             http_error(lambda: endpoint(a.client, "/999"), 404)
             scope.write_text(hashlib.sha256(devices["first"]["personalSpace"].encode()).hexdigest(), encoding="ascii")
             for suffix in ("", "/999"):
@@ -387,6 +418,7 @@ def verify(root):
         "python": sys.version.split()[0],
         "https": True,
         "device_isolation": True,
+        "codex_activity_workspace_roundtrip": True,
         "conflict_preserved": True,
         "persisted_after_restart": True,
         "accepted_bytes": len(large),

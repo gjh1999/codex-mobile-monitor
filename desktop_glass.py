@@ -168,12 +168,12 @@ class ClientSegment(QPushButton):
         bounds = QRectF(self.rect())
         if not switch.dragging and (self.isDown() or self.underMouse()):
             feedback = QPainterPath()
-            feedback.addRoundedRect(bounds, bounds.height() / 2, bounds.height() / 2)
+            feedback.addRoundedRect(bounds, switch.thumb_radius, switch.thumb_radius)
             painter.fillPath(feedback, QColor(194, 237, 252, 42 if self.isDown() else 15))
 
         thumb = switch.thumb_rect().translated(-QPointF(self.pos()))
         thumb_clip = QPainterPath()
-        thumb_clip.addRoundedRect(thumb, thumb.height() / 2, thumb.height() / 2)
+        thumb_clip.addRoundedRect(thumb, switch.thumb_radius, switch.thumb_radius)
         outside = QPainterPath()
         outside.addRect(bounds)
         painter.save()
@@ -189,32 +189,36 @@ class ClientSegment(QPushButton):
         if self.hasFocus() and not self.isDown() and not switch.dragging:
             painter.setPen(QPen(QColor('#d1f0fc'), 1))
             ring = bounds.adjusted(.5, .5, -.5, -.5)
-            painter.drawRoundedRect(ring, ring.height() / 2, ring.height() / 2)
+            radius = switch.thumb_radius - .5
+            painter.drawRoundedRect(ring, radius, radius)
 
 
 class ClientSwitch(FrostedPanel):
     # The angular frequency sets how quickly the critically damped thumb settles.
     SPRING_RATE = 25.0
+    WORKSPACES = (('codex', 'Codex', 84), ('claude', 'Claude Code', 104), ('notebook', '吉光片羽', 99))
 
-    def __init__(self, backdrop, select):
-        super().__init__(backdrop, radius=21, tint=QColor(8, 54, 70, 141), edge=QColor(210, 245, 255, 77))
+    def __init__(self, backdrop, select, *, segments=WORKSPACES, compact=False, accessible_name='切换工作区'):
+        super().__init__(backdrop, radius=9 if compact else 21,
+                         tint=QColor(8, 54, 70, 141), edge=QColor(210, 245, 255, 77))
         self.setObjectName('clientPill')
-        self.setAccessibleName('切换工作区')
+        self.setAccessibleName(accessible_name)
         self.select_workspace = select
+        self.thumb_radius = 6 if compact else 15
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(14, 6, 14, 6)
-        layout.setSpacing(5)
+        layout.setContentsMargins(*(4, 4, 4, 4) if compact else (14, 6, 14, 6))
+        layout.setSpacing(3 if compact else 5)
         self.buttons = {}
         self.offsets = {}
         offset = 0
-        for key, text, width in (('codex', 'Codex', 84), ('claude', 'Claude Code', 104), ('notebook', '吉光片羽', 99)):
+        for key, text, width in segments:
             button = ClientSegment(text)
             font = button.font()
-            font.setPointSizeF(11.0)
+            font.setPointSizeF(9.5 if compact else 11.0)
             font.setWeight(font.Weight.Bold)
             font.setStyleName('Bold')
             button.setFont(font)
-            button.setFixedSize(width, 30)
+            button.setFixedSize(width, 26 if compact else 30)
             button.setObjectName('clientSwitch')
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
@@ -225,7 +229,8 @@ class ClientSwitch(FrostedPanel):
             self.buttons[key] = button
             self.offsets[key] = offset
             offset += width + layout.spacing()
-        self.active = 'codex'
+        self.first_key, self.middle_key, self.last_key = self.buttons
+        self.active = self.first_key
         self.position = self.velocity = 0.0
         self.target = 0.0
         self.last_frame = 0.0
@@ -235,14 +240,15 @@ class ClientSwitch(FrostedPanel):
         self.spring.setTimerType(Qt.TimerType.PreciseTimer)
         self.spring.setInterval(16)
         self.spring.timeout.connect(self.advance_spring)
-        self.select('codex', animate=False)
+        self.select(self.active, animate=False)
 
     def thumb_rect(self):
-        left_key, right_key = ('codex', 'claude') if self.position <= self.offsets['claude'] else ('claude', 'notebook')
+        left_key, right_key = ((self.first_key, self.middle_key) if self.position <= self.offsets[self.middle_key]
+                               else (self.middle_key, self.last_key))
         left, right = self.buttons[left_key], self.buttons[right_key]
         interval = self.offsets[right_key] - self.offsets[left_key]
         progress = max(0.0, min(1.0, (self.position - self.offsets[left_key]) / interval))
-        first = self.buttons['codex']
+        first = self.buttons[self.first_key]
         return QRectF(first.x() + self.position, first.y(),
                       left.width() + (right.width() - left.width()) * progress, first.height())
 
@@ -294,7 +300,7 @@ class ClientSwitch(FrostedPanel):
             if self.dragging or abs(x - anchor) >= QApplication.startDragDistance():
                 self.dragging = True
                 now = monotonic()
-                position = max(0.0, min(self.offsets['notebook'], start + x - anchor))
+                position = max(0.0, min(self.offsets[self.last_key], start + x - anchor))
                 self.velocity = (position - self.position) / max(now - last, .01)
                 self.position = position
                 self.press = (anchor, start, now)
@@ -326,4 +332,4 @@ class ClientSwitch(FrostedPanel):
         painter = QPainter(self)
         self.paint_glass(painter, QRectF(self.rect()), self.radius, self.tint, self.edge)
         thumb = self.thumb_rect()
-        self.paint_glass(painter, thumb, thumb.height() / 2, QColor(215, 243, 253, 146), None)
+        self.paint_glass(painter, thumb, self.thumb_radius, QColor(215, 243, 253, 146), None)

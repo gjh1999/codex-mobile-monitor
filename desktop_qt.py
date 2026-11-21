@@ -32,6 +32,7 @@ from desktop_model_api import ModelApiDialog
 from desktop_notebook import NotebookStore, NotebookWorkspace
 from desktop_pairing import CONNECT_CLOUD, PairingDialog, WorkspaceConnectDialog
 from desktop_poetry import COVER_VERSES
+from desktop_wallpapers import WallpaperDialog
 from desktop_projects import SessionTitles, folder_name, project_group
 from desktop_theme import (
     SLASH_MENU_STYLE, STYLESHEET, configure_text, format_reading_document, insert_markdown,
@@ -648,7 +649,7 @@ class MainWindow(QMainWindow):
             minutes = monitor.config().get('desktopWallpaperMinutes', 30)
         except (OSError, ValueError, AttributeError):
             minutes = 30
-        root = OceanBackdrop(Path(getattr(sys, '_MEIPASS', monitor.ROOT)), minutes)
+        root = OceanBackdrop(Path(getattr(sys, '_MEIPASS', monitor.ROOT)), minutes, monitor.ROOT)
         self.setCentralWidget(root)
         page = QVBoxLayout(root)
         page.setContentsMargins(24, EdgeMenu.HEIGHT, 24, 24)
@@ -888,7 +889,7 @@ class MainWindow(QMainWindow):
                    ('运行与额度', self.show_details)],
             '显示': [('Codex', lambda: self.select_workspace('codex')), ('Claude Code', lambda: self.select_workspace('claude')),
                    ('吉光片羽', self.open_notebook)],
-            '设置': [('大模型 API…', self.open_model_api)],
+            '设置': [('大模型 API…', self.open_model_api), ('壁纸管理…', self.open_wallpapers)],
             '窗口': [('最大化／还原', self.toggle_maximized), ('收起到托盘', self.close)],
         }, actions=[
             (CONNECT_CLOUD, lambda: self.open_device_pairing(self), '连接云服务器或查看连接状态'),
@@ -918,6 +919,15 @@ class MainWindow(QMainWindow):
             self.refresh()
             if self.notebook is not None:
                 self.notebook.load_list()
+
+    def open_wallpapers(self):
+        backdrop = self.centralWidget()
+        backdrop.reload_wallpapers()
+        dialog = WallpaperDialog(self, backdrop)
+        try:
+            dialog.exec()
+        finally:
+            dialog.deleteLater()
 
     def refresh_grouping(self, scope):
         if self.stop.is_set():

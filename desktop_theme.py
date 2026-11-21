@@ -309,6 +309,10 @@ QDialog#lanxiDialog QLineEdit {
 }
 QDialog#lanxiDialog QLineEdit:focus { border-color:#327fb2; }
 QDialog#lanxiDialog QLabel#dialogHint { color:#476477; }
+QListWidget#wallpaperList { background:#e9f5fb; border:1px solid #bed9e9; border-radius:8px; padding:4px; }
+QListWidget#wallpaperList::item { padding:7px 8px; border-radius:5px; color:#254459; }
+QListWidget#wallpaperList::item:selected { background:#b8dcec; color:#143b54; }
+QLabel#wallpaperPreview { background:#193b52; color:#e1f1fa; border-radius:9px; }
 QTextBrowser#approvalDetails { background:#e6f2fb; border:1px solid #bfd9ea; border-radius:8px; }
 QScrollArea { border:0; background:transparent; }
 QScrollBar:vertical { background:transparent; width:7px; margin:3px 0; }

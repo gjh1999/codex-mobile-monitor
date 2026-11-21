@@ -4,11 +4,11 @@ from math import exp
 from pathlib import Path
 from time import monotonic
 
-from PySide6.QtCore import QEvent, QEasingCurve, QPoint, QPointF, QRectF, QStandardPaths, Qt, QTimer, QVariantAnimation
+from PySide6.QtCore import QEvent, QEasingCurve, QPoint, QPointF, QRectF, QStandardPaths, Qt, QTimer, Signal, QVariantAnimation
 from PySide6.QtGui import QColor, QImage, QImageReader, QLinearGradient, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QApplication, QFrame, QHBoxLayout, QPushButton, QWidget
 
-WALLPAPERS = ('os-x-mavericks-wave.jpg', 'macos-big-sur-day.jpg', 'macos-catalina-night.jpg')
+from desktop_wallpapers import EXTENSIONS, WallpaperLibrary, image_reader
 
 
 def local_wallpapers():
@@ -18,7 +18,7 @@ def local_wallpapers():
     library = Path(pictures) / '澜汐' / 'macOS'
     images = []
     for path in library.rglob('*'):
-        if path.suffix.lower() in {'.jpg', '.jpeg', '.png'} and path.is_file():
+        if path.suffix.lower() in EXTENSIONS and path.is_file():
             size = QImageReader(str(path)).size()
             if size.width() >= size.height() > 0:
                 images.append(path)
@@ -35,21 +35,17 @@ def motion_enabled():
 
 
 class OceanBackdrop(QWidget):
-    def __init__(self, bundle: Path, minutes):
+    wallpaper_changed = Signal()
+
+    def __init__(self, bundle: Path, minutes, data_root: Path):
         super().__init__()
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
-        assets = bundle / 'docs' / 'assets'
-        bundled = [assets / name for name in WALLPAPERS if (assets / name).is_file()]
         if type(minutes) is not int or not 0 <= minutes <= 1440:
             minutes = 30
-        self.wallpapers = local_wallpapers()
-        if minutes == 0:
-            self.wallpapers = [path for path in self.wallpapers if path.stem == '10.9 Mavericks']
-        self.index = 0
-        self.current = self.load_wallpaper()
-        if self.current[0].isNull():
-            self.wallpapers = bundled
-            self.current = self.load_wallpaper()
+        self.minutes = minutes
+        self.library = WallpaperLibrary(bundle / 'docs' / 'assets', data_root)
+        self.current_entry = None
+        self.current = QImage(), QImage()
         self.previous = None
         self.fade = 1.0
         self.transition = QVariantAnimation(self)
@@ -60,35 +56,68 @@ class OceanBackdrop(QWidget):
         self.transition.valueChanged.connect(self.set_fade)
         self.transition.finished.connect(self.finish_fade)
         self.rotation = QTimer(self)
+        self.rotation.setInterval(minutes * 60_000)
         self.rotation.timeout.connect(self.next_wallpaper)
-        if minutes and len(self.wallpapers) > 1:
-            self.rotation.start(minutes * 60_000)
+        self.reload_wallpapers()
 
-    def load_wallpaper(self):
-        while self.wallpapers:
-            self.index %= len(self.wallpapers)
-            image = QImage(str(self.wallpapers[self.index]))
-            if not image.isNull():
-                soft = image.scaledToWidth(100, Qt.TransformationMode.SmoothTransformation)
-                return image, soft
-            self.wallpapers.pop(self.index)
-        self.index = 0
-        return QImage(), QImage()
+    def reload_wallpapers(self):
+        self.entries = self.library.entries(local_wallpapers())
+        enabled = [entry for entry in self.entries if entry.key not in self.library.hidden]
+        local = [entry for entry in enabled if entry.origin != 'builtin']
+        bundled = [entry for entry in enabled if entry.origin == 'builtin']
+        if self.minutes == 0:
+            mavericks = [entry for entry in enabled if entry.path.stem in ('10.9 Mavericks', 'os-x-mavericks-wave')]
+            self.wallpapers = mavericks or local or bundled
+            self.fallback = [entry for entry in enabled if entry not in self.wallpapers]
+        else:
+            self.wallpapers = local or bundled
+            self.fallback = bundled if local else []
+        if self.current_entry not in enabled:
+            self.show_first((*self.wallpapers, *self.fallback))
+        self.update_rotation()
+
+    def update_rotation(self):
+        more = len(self.wallpapers) > 1 or (self.wallpapers and self.current_entry not in self.wallpapers)
+        if self.minutes and more:
+            if not self.rotation.isActive():
+                self.rotation.start()
+        else:
+            self.rotation.stop()
+
+    def show_first(self, entries):
+        if not any(self.show_wallpaper(entry) for entry in entries):
+            self.set_wallpaper(None, QImage())
 
     def next_wallpaper(self):
-        if len(self.wallpapers) < 2:
-            return
-        self.index = (self.index + 1) % len(self.wallpapers)
-        next_image = self.load_wallpaper()
-        if next_image[0].isNull():
-            return
+        start = self.wallpapers.index(self.current_entry) + 1 if self.current_entry in self.wallpapers else 0
+        ordered = self.wallpapers[start:] + self.wallpapers[:start]
+        self.show_first((*ordered, *self.fallback))
+
+    def show_wallpaper(self, entry):
+        if entry not in self.entries or entry.key in self.library.hidden:
+            return False
+        if entry == self.current_entry:
+            return True
+        image = image_reader(entry.path).read()
+        if image.isNull():
+            return False
+        self.set_wallpaper(entry, image)
+        return True
+
+    def set_wallpaper(self, entry, image):
+        self.current_entry = entry
+        soft = image.scaledToWidth(100, Qt.TransformationMode.SmoothTransformation) if not image.isNull() else QImage()
         self.transition.stop()
-        self.previous, self.current = self.current, next_image
-        if not self.isVisible() or not motion_enabled():
+        self.previous, self.current = self.current, (image, soft)
+        if image.isNull() or not self.isVisible() or not motion_enabled():
             self.finish_fade()
         else:
             self.set_fade(0.0)
             self.transition.start()
+        self.update_rotation()
+        if self.rotation.isActive():
+            self.rotation.start()
+        self.wallpaper_changed.emit()
 
     def set_fade(self, value):
         self.fade = value

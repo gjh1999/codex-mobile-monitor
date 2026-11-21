@@ -33,6 +33,7 @@ FILES = (
     ".local/handoff-sync.json",
     ".local/ide-close.sqlite3",
     ".local/personal-sync",
+    ".local/desktop-wallpapers",
 )
 
 
